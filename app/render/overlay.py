@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import io
 import math
-from typing import Optional, Sequence, Tuple
+from typing import Literal, Optional, Sequence, Tuple
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
-from app.models import Arrangement, ChordSymbol, KeyChange, ParsedSheet, ResolvedChord, System
+from app.models import Arrangement, ChordSymbol, Event, KeyChange, ParsedSheet, ResolvedChord, System
 from app.render.jianpu import (
     compute_stack_height,
     draw_augmentation_dot,
@@ -156,6 +156,189 @@ def draw_measure_chords(
     # 5. Render chords
     for item in items:
         draw.text((item["x"], chord_y), item["name"], font=item["font"], fill=chord_color)
+
+
+def compute_event_glyph_width(
+    draw: ImageDraw.ImageDraw,
+    ev: Event,
+    tonic_pc: int,
+    hand: Literal["rh", "lh"],
+    active_chord: Optional[ResolvedChord],
+    key_name: Optional[str],
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    acc_font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+) -> float:
+    """Compute the horizontal glyph extent of an event (accidentals + digit + dots)."""
+    if not ev.notes:
+        tb = draw.textbbox((0, 0), "0", font=font)
+        return float(tb[2] - tb[0])
+
+    j_notes = [
+        midi_to_jianpu(
+            n.midi,
+            tonic_pc,
+            hand=hand,
+            finger=n.finger,
+            chord=active_chord,
+            key_name=key_name,
+        )
+        for n in ev.notes
+    ]
+    max_w = 0.0
+    for jn in j_notes:
+        w = 0.0
+        if jn.accidental:
+            tb_acc = draw.textbbox((0, 0), jn.accidental, font=acc_font)
+            w += float(tb_acc[2] - tb_acc[0]) + 1.0
+        tb_deg = draw.textbbox((0, 0), str(jn.degree), font=font)
+        w += float(tb_deg[2] - tb_deg[0])
+        if w > max_w:
+            max_w = w
+
+    if hand == "rh" and len(j_notes) > 1 and any(n.finger is not None for n in ev.notes):
+        max_w += 10.0
+
+    if abs(ev.duration - 1.5) < 0.05 or abs(ev.duration - 0.75) < 0.05:
+        max_w += 7.0
+
+    return max_w
+
+
+def layout_measure_row(
+    draw: ImageDraw.ImageDraw,
+    events: Sequence[Event],
+    mx0: float,
+    mx1: float,
+    pad: float,
+    beats: float,
+    tonic_pc: int,
+    hand: Literal["rh", "lh"],
+    chords: Sequence[ResolvedChord],
+    key_name: Optional[str],
+    base_font_size: int = 20,
+    min_font_size: int = 15,
+) -> Tuple[
+    list[float],
+    ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    ImageFont.FreeTypeFont | ImageFont.ImageFont,
+]:
+    """Calculate collision-aware horizontal layout for events in a measure row.
+
+    Maintains time-proportional target x while enforcing min_gap.
+    If overflowing right boundary, compresses gaps proportionally down to min_gap,
+    then scales font size down (up to 75%, size 15).
+    """
+    if not events:
+        font_default = get_font(size=base_font_size, bold=False)
+        acc_default = get_font(size=16, bold=False)
+        finger_default = get_font(size=11, bold=True)
+        return [], font_default, acc_default, finger_default
+
+    mw = mx1 - mx0
+    if len(events) == 1:
+        ev = events[0]
+        font_single = get_font(size=base_font_size, bold=False)
+        acc_single = get_font(size=16, bold=False)
+        finger_single = get_font(size=11, bold=True)
+        chord_single = get_active_chord(chords, ev.onset)
+        w = compute_event_glyph_width(
+            draw,
+            ev,
+            tonic_pc,
+            hand,
+            chord_single,
+            key_name,
+            font_single,
+            acc_single,
+        )
+        nom_x = calc_event_x(mx0, mw, pad, ev.onset, beats)
+        placed_x = max(mx0 + pad, min(nom_x, mx1 - pad - w))
+        return [placed_x], font_single, acc_single, finger_single
+
+    target_x = [calc_event_x(mx0, mw, pad, ev.onset, beats) for ev in events]
+
+    for sz in range(base_font_size, min_font_size - 1, -1):
+        font = get_font(size=sz, bold=False)
+        acc_font = get_font(size=max(12, int(round(16 * (sz / 20.0)))), bold=False)
+        finger_font = get_font(size=max(9, int(round(11 * (sz / 20.0)))), bold=True)
+        tb_d = draw.textbbox((0, 0), "1", font=font)
+        digit_w = float(tb_d[2] - tb_d[0])
+        min_gap = max(2.5, 0.25 * digit_w)
+
+        extents = [
+            compute_event_glyph_width(
+                draw,
+                ev,
+                tonic_pc,
+                hand,
+                get_active_chord(chords, ev.onset),
+                key_name,
+                font,
+                acc_font,
+            )
+            for ev in events
+        ]
+
+        pos = [target_x[0]]
+        for i in range(1, len(events)):
+            pos.append(max(target_x[i], pos[i - 1] + extents[i - 1] + min_gap))
+
+        overflow = (pos[-1] + extents[-1]) - (mx1 - pad)
+
+        if overflow <= 0:
+            return pos, font, acc_font, finger_font
+
+        gaps = [pos[i + 1] - (pos[i] + extents[i]) for i in range(len(events) - 1)]
+        slacks = [max(0.0, g - min_gap) for g in gaps]
+        total_slack = sum(slacks)
+
+        if total_slack >= overflow:
+            new_pos = [pos[0]]
+            for i in range(len(events) - 1):
+                reduction = overflow * (slacks[i] / total_slack) if total_slack > 0 else 0.0
+                new_gap = gaps[i] - reduction
+                new_pos.append(new_pos[i] + extents[i] + new_gap)
+            return new_pos, font, acc_font, finger_font
+
+    # Fallback at min_font_size: compress all gaps down to min_gap
+    font = get_font(size=min_font_size, bold=False)
+    acc_font = get_font(size=max(12, int(round(16 * (min_font_size / 20.0)))), bold=False)
+    finger_font = get_font(size=max(9, int(round(11 * (min_font_size / 20.0)))), bold=True)
+    tb_d = draw.textbbox((0, 0), "1", font=font)
+    digit_w = float(tb_d[2] - tb_d[0])
+    min_gap = max(2.5, 0.25 * digit_w)
+    extents = [
+        compute_event_glyph_width(
+            draw,
+            ev,
+            tonic_pc,
+            hand,
+            get_active_chord(chords, ev.onset),
+            key_name,
+            font,
+            acc_font,
+        )
+        for ev in events
+    ]
+    new_pos = [target_x[0]]
+    for i in range(len(events) - 1):
+        new_pos.append(new_pos[i] + extents[i] + min_gap)
+
+    if new_pos[-1] + extents[-1] > mx1 - 2.0:
+        shift = (new_pos[-1] + extents[-1]) - (mx1 - 2.0)
+        max_shift = new_pos[0] - (mx0 + 2.0)
+        actual_shift = min(shift, max_shift)
+        if actual_shift > 0:
+            new_pos = [p - actual_shift for p in new_pos]
+
+    if new_pos[-1] + extents[-1] > mx1 - 2.0:
+        new_pos[-1] = mx1 - 2.0 - extents[-1]
+        for i in range(len(events) - 2, -1, -1):
+            if new_pos[i] + extents[i] > new_pos[i + 1] - 1.0:
+                new_pos[i] = new_pos[i + 1] - 1.0 - extents[i]
+
+    return new_pos, font, acc_font, finger_font
 
 
 def make_header_band(
@@ -314,12 +497,25 @@ def render_system_strip(
             continue
 
         # ---------------------------------------------------- RH events
+        rh_pos, rh_digit_font, rh_acc_font, rh_finger_font = layout_measure_row(
+            draw=draw,
+            events=arr_m.rh,
+            mx0=mx0,
+            mx1=mx1,
+            pad=pad,
+            beats=beats,
+            tonic_pc=arr_m.tonic_pc,
+            hand="rh",
+            chords=arr_m.chords,
+            key_name=arr_m.key_name,
+        )
+
         rh_layouts = []
-        for ev in arr_m.rh:
+        for ev_idx, ev in enumerate(arr_m.rh):
             active_chord = get_active_chord(arr_m.chords, ev.onset)
-            ev_x = calc_event_x(mx0, mw, pad, ev.onset, beats)
+            ev_x = rh_pos[ev_idx]
             if not ev.notes:
-                _, t_y, b_y = draw_rest(draw, ev_x, base_y_rh, digit_font)
+                _, t_y, b_y = draw_rest(draw, ev_x, base_y_rh, rh_digit_font)
             else:
                 j_notes = [
                     midi_to_jianpu(
@@ -338,9 +534,9 @@ def render_system_strip(
                     ev_x,
                     base_y_rh,
                     j_notes,
-                    digit_font,
-                    acc_font,
-                    finger_font,
+                    rh_digit_font,
+                    rh_acc_font,
+                    rh_finger_font,
                     hand="rh",
                     line_spacing=line_spacing,
                     draw_finger=True,
@@ -353,7 +549,7 @@ def render_system_strip(
                     for k in range(1, extra_beats + 1):
                         dash_x = calc_event_x(mx0, mw, pad, ev.onset + k, beats)
                         if dash_x < mx1 - pad:
-                            draw_sustain_dash(draw, dash_x, base_y_rh, digit_font)
+                            draw_sustain_dash(draw, dash_x, base_y_rh, rh_digit_font)
 
                 # Augmentation dot for dotted values
                 if abs(ev.duration - 1.5) < 0.05 or abs(ev.duration - 0.75) < 0.05:
@@ -380,23 +576,36 @@ def render_system_strip(
 
             b1_events = [x for x in ev_lays if x[0].duration <= 0.75]
             if b1_events:
-                x_start = calc_event_x(mx0, mw, pad, b1_events[0][0].onset, beats) - 2.0
-                x_end = calc_event_x(mx0, mw, pad, b1_events[-1][0].onset, beats) + 16.0
+                x_start = b1_events[0][1].base_x - 2.0
+                x_end = b1_events[-1][1].base_x + b1_events[-1][1].max_w
                 draw_underline_beam(draw, x_start, x_end, b_y1)
 
             b2_events = [x for x in ev_lays if x[0].duration <= 0.375]
             if b2_events:
-                x_start = calc_event_x(mx0, mw, pad, b2_events[0][0].onset, beats) - 2.0
-                x_end = calc_event_x(mx0, mw, pad, b2_events[-1][0].onset, beats) + 16.0
+                x_start = b2_events[0][1].base_x - 2.0
+                x_end = b2_events[-1][1].base_x + b2_events[-1][1].max_w
                 draw_underline_beam(draw, x_start, x_end, b_y2)
 
         # ---------------------------------------------------- LH events
+        lh_pos, lh_digit_font, lh_acc_font, lh_finger_font = layout_measure_row(
+            draw=draw,
+            events=arr_m.lh,
+            mx0=mx0,
+            mx1=mx1,
+            pad=pad,
+            beats=beats,
+            tonic_pc=arr_m.tonic_pc,
+            hand="lh",
+            chords=arr_m.chords,
+            key_name=arr_m.key_name,
+        )
+
         lh_layouts = []
-        for ev in arr_m.lh:
+        for ev_idx, ev in enumerate(arr_m.lh):
             active_chord = get_active_chord(arr_m.chords, ev.onset)
-            ev_x = calc_event_x(mx0, mw, pad, ev.onset, beats)
+            ev_x = lh_pos[ev_idx]
             if not ev.notes:
-                draw_rest(draw, ev_x, base_y_lh, digit_font)
+                draw_rest(draw, ev_x, base_y_lh, lh_digit_font)
             else:
                 j_notes = [
                     midi_to_jianpu(
@@ -415,9 +624,9 @@ def render_system_strip(
                     ev_x,
                     base_y_lh,
                     j_notes,
-                    digit_font,
-                    acc_font,
-                    finger_font,
+                    lh_digit_font,
+                    lh_acc_font,
+                    lh_finger_font,
                     hand="lh",
                     line_spacing=line_spacing,
                     draw_finger=False,
@@ -429,7 +638,7 @@ def render_system_strip(
                     for k in range(1, extra_beats + 1):
                         dash_x = calc_event_x(mx0, mw, pad, ev.onset + k, beats)
                         if dash_x < mx1 - pad:
-                            draw_sustain_dash(draw, dash_x, base_y_lh, digit_font)
+                            draw_sustain_dash(draw, dash_x, base_y_lh, lh_digit_font)
 
                 if abs(ev.duration - 1.5) < 0.05 or abs(ev.duration - 0.75) < 0.05:
                     dot_x = ev_x + layout.max_w + 4.0
@@ -457,16 +666,16 @@ def render_system_strip(
 
             b1_events = [x for x in ev_lays if x[0].duration <= 0.75]
             if b1_events:
-                x_start = calc_event_x(mx0, mw, pad, b1_events[0][0].onset, beats) - 2.0
-                x_end = calc_event_x(mx0, mw, pad, b1_events[-1][0].onset, beats) + 16.0
+                x_start = b1_events[0][1].base_x - 2.0
+                x_end = b1_events[-1][1].base_x + b1_events[-1][1].max_w
                 draw_underline_beam(draw, x_start, x_end, b_y1)
                 for ev, _ in b1_events:
                     event_bottom_y[ev.onset] = b_y1 + 1.0
 
             b2_events = [x for x in ev_lays if x[0].duration <= 0.375]
             if b2_events:
-                x_start = calc_event_x(mx0, mw, pad, b2_events[0][0].onset, beats) - 2.0
-                x_end = calc_event_x(mx0, mw, pad, b2_events[-1][0].onset, beats) + 16.0
+                x_start = b2_events[0][1].base_x - 2.0
+                x_end = b2_events[-1][1].base_x + b2_events[-1][1].max_w
                 draw_underline_beam(draw, x_start, x_end, b_y2)
                 for ev, _ in b2_events:
                     event_bottom_y[ev.onset] = b_y2 + 1.0
@@ -481,7 +690,7 @@ def render_system_strip(
                     f_y = event_bottom_y[ev.onset] + 4.0
                 else:
                     f_y = lay.bottom_y + 4.0
-                draw.text((lay.base_x + 2.0, f_y), str(f_num), font=finger_font, fill=(25, 118, 210))
+                draw.text((lay.base_x + 2.0, f_y), str(f_num), font=lh_finger_font, fill=(25, 118, 210))
 
     return strip
 

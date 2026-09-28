@@ -32,6 +32,8 @@ from app.render.jianpu import (
     midi_to_jianpu,
 )
 from app.render.overlay import (
+    compute_event_glyph_width,
+    layout_measure_row,
     make_header_band,
     render_page,
     render_pages,
@@ -596,4 +598,107 @@ class TestOverlayRevisions:
         left_margin = np.array(strip)[:, 0:50, :]
         dark_pixels = (left_margin < 200).all(axis=2)
         assert dark_pixels.sum() > 0
+
+    def test_collision_aware_layout_fixture_measure_42_no_overlap_and_order_preserved(self):
+        from PIL import ImageDraw
+        from app.arrange.piano import arrange
+
+        with open("fixtures/omr_sample.json") as f:
+            sheet = ParsedSheet.model_validate_json(f.read())
+        arr = arrange(sheet, start_key="F", difficulty="intermediate")
+        m42 = [m for m in arr.measures if m.measure_index == 42][0]
+
+        img = Image.new("RGB", (1200, 200))
+        draw = ImageDraw.Draw(img)
+        mx0, mx1 = 644.88, 902.4
+        mw = mx1 - mx0
+        pad = max(6.0, mw * 0.04)
+
+        pos, font, acc_font, finger_font = layout_measure_row(
+            draw=draw,
+            events=m42.lh,
+            mx0=mx0,
+            mx1=mx1,
+            pad=pad,
+            beats=4.0,
+            tonic_pc=m42.tonic_pc,
+            hand="lh",
+            chords=m42.chords,
+            key_name=m42.key_name,
+        )
+
+        assert len(pos) == len(m42.lh) == 9
+
+        extents = [
+            compute_event_glyph_width(
+                draw,
+                ev,
+                m42.tonic_pc,
+                "lh",
+                m42.chords[0],
+                m42.key_name,
+                font,
+                acc_font,
+            )
+            for ev in m42.lh
+        ]
+
+        # Assert no glyph overlaps and event order is strictly preserved
+        for i in range(len(m42.lh) - 1):
+            assert pos[i] < pos[i + 1], f"Order violated: {pos[i]} >= {pos[i + 1]}"
+            assert pos[i + 1] >= pos[i] + extents[i], (
+                f"Glyph bbox overlap between event {i} (right={pos[i] + extents[i]}) "
+                f"and event {i + 1} (x={pos[i + 1]})"
+            )
+
+        assert pos[-1] + extents[-1] <= mx1, (
+            f"Event exceeded right measure boundary: {pos[-1] + extents[-1]} > {mx1}"
+        )
+
+    def test_collision_aware_layout_synthetic_dense_measure(self):
+        from PIL import ImageDraw
+
+        img = Image.new("RGB", (1000, 200))
+        draw = ImageDraw.Draw(img)
+        mx0, mx1 = 100.0, 320.0
+        mw = mx1 - mx0
+        pad = max(6.0, mw * 0.04)
+
+        chords = [ResolvedChord(raw="Eb", name="Eb", beat=1.0, root_pc=3, bass_pc=3, pcs=[3, 7, 10], quality="maj")]
+        events = [
+            Event(onset=0.0, duration=0.5, notes=[Note(midi=39, finger=5)]),
+            Event(onset=0.5, duration=0.5, notes=[Note(midi=39, finger=5)]),
+            Event(onset=1.0, duration=0.5, notes=[Note(midi=39, finger=5)]),
+            Event(onset=1.5, duration=0.25, notes=[Note(midi=39, finger=5)]),
+            Event(onset=1.75, duration=0.25, notes=[Note(midi=46, finger=1)]),
+            Event(onset=2.0, duration=0.5, notes=[Note(midi=39, finger=5)]),
+            Event(onset=2.5, duration=0.5, notes=[Note(midi=39, finger=5)]),
+            Event(onset=3.0, duration=0.5, notes=[Note(midi=39, finger=5)]),
+            Event(onset=3.5, duration=0.5, notes=[Note(midi=39, finger=5)]),
+        ]
+
+        pos, font, acc_font, finger_font = layout_measure_row(
+            draw=draw,
+            events=events,
+            mx0=mx0,
+            mx1=mx1,
+            pad=pad,
+            beats=4.0,
+            tonic_pc=5,
+            hand="lh",
+            chords=chords,
+            key_name="F",
+        )
+
+        assert len(pos) == 9
+        extents = [
+            compute_event_glyph_width(draw, ev, 5, "lh", chords[0], "F", font, acc_font)
+            for ev in events
+        ]
+
+        for i in range(len(events) - 1):
+            assert pos[i] < pos[i + 1]
+            assert pos[i + 1] >= pos[i] + extents[i]
+        assert pos[-1] + extents[-1] <= mx1
+
 

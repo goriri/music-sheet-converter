@@ -153,6 +153,7 @@ class RowTranscribedChord(BaseModel):
 class SystemRowChords(BaseModel):
     row_index: int = Field(description="0-based index of the row crop image (0 for Image #0, 1 for Image #1, etc.)")
     chords: list[RowTranscribedChord] = Field(default_factory=list)
+    measure_count: Optional[int] = Field(default=None, description="Total number of measures separated by barlines in this row image")
 
 
 class PageRowTranscriptionResponse(BaseModel):
@@ -368,10 +369,10 @@ def _transcribe_page_row(
     p_idx: int,
     page_img: Optional[np.ndarray],
     p_systems: list[System],
-) -> tuple[int, list[System], dict[int, list[RowTranscribedChord]]]:
+) -> tuple[int, list[System], dict[int, list[RowTranscribedChord]], dict[int, int]]:
     """Transcribe all row chord bands for a single page in one Gemini Flash call."""
     if page_img is None or not p_systems:
-        return p_idx, [], {}
+        return p_idx, [], {}, {}
     h_p, w_p = page_img.shape[:2]
     row_crops: list[bytes] = []
     valid_p_systems: list[System] = []
@@ -388,21 +389,20 @@ def _transcribe_page_row(
             valid_p_systems.append(s)
 
     if not row_crops:
-        return p_idx, [], {}
+        return p_idx, [], {}, {}
 
     row_prompt = (
         f"You are transcribing chord boxes from a Taiwanese band chart sheet music (page {p_idx + 1}). "
         "Each numbered image (Image #0, Image #1, ...) is a horizontal system row crop covering the chord band above the melody for that row. "
         "Each row image contains measures separated by vertical barlines. "
-        "Note: Some measures contain TWO chord boxes (one at beat 1.0, one at beat 3.0). "
-        "Both chord boxes in the same measure MUST have the SAME measure_in_row (between 1 and the number of measures in that row)! "
-        "Do NOT increment measure_in_row unless crossing a vertical barline into the next measure. "
-        "IMPORTANT: Ignore volta repeat ending brackets (e.g. [1. 2.], [2. 3.], 1., 2.) and section names; transcribe ONLY harmonic chord boxes! "
-        "For each chord box from left to right, report: "
-        "1. measure_in_row: 1-based measure index within this row (count barlines from left to right: 1 for leftmost measure, 2 for second, etc.) "
-        "2. beat: 1.0 for the first chord in the measure, 3.0 for the second chord in the measure "
-        "3. chord: exact printed chord text (e.g. '1(2)', '5/7', '5m6/2', '67/1#', '6m7-5', '5', '5sus', '2m7/5') "
-        "4. approx_x: horizontal position from 0.0 (left edge) to 1.0 (right edge)"
+        "For each row, report: "
+        "- measure_count: total number of measures in this row (separated by vertical barlines) "
+        "- chords: list of chord boxes in this row from left to right: "
+        "  1. measure_in_row: 1-based measure index within this row (count barlines: 1 for leftmost measure, 2 for second, etc.) "
+        "  2. beat: 1.0 for the first chord in the measure, 3.0 for the second chord in the measure "
+        "  3. chord: exact printed chord text (e.g. '1(2)', '5/7', '5m6/2', '67/1#', '6m7-5', '5', '5sus', '2m7/5') "
+        "  4. approx_x: horizontal position from 0.0 (left edge) to 1.0 (right edge). "
+        "IMPORTANT: If a measure has TWO chord boxes, both have the SAME measure_in_row! Ignore volta brackets [1. 2.] and section names."
     )
     try:
         row_resp = ask_json(
@@ -412,10 +412,31 @@ def _transcribe_page_row(
             role="reader",
             timeout_s=45.0,
         )
-        return p_idx, valid_p_systems, {r.row_index: r.chords for r in row_resp.rows}
+        # Normalize row_index to 0-based if LLM used 1-based indexing
+        min_idx = min((r.row_index for r in row_resp.rows), default=0)
+        max_idx = max((r.row_index for r in row_resp.rows), default=0)
+        is_1_based = min_idx == 1 and max_idx == len(row_resp.rows)
+
+        row_dict: dict[int, list[RowTranscribedChord]] = {}
+        meas_counts: dict[int, int] = {}
+        for idx, r in enumerate(row_resp.rows):
+            actual_row = (r.row_index - 1) if is_1_based else r.row_index
+            if not (0 <= actual_row < len(valid_p_systems)):
+                actual_row = idx
+            row_dict[actual_row] = r.chords
+            if r.measure_count is not None and r.measure_count > 0:
+                meas_counts[actual_row] = r.measure_count
+            else:
+                max_tc = max((tc.measure_in_row for tc in r.chords), default=0)
+                if max_tc > 0:
+                    meas_counts[actual_row] = max_tc
+                elif actual_row < len(valid_p_systems):
+                    meas_counts[actual_row] = len(valid_p_systems[actual_row].measures)
+        return p_idx, valid_p_systems, row_dict, meas_counts
     except Exception as exc:
         logger.warning("Row chord transcription failed on page %d: %s", p_idx + 1, exc)
-        return p_idx, valid_p_systems, {}
+        return p_idx, valid_p_systems, {}, {}
+
 
 
 def _read_page_crops(page_num: int, items: list[dict[str, Any]]) -> dict[tuple[int, int], str]:
@@ -757,53 +778,47 @@ def verify_sheet(
                 )
             )
 
-    # 2. Structural Checks: Barline Warnings
-    for w in verified.warnings:
-        m_match = re.search(r"Page\s+(\d+)\s+System\s+(\d+):\s+detected\s+(\d+)\s+barlines\s+for\s+(\d+)\s+measures", w)
-        if m_match:
-            p_idx = int(m_match.group(1)) - 1
-            s_idx = int(m_match.group(2)) - 1
-            sys_measures = [
-                m for s in verified.systems if s.page == p_idx
-                for m in s.measures
-            ]
-            first_m = sys_measures[0].index if sys_measures else None
-            new_issues.append(
-                QualityIssue(
-                    stage="omr",
-                    measure_index=first_m,
-                    severity="needs_review",
-                    code="barline_count_mismatch",
-                    message=f"第{p_idx + 1}页第{s_idx + 1}行小节线检测数量不符，请核对小节划分",
-                    detail={"warning": w},
-                )
-            )
-
     # Collect all measures and pre-parse melodies
     all_measures = verified.measures()
     measure_map: dict[int, Measure] = {m.index: m for m in all_measures}
+    parsed_melodies: dict[int, Any] = {
+        m.index: parse_melody(m.melody, beats=m.beats) for m in all_measures
+    }
 
-    parsed_melodies: dict[int, Any] = {}
-    for m in all_measures:
-        pm = parse_melody(m.melody, beats=m.beats)
-        parsed_melodies[m.index] = pm
-        if pm and pm.notes and abs(pm.beat_sum - m.beats) >= 1.0:
-            new_issues.append(
-                QualityIssue(
-                    stage="omr",
-                    measure_index=m.index,
-                    severity="needs_review",
-                    code="melody_beat_sum_mismatch",
-                    message=f"第{m.index + 1}小节旋律拍数（{pm.beat_sum:.1f}拍）与小节拍数（{m.beats:.1f}拍）不符，请核对",
-                    detail={"melody": m.melody, "beat_sum": pm.beat_sum, "expected_beats": m.beats},
-                )
-            )
+    # 2. Parallel Vision Phase: Row Transcription & Crop Re-Reading concurrently
+    page_transcription_results: list[tuple[int, list[System], dict[int, list[RowTranscribedChord]], dict[int, int]]] = []
+    crop_readings_map: dict[tuple[int, int], str] = {}
+    crop_images_map: dict[tuple[int, int], bytes] = {}
+    page_row_meas_counts: dict[int, dict[int, int]] = {}
 
-    # 2a. Visual Row-Level Chord Transcription & Sequence Alignment
-    row_aligned_restored_measures: set[int] = set()
     if can_use_llm and cv2_pages:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(cv2_pages))) as executor:
-            p_futs = [
+        # Prepare chord box crops for crop re-reading
+        chords_to_read: list[dict[str, Any]] = []
+        for s in verified.systems:
+            p_idx = s.page
+            img_bgr = cv2_pages[p_idx] if p_idx < len(cv2_pages) else None
+            if img_bgr is None:
+                continue
+            for m in s.measures:
+                for c_idx, c in enumerate(m.chords):
+                    crop_bytes = _crop_chord_box(img_bgr, c)
+                    if crop_bytes:
+                        key = (m.index, c_idx)
+                        crop_images_map[key] = crop_bytes
+                        chords_to_read.append({
+                            "key": key,
+                            "crop_bytes": crop_bytes,
+                            "raw_full": c.raw,
+                            "page": p_idx,
+                            "system": s,
+                            "measure": m,
+                            "chord": c,
+                        })
+
+        pages_with_crops = sorted(set(it["page"] for it in chords_to_read))
+        num_workers = max(1, len(cv2_pages) + len(pages_with_crops))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+            row_futs = [
                 executor.submit(
                     _transcribe_page_row,
                     p_idx,
@@ -812,30 +827,107 @@ def verify_sheet(
                 )
                 for p_idx in range(len(cv2_pages))
             ]
-            page_transcription_results = [f.result() for f in p_futs]
+            crop_futs = {
+                executor.submit(
+                    _read_page_crops, p, [it for it in chords_to_read if it["page"] == p]
+                ): p
+                for p in pages_with_crops
+            }
 
-        candidate_insertions: list[dict[str, Any]] = []
-        for p_idx, valid_p_systems, row_dict in page_transcription_results:
-            page_img = cv2_pages[p_idx]
-            if page_img is None or not valid_p_systems:
-                continue
-            for r_idx, s in enumerate(valid_p_systems):
-                tc_list = row_dict.get(r_idx, [])
-                m_tc_map = map_transcribed_chords_to_measures(s, tc_list)
-                for m in s.measures:
-                    m_tcs = m_tc_map.get(m.index, [])
-                    unmatched_sheet, cands = align_measure_chords(m.chords, m_tcs)
-                    for us in unmatched_sheet:
-                        us.confidence = min(us.confidence, 0.70)
-                    for cand in cands:
-                        candidate_insertions.append({
-                            "system": s,
-                            "measure": m,
-                            "candidate_chord": cand.chord.strip(),
-                            "candidate_beat": cand.beat,
-                            "page_img": page_img,
-                            "page_idx": p_idx,
-                        })
+            for f in row_futs:
+                try:
+                    res = f.result()
+                    page_transcription_results.append(res)
+                    p_res_idx, _, _, meas_counts = res
+                    page_row_meas_counts[p_res_idx] = meas_counts
+                except Exception as exc:
+                    logger.warning("Row transcription future failed: %s", exc)
+
+            for f in concurrent.futures.as_completed(crop_futs):
+                try:
+                    crop_readings_map.update(f.result())
+                except Exception as exc:
+                    logger.error("Crop reading future failed: %s", exc)
+
+    # 3. Structural Checks: Barline Warnings cross-checked with row transcription
+    for w in verified.warnings:
+        m_match = re.search(r"Page\s+(\d+)\s+System\s+(\d+):\s+detected\s+(\d+)\s+barlines\s+for\s+(\d+)\s+measures", w)
+        if m_match:
+            p_idx = int(m_match.group(1)) - 1
+            s_idx = int(m_match.group(2)) - 1
+            page_sys = [s for s in verified.systems if s.page == p_idx]
+            target_sys = page_sys[s_idx] if 0 <= s_idx < len(page_sys) else None
+            first_m = target_sys.measures[0].index if target_sys and target_sys.measures else None
+            parsed_count = len(target_sys.measures) if target_sys else 0
+
+            is_monotonic_non_overlapping = True
+            if target_sys and len(target_sys.measures) > 1:
+                for k in range(len(target_sys.measures) - 1):
+                    m_curr = target_sys.measures[k]
+                    m_next = target_sys.measures[k + 1]
+                    if not (m_curr.bbox[0] < m_next.bbox[0] and m_curr.bbox[2] <= m_next.bbox[0] + 0.015):
+                        is_monotonic_non_overlapping = False
+                        break
+
+            transcribed_count = None
+            if p_idx in page_row_meas_counts:
+                transcribed_count = page_row_meas_counts[p_idx].get(s_idx)
+
+            agrees = (
+                transcribed_count is not None
+                and transcribed_count == parsed_count
+                and is_monotonic_non_overlapping
+            )
+
+            if agrees:
+                new_issues.append(
+                    QualityIssue(
+                        stage="omr",
+                        measure_index=first_m,
+                        severity="info",
+                        code="barline_count_consistent",
+                        message=f"第{p_idx + 1}页第{s_idx + 1}行小节线检测与行级转录一致（共{parsed_count}小节，布局正常）",
+                        detail={"warning": w, "measure_count": parsed_count},
+                    )
+                )
+            else:
+                new_issues.append(
+                    QualityIssue(
+                        stage="omr",
+                        measure_index=first_m,
+                        severity="needs_review",
+                        code="barline_count_mismatch",
+                        message=f"第{p_idx + 1}页第{s_idx + 1}行小节线检测数量不符，请核对小节划分",
+                        detail={"warning": w, "parsed_count": parsed_count, "transcribed_count": transcribed_count},
+                    )
+                )
+
+    # 4. Visual Row-Level Chord Transcription & Sequence Alignment
+    row_aligned_restored_measures: set[int] = set()
+    m_tc_map_global: dict[int, list[RowTranscribedChord]] = {}
+    candidate_insertions: list[dict[str, Any]] = []
+    for p_idx, valid_p_systems, row_dict, _ in page_transcription_results:
+        page_img = cv2_pages[p_idx]
+        if page_img is None or not valid_p_systems:
+            continue
+        for r_idx, s in enumerate(valid_p_systems):
+            tc_list = row_dict.get(r_idx, [])
+            m_tc_map = map_transcribed_chords_to_measures(s, tc_list)
+            m_tc_map_global.update(m_tc_map)
+            for m in s.measures:
+                m_tcs = m_tc_map.get(m.index, [])
+                unmatched_sheet, cands = align_measure_chords(m.chords, m_tcs)
+                for us in unmatched_sheet:
+                    us.confidence = min(us.confidence, 0.70)
+                for cand in cands:
+                    candidate_insertions.append({
+                        "system": s,
+                        "measure": m,
+                        "candidate_chord": cand.chord.strip(),
+                        "candidate_beat": cand.beat,
+                        "page_img": page_img,
+                        "page_idx": p_idx,
+                    })
 
         if candidate_insertions:
             arb_images: list[bytes] = []
@@ -995,6 +1087,44 @@ def verify_sheet(
                                 detail={"measure": m.index, "candidate": cand_c, "beat": cand_b},
                             )
                         )
+    # 2a-2. Melody Beat-Sum Check (info unless >=2 chords and beat disagreement)
+    for m in all_measures:
+        pm = parsed_melodies.get(m.index)
+        if pm and pm.notes and abs(pm.beat_sum - m.beats) >= 1.0:
+            has_beat_disagreement = False
+            if len(m.chords) >= 2:
+                beats = [c.beat for c in m.chords]
+                if len(set(beats)) < len(beats) or any(c2.beat <= c1.beat for c1, c2 in zip(m.chords[:-1], m.chords[1:])):
+                    has_beat_disagreement = True
+                else:
+                    m_tcs = m_tc_map_global.get(m.index, [])
+                    if m_tcs and len(m_tcs) >= 2:
+                        tc_beats = [tc.beat for tc in m_tcs]
+                        if any(abs(b1 - b2) >= 0.5 for b1, b2 in zip(beats, tc_beats)):
+                            has_beat_disagreement = True
+
+            if len(m.chords) >= 2 and has_beat_disagreement:
+                new_issues.append(
+                    QualityIssue(
+                        stage="omr",
+                        measure_index=m.index,
+                        severity="needs_review",
+                        code="melody_beat_sum_mismatch",
+                        message=f"第{m.index + 1}小节旋律拍数（{pm.beat_sum:.1f}拍）与小节拍数（{m.beats:.1f}拍）不符且和弦起始拍存疑，请核对",
+                        detail={"melody": m.melody, "beat_sum": pm.beat_sum, "expected_beats": m.beats},
+                    )
+                )
+            else:
+                new_issues.append(
+                    QualityIssue(
+                        stage="omr",
+                        measure_index=m.index,
+                        severity="info",
+                        code="melody_beat_sum_mismatch",
+                        message=f"第{m.index + 1}小节旋律拍数（{pm.beat_sum:.1f}拍）与小节拍数（{m.beats:.1f}拍）不符（简谱下划线省略，仅供参考）",
+                        detail={"melody": m.melody, "beat_sum": pm.beat_sum, "expected_beats": m.beats},
+                    )
+                )
 
     # 2b. Structural Checks: Missing Chord Inspection (Crop Re-Read + Arbiter Confirmation)
     suspected_missing_measures: list[dict[str, Any]] = []
@@ -1199,49 +1329,6 @@ def verify_sheet(
                     detail={"measure": m.index, "beat": sus_beat},
                 )
             )
-
-    # 3. Crop Re-Read per Page using role='reader'
-    crop_readings_map: dict[tuple[int, int], str] = {}
-    crop_images_map: dict[tuple[int, int], bytes] = {}
-
-    chords_to_read: list[dict[str, Any]] = []
-    for s in verified.systems:
-        p_idx = s.page
-        img_bgr = cv2_pages[p_idx] if p_idx < len(cv2_pages) else None
-        if img_bgr is None:
-            continue
-        for m in s.measures:
-            for c_idx, c in enumerate(m.chords):
-                crop_bytes = _crop_chord_box(img_bgr, c)
-                if crop_bytes:
-                    key = (m.index, c_idx)
-                    crop_images_map[key] = crop_bytes
-                    chords_to_read.append({
-                        "key": key,
-                        "crop_bytes": crop_bytes,
-                        "raw_full": c.raw,
-                        "page": p_idx,
-                        "system": s,
-                        "measure": m,
-                        "chord": c,
-                    })
-
-    if can_use_llm and chords_to_read:
-        pages_present = sorted(set(it["page"] for it in chords_to_read))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(pages_present))) as executor:
-            future_to_page = {
-                executor.submit(
-                    _read_page_crops, p, [it for it in chords_to_read if it["page"] == p]
-                ): p
-                for p in pages_present
-            }
-            for future in concurrent.futures.as_completed(future_to_page):
-                try:
-                    p_res = future.result()
-                    crop_readings_map.update(p_res)
-                except Exception as exc:
-                    logger.error("Page crop reading exception: %s", exc)
-
     # 4. Multi-chord beat alignment & Candidate Evaluation
     undecided_chords: list[dict[str, Any]] = []
 

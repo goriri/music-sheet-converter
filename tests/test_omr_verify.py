@@ -199,7 +199,7 @@ def clean_sheet() -> ParsedSheet:
 def dummy_images() -> list[bytes]:
     import cv2
     import numpy as np
-    img = np.ones((100, 100, 3), dtype=np.uint8) * 255
+    img = np.ones((1000, 1000, 3), dtype=np.uint8) * 255
     _, buf = cv2.imencode(".jpg", img)
     return [buf.tobytes(), buf.tobytes()]
 
@@ -493,13 +493,25 @@ def test_verify_sheet_flags_melody_beat_mismatch(monkeypatch, clean_sheet, dummy
     target_idx = target_meas.index
     target_meas.melody = "2"
 
+    # Single chord: severity is 'info' (melody text underlines absent)
     verified = verify_sheet(dummy_images, clean_sheet, use_llm=False)
     mel_issue = next(
         (i for i in verified.issues if i.code == "melody_beat_sum_mismatch" and i.measure_index == target_idx),
         None,
     )
     assert mel_issue is not None
-    assert mel_issue.severity == "needs_review"
+    assert mel_issue.severity == "info"
+
+    # >= 2 chords with beat disagreement: severity escalates to 'needs_review'
+    target_meas.chords.append(ChordSymbol(raw="5", beat=1.0))
+    verified2 = verify_sheet(dummy_images, clean_sheet, use_llm=False)
+    mel_issue2 = next(
+        (i for i in verified2.issues if i.code == "melody_beat_sum_mismatch" and i.measure_index == target_idx),
+        None,
+    )
+    assert mel_issue2 is not None
+    assert mel_issue2.severity == "needs_review"
+
 
 
 def test_verify_sheet_flags_unparseable_chord(monkeypatch, clean_sheet, dummy_images):
@@ -611,3 +623,34 @@ def test_verify_sheet_candidate_insertion_rejected_discarded(monkeypatch, clean_
         None,
     )
     assert review_issue is None
+
+
+def _mock_ask_json_barline(prompt: str, schema: Any, images=None, role: str = "reader", timeout_s: float = 60.0):
+    if schema == PageRowTranscriptionResponse:
+        return PageRowTranscriptionResponse(
+            rows=[
+                SystemRowChords(row_index=9, measure_count=4, chords=[])
+            ]
+        )
+    elif schema == PageCropReadings:
+        return PageCropReadings()
+    elif schema == ArbiterBatchResponse:
+        return ArbiterBatchResponse()
+    elif schema == CandidateInsertionBatchResponse:
+        return CandidateInsertionBatchResponse()
+    return None
+
+
+def test_verify_sheet_barline_mismatch_downgraded_with_row_transcription(monkeypatch, clean_sheet, dummy_images):
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_json_barline)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(dummy_images, clean_sheet, use_llm=True)
+    consistent_issue = next((i for i in verified.issues if i.code == "barline_count_consistent"), None)
+    mismatch_issue = next((i for i in verified.issues if i.code == "barline_count_mismatch"), None)
+
+    assert consistent_issue is not None
+    assert consistent_issue.severity == "info"
+    assert mismatch_issue is None
+
+
