@@ -80,10 +80,11 @@ def parse_single_page(
     for attempt in range(max_retries):
         try:
             logger.info("Parsing page %d/%d (attempt %d)...", page_idx + 1, total_pages, attempt + 1)
+            mime_type = "image/png" if img_bytes.startswith(b"\x89PNG") else "image/jpeg"
             resp = client.models.generate_content(
                 model=model,
                 contents=[
-                    types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
+                    types.Part.from_bytes(data=img_bytes, mime_type=mime_type),
                     prompt,
                 ],
                 config=types.GenerateContentConfig(

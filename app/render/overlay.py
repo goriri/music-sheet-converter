@@ -64,7 +64,27 @@ def extract_key_change_label(raw: str) -> str:
     return raw
 
 
+def get_active_chord(
+    chords: Sequence[ResolvedChord],
+    onset: float,
+) -> Optional[ResolvedChord]:
+    """Find the chord active at the given event onset (0-based beat)."""
+    if not chords:
+        return None
+    event_beat = onset + 1.0
+    active = None
+    for c in chords:
+        if c.beat <= event_beat + 0.01:
+            active = c
+        else:
+            break
+    if active is None:
+        active = chords[0]
+    return active
+
+
 def draw_measure_chords(
+
     draw: ImageDraw.ImageDraw,
     chords: Sequence[ResolvedChord],
     mx0: float,
@@ -260,18 +280,23 @@ def render_system_strip(
         key_marker_right = mx0 + 4.0
         if m.index in key_change_map:
             kc = key_change_map[m.index]
-            marker_text = extract_key_change_label(kc.raw)
+            if arr_m and arr_m.key_name:
+                marker_text = f"1={arr_m.key_name}"
+            else:
+                marker_text = extract_key_change_label(kc.raw)
+
             kc_font = get_font(size=13, bold=True)
-            tb = draw.textbbox((0, 0), marker_text, font=kc_font)
-            mw_text = tb[2] - tb[0]
             bx0 = mx0 + 4.0
-            by0 = chord_y - 1.0
-            bx1 = bx0 + mw_text + 6.0
-            by1 = by0 + 17.0
+            text_x = bx0 + 4.0
+            text_y = chord_y
+            tb = draw.textbbox((text_x, text_y), marker_text, font=kc_font)
+            bx1 = tb[2] + 4.0
+            by0 = tb[1] - 2.0
+            by1 = tb[3] + 2.0
             # Red outline box
             draw.rectangle([bx0, by0, bx1, by1], outline=(176, 0, 0), width=1)
             # Red text
-            draw.text((bx0 + 3.0, chord_y), marker_text, font=kc_font, fill=(176, 0, 0))
+            draw.text((text_x, text_y), marker_text, font=kc_font, fill=(176, 0, 0))
             key_marker_right = bx1 + 4.0
 
         if arr_m and arr_m.chords:
@@ -291,14 +316,23 @@ def render_system_strip(
         # ---------------------------------------------------- RH events
         rh_layouts = []
         for ev in arr_m.rh:
+            active_chord = get_active_chord(arr_m.chords, ev.onset)
             ev_x = calc_event_x(mx0, mw, pad, ev.onset, beats)
             if not ev.notes:
                 _, t_y, b_y = draw_rest(draw, ev_x, base_y_rh, digit_font)
             else:
                 j_notes = [
-                    midi_to_jianpu(n.midi, arr_m.tonic_pc, hand="rh", finger=n.finger)
+                    midi_to_jianpu(
+                        n.midi,
+                        arr_m.tonic_pc,
+                        hand="rh",
+                        finger=n.finger,
+                        chord=active_chord,
+                        key_name=arr_m.key_name,
+                    )
                     for n in ev.notes
                 ]
+
                 layout = draw_chord_stack(
                     draw,
                     ev_x,
@@ -359,14 +393,23 @@ def render_system_strip(
         # ---------------------------------------------------- LH events
         lh_layouts = []
         for ev in arr_m.lh:
+            active_chord = get_active_chord(arr_m.chords, ev.onset)
             ev_x = calc_event_x(mx0, mw, pad, ev.onset, beats)
             if not ev.notes:
                 draw_rest(draw, ev_x, base_y_lh, digit_font)
             else:
                 j_notes = [
-                    midi_to_jianpu(n.midi, arr_m.tonic_pc, hand="lh", finger=n.finger)
+                    midi_to_jianpu(
+                        n.midi,
+                        arr_m.tonic_pc,
+                        hand="lh",
+                        finger=n.finger,
+                        chord=active_chord,
+                        key_name=arr_m.key_name,
+                    )
                     for n in ev.notes
                 ]
+
                 layout = draw_chord_stack(
                     draw,
                     ev_x,

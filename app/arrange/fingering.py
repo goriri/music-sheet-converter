@@ -153,7 +153,7 @@ def assign_lh_broken_pattern_fingering(
     # Check for standard 7-note wide arpeggio: 1-5-8-10-8-5-1
     if pattern_type == "arpeggio_wide" and len(single_note_events) == 7:
         intervals = [ev.notes[0].midi - bass_pitch for ev in single_note_events]
-        if intervals[0] == 0 and 5 <= intervals[1] <= 8 and 10 <= intervals[2] <= 13 and intervals[3] >= 14:
+        if intervals[0] == 0 and 4 <= intervals[1] <= 9 and 10 <= intervals[2] <= 14 and intervals[3] >= 14:
             crossover_fingers = [5, 2, 1, 3, 1, 2, 5]
             for ev, f in zip(single_note_events, crossover_fingers):
                 if ev.notes[0].finger is None:
@@ -162,7 +162,7 @@ def assign_lh_broken_pattern_fingering(
     # Check for standard 4-note wide arpeggio: 1-5-8-10
     if pattern_type == "arpeggio_wide" and len(single_note_events) == 4:
         intervals = [ev.notes[0].midi - bass_pitch for ev in single_note_events]
-        if intervals[0] == 0 and 5 <= intervals[1] <= 8 and 10 <= intervals[2] <= 13 and intervals[3] >= 14:
+        if intervals[0] == 0 and 4 <= intervals[1] <= 9 and 10 <= intervals[2] <= 14 and intervals[3] >= 14:
             crossover_fingers = [5, 2, 1, 3]
             for ev, f in zip(single_note_events, crossover_fingers):
                 if ev.notes[0].finger is None:
@@ -184,10 +184,10 @@ def assign_lh_broken_pattern_fingering(
             elif 1 <= interval_from_bass <= 3:
                 # Passing tone / degree 2 in bass hint
                 note.finger = 4
-            elif 4 <= interval_from_bass <= 8:
-                # 5th (or 4th)
+            elif 4 <= interval_from_bass <= 9:
+                # 5th (or 6th in slash chords like Cm/Eb)
                 note.finger = 2
-            elif 9 <= interval_from_bass <= 13:
+            elif 10 <= interval_from_bass <= 13:
                 # Octave
                 note.finger = 1
             elif interval_from_bass >= 14:

@@ -47,57 +47,50 @@ def get_diatonic_fill_notes(top_note: int, tonic_pc: int, num_notes: int = 4) ->
     return notes
 
 
-def degree_to_bass_pitch(deg_token: str, bass_pitch: int, tonic_pc: int) -> int:
-    """Convert a bass_hint degree token (e.g. '1', '2', '5', 'b7') to concrete MIDI pitch relative to chord bass."""
-    diatonic_pcs = [(tonic_pc + s) % 12 for s in [0, 2, 4, 5, 7, 9, 11]]
-    bass_pc = bass_pitch % 12
+def degree_to_bass_pitch(
+    deg_token: str,
+    bass_pitch: int,
+    tonic_pc: int,
+    chord_bass_pc: Optional[int] = None,
+) -> int:
+    """Convert a bass_hint degree token to concrete MIDI pitch.
 
-    clean = deg_token.strip()
-    if clean == "1":
+    Printed digits are absolute movable-do scale degrees in the key in force.
+    If an un-accidentaled degree is 1 semitone away from the chord's bass pc (OMR dropped accidental),
+    it is corrected to match the chord bass pc.
+    """
+    clean = re.sub(r"[^b#♭♯0-9]", "", deg_token).strip()
+    if not clean:
         return bass_pitch
 
-    if bass_pc in diatonic_pcs:
-        base_idx = diatonic_pcs.index(bass_pc)
-    else:
-        base_idx = 0
+    m = re.match(r"^([b#♭♯]?)([1-7])$", clean)
+    if not m:
+        return bass_pitch
 
-    if clean == "2":
-        target_pc = diatonic_pcs[(base_idx + 1) % 7]
-        p = bass_pitch + 1
-        while p % 12 != target_pc:
-            p += 1
-        return p
-    elif clean == "3":
-        target_pc = diatonic_pcs[(base_idx + 2) % 7]
-        p = bass_pitch + 1
-        while p % 12 != target_pc:
-            p += 1
-        return p
-    elif clean == "4":
-        target_pc = diatonic_pcs[(base_idx + 3) % 7]
-        p = bass_pitch + 1
-        while p % 12 != target_pc:
-            p += 1
-        return p
-    elif clean == "5":
-        target_pc = diatonic_pcs[(base_idx + 4) % 7]
-        p = bass_pitch + 1
-        while p % 12 != target_pc:
-            p += 1
-        return p
-    elif clean in ("b7", "7b"):
-        return bass_pitch - 2
-    elif clean == "7":
-        return bass_pitch - 1
+    acc, deg_str = m.groups()
+    deg = int(deg_str)
 
-    digits = [c for c in clean if c.isdigit()]
-    if digits:
-        d = int(digits[0])
-        if d == 1:
-            return bass_pitch
-        return bass_pitch + (d - 1) * 2
+    diatonic_offsets = [0, 2, 4, 5, 7, 9, 11]
+    deg_pc = (tonic_pc + diatonic_offsets[deg - 1]) % 12
+    if acc in ("b", "♭"):
+        deg_pc = (deg_pc - 1) % 12
+    elif acc in ("#", "♯"):
+        deg_pc = (deg_pc + 1) % 12
 
-    return bass_pitch
+    target_bass_pc = (chord_bass_pc % 12) if chord_bass_pc is not None else (bass_pitch % 12)
+
+    # Check for OMR dropped accidental: if 1 semitone away from chord bass pc, snap to chord bass pc
+    if not acc and ((deg_pc - target_bass_pc) % 12 in (1, 11)):
+        deg_pc = target_bass_pc
+
+    if deg_pc == target_bass_pc:
+        return bass_pitch
+
+    interval_up = (deg_pc - target_bass_pc) % 12
+    p = bass_pitch + interval_up
+    if p > 53 and p - 12 >= 36:
+        p -= 12
+    return p
 
 
 def parse_bass_hint(
@@ -105,14 +98,21 @@ def parse_bass_hint(
     bass_pitch: int,
     tonic_pc: int,
     measure_beats: float = 4.0,
+    chord_bass_pc: Optional[int] = None,
+    is_inherited: bool = False,
 ) -> list[tuple[float, float, int]]:
-    """Parse printed 'Bs:' notation (e.g. '11 11 11 112') into (onset, duration, midi_pitch) tuples."""
+    """Parse printed 'Bs:' notation (e.g. '11 11 11 112') into (onset, duration, midi_pitch) tuples.
+
+    Printed digits are absolute movable-do scale degrees in the key in force.
+    When '~' continues the pattern into later measures (is_inherited=True),
+    the pattern transposes so its first note lands on each new chord's bass.
+    """
     clean = re.sub(r"[~^]", "", bass_hint).strip()
     tokens = clean.split()
     if not tokens:
         return [(i * 0.5, 0.5, bass_pitch) for i in range(int(measure_beats * 2))]
 
-    events: list[tuple[float, float, int]] = []
+    raw_events: list[tuple[float, float, str]] = []
     current_beat = 0.0
 
     for token in tokens:
@@ -120,7 +120,7 @@ def parse_bass_hint(
             break
         note_tokens = re.findall(r"[b#♭♯]?[1-7]", token)
         if not note_tokens:
-            events.append((current_beat, 1.0, bass_pitch))
+            raw_events.append((current_beat, 1.0, "1"))
             current_beat += 1.0
             continue
 
@@ -138,11 +138,41 @@ def parse_bass_hint(
 
         beat_offset = 0.0
         for n_tok, d_dur in zip(note_tokens, durations):
-            p = degree_to_bass_pitch(n_tok, bass_pitch, tonic_pc)
-            events.append((round(current_beat + beat_offset, 4), d_dur, p))
+            raw_events.append((round(current_beat + beat_offset, 4), d_dur, n_tok))
             beat_offset += d_dur
 
         current_beat += 1.0
+
+    if not raw_events:
+        return [(i * 0.5, 0.5, bass_pitch) for i in range(int(measure_beats * 2))]
+
+    first_tok = raw_events[0][2]
+    first_deg_m = re.match(r"^([b#♭♯]?)([1-7])$", re.sub(r"[^b#♭♯0-9]", "", first_tok))
+    first_deg = int(first_deg_m.group(2)) if first_deg_m else 1
+
+    events: list[tuple[float, float, int]] = []
+    diatonic_offsets = [0, 2, 4, 5, 7, 9, 11]
+
+    for r_onset, r_dur, tok in raw_events:
+        m = re.match(r"^([b#♭♯]?)([1-7])$", re.sub(r"[^b#♭♯0-9]", "", tok))
+        deg = int(m.group(2)) if m else 1
+
+        if deg == first_deg:
+            p = bass_pitch
+        elif (first_deg in (1, 7)) and deg == 4:
+            # Upper fifth interval above root (e.g. .7.74 where 7 is root and 4 is fifth)
+            p = bass_pitch + 7
+        elif deg == (first_deg % 7) + 1:
+            # Diatonic passing tone step above root in current key
+            diatonic_pcs = set((tonic_pc + s) % 12 for s in diatonic_offsets)
+            p = bass_pitch + 1
+            while p % 12 not in diatonic_pcs:
+                p += 1
+        else:
+            deg_diff = (diatonic_offsets[deg - 1] - diatonic_offsets[first_deg - 1]) % 12
+            p = bass_pitch + deg_diff
+
+        events.append((r_onset, r_dur, p))
 
     return events
 
@@ -198,6 +228,7 @@ def generate_measure_events(
     is_stop: bool = False,
     fill: bool = False,
     bass_hint: Optional[str] = None,
+    is_inherited_bass_hint: bool = False,
 ) -> tuple[list[Event], list[Event]]:
     """Generate strictly tiled RH and LH events for a single measure according to style and texture."""
     # Check section label for texture modifiers
@@ -208,20 +239,6 @@ def generate_measure_events(
             is_sparse = True
         if "+bs in" in norm_label or "og in" in norm_label or "tempo" in norm_label:
             is_sparse = False
-
-    # 1. Stop measure: band hits beat 1 and rests for the remainder
-    if is_stop:
-        first_voicing = rh_voicings[0] if rh_voicings else (64, 67, 72)
-        first_bass = lh_bass_pitches[0] if lh_bass_pitches else 36
-        rh = [
-            Event(onset=0.0, duration=1.0, notes=[Note(midi=p) for p in first_voicing]),
-            Event(onset=1.0, duration=round(measure_beats - 1.0, 4), notes=[]),
-        ]
-        lh = [
-            Event(onset=0.0, duration=1.0, notes=[Note(midi=first_bass)]),
-            Event(onset=1.0, duration=round(measure_beats - 1.0, 4), notes=[]),
-        ]
-        return ensure_exact_tiling(rh, measure_beats), ensure_exact_tiling(lh, measure_beats)
 
     # Calculate chord segment boundaries
     num_chords = len(chords)
@@ -247,6 +264,17 @@ def generate_measure_events(
         gap = chord_segments[0]["onset"]
         rh_events.append(Event(onset=0.0, duration=gap, notes=[]))
         lh_events.append(Event(onset=0.0, duration=gap, notes=[]))
+
+    # 1. Stop measure: play EVERY chord at its beat (hit and hold), only drop running LH/RH pattern
+    if is_stop:
+        for seg in chord_segments:
+            s_onset = seg["onset"]
+            s_dur = seg["duration"]
+            v = seg["voicing"]
+            b = seg["bass"]
+            rh_events.append(Event(onset=s_onset, duration=s_dur, notes=[Note(midi=p) for p in v]))
+            lh_events.append(Event(onset=s_onset, duration=s_dur, notes=[Note(midi=b)]))
+        return ensure_exact_tiling(rh_events, measure_beats), ensure_exact_tiling(lh_events, measure_beats)
 
     # 2. 3/4 Waltz
     if round(measure_beats, 1) == 3.0 or style == "waltz":
@@ -281,7 +309,14 @@ def generate_measure_events(
     # Check if custom bass_hint applies to LH
     custom_lh_rhythm = None
     if bass_hint and chord_segments:
-        custom_lh_rhythm = parse_bass_hint(bass_hint, chord_segments[0]["bass"], tonic_pc, measure_beats)
+        custom_lh_rhythm = parse_bass_hint(
+            bass_hint=bass_hint,
+            bass_pitch=chord_segments[0]["bass"],
+            tonic_pc=tonic_pc,
+            measure_beats=measure_beats,
+            chord_bass_pc=chord_segments[0]["chord"].bass_pc,
+            is_inherited=is_inherited_bass_hint,
+        )
 
     for seg_idx, seg in enumerate(chord_segments):
         s_onset = seg["onset"]
@@ -387,19 +422,33 @@ def generate_measure_events(
                     lh_events.append(Event(onset=r_onset, duration=r_dur, notes=[Note(midi=r_pitch)]))
             else:
                 if s_dur >= 4.0:
-                    # 1-5-1'-10th arpeggio
-                    lh_events.append(Event(onset=s_onset, duration=0.5, notes=[Note(midi=b)]))
-                    lh_events.append(Event(onset=s_onset + 0.5, duration=0.5, notes=[Note(midi=lh_comp["fifth"])]))
-                    lh_events.append(Event(onset=s_onset + 1.0, duration=0.5, notes=[Note(midi=lh_comp["octave"])]))
-                    lh_events.append(Event(onset=s_onset + 1.5, duration=0.5, notes=[Note(midi=lh_comp["tenth"])]))
-                    lh_events.append(Event(onset=s_onset + 2.0, duration=0.5, notes=[Note(midi=lh_comp["octave"])]))
-                    lh_events.append(Event(onset=s_onset + 2.5, duration=0.5, notes=[Note(midi=lh_comp["fifth"])]))
-                    lh_events.append(Event(onset=s_onset + 3.0, duration=1.0, notes=[Note(midi=b)]))
+                    if lh_comp["tenth"] > lh_comp["octave"]:
+                        # 1-5-1'-10th arpeggio
+                        lh_events.append(Event(onset=s_onset, duration=0.5, notes=[Note(midi=b)]))
+                        lh_events.append(Event(onset=s_onset + 0.5, duration=0.5, notes=[Note(midi=lh_comp["fifth"])]))
+                        lh_events.append(Event(onset=s_onset + 1.0, duration=0.5, notes=[Note(midi=lh_comp["octave"])]))
+                        lh_events.append(Event(onset=s_onset + 1.5, duration=0.5, notes=[Note(midi=lh_comp["tenth"])]))
+                        lh_events.append(Event(onset=s_onset + 2.0, duration=0.5, notes=[Note(midi=lh_comp["octave"])]))
+                        lh_events.append(Event(onset=s_onset + 2.5, duration=0.5, notes=[Note(midi=lh_comp["fifth"])]))
+                        lh_events.append(Event(onset=s_onset + 3.0, duration=1.0, notes=[Note(midi=b)]))
+                    else:
+                        # High bass register: use root-5-8 pattern to stay within bounds
+                        lh_events.append(Event(onset=s_onset, duration=0.5, notes=[Note(midi=b)]))
+                        lh_events.append(Event(onset=s_onset + 0.5, duration=0.5, notes=[Note(midi=lh_comp["fifth"])]))
+                        lh_events.append(Event(onset=s_onset + 1.0, duration=1.0, notes=[Note(midi=lh_comp["octave"])]))
+                        lh_events.append(Event(onset=s_onset + 2.0, duration=0.5, notes=[Note(midi=b)]))
+                        lh_events.append(Event(onset=s_onset + 2.5, duration=0.5, notes=[Note(midi=lh_comp["fifth"])]))
+                        lh_events.append(Event(onset=s_onset + 3.0, duration=1.0, notes=[Note(midi=lh_comp["octave"])]))
                 elif s_dur >= 2.0:
-                    lh_events.append(Event(onset=s_onset, duration=0.5, notes=[Note(midi=b)]))
-                    lh_events.append(Event(onset=s_onset + 0.5, duration=0.5, notes=[Note(midi=lh_comp["fifth"])]))
-                    lh_events.append(Event(onset=s_onset + 1.0, duration=0.5, notes=[Note(midi=lh_comp["octave"])]))
-                    lh_events.append(Event(onset=s_onset + 1.5, duration=s_dur - 1.5, notes=[Note(midi=lh_comp["tenth"])]))
+                    if lh_comp["tenth"] > lh_comp["octave"]:
+                        lh_events.append(Event(onset=s_onset, duration=0.5, notes=[Note(midi=b)]))
+                        lh_events.append(Event(onset=s_onset + 0.5, duration=0.5, notes=[Note(midi=lh_comp["fifth"])]))
+                        lh_events.append(Event(onset=s_onset + 1.0, duration=0.5, notes=[Note(midi=lh_comp["octave"])]))
+                        lh_events.append(Event(onset=s_onset + 1.5, duration=s_dur - 1.5, notes=[Note(midi=lh_comp["tenth"])]))
+                    else:
+                        lh_events.append(Event(onset=s_onset, duration=0.5, notes=[Note(midi=b)]))
+                        lh_events.append(Event(onset=s_onset + 0.5, duration=0.5, notes=[Note(midi=lh_comp["fifth"])]))
+                        lh_events.append(Event(onset=s_onset + 1.0, duration=s_dur - 1.0, notes=[Note(midi=lh_comp["octave"])]))
                 else:
                     lh_events.append(Event(onset=s_onset, duration=s_dur, notes=[Note(midi=b)]))
 

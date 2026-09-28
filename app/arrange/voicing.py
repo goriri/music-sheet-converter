@@ -103,14 +103,11 @@ def get_candidate_rh_voicings(chord: ResolvedChord, difficulty: Difficulty) -> l
             # 1. 4-note voicings (guaranteed to contain all 4 tones including color tone)
             candidates.extend(_generate_close_voicings(pcs[:4], max_notes=4, max_span=max_span))
 
-            # 2. 3-note voicings that RETAIN the essential color tone pcs[3]:
+            # 2. 3-note voicings that RETAIN the 3rd (pcs[1]) AND the color tone (pcs[3]):
             color_tone = pcs[3]
             v_3note_patterns = [
-                [pcs[0], pcs[1], color_tone],
-                [pcs[1], pcs[2], color_tone],
-                [pcs[0], pcs[2], color_tone],
-                [pcs[0], color_tone, pcs[1]],
-                [color_tone, pcs[1], pcs[2]],
+                [pcs[0], pcs[1], color_tone],  # Root + 3rd + color tone (omits 5th)
+                [pcs[1], pcs[2], color_tone],  # 3rd + 5th + color tone (omits root)
             ]
             for pat in v_3note_patterns:
                 candidates.extend(_generate_close_voicings(pat, max_notes=3, max_span=max_span))
@@ -312,28 +309,55 @@ def select_lh_bass_notes(chords: list[ResolvedChord]) -> list[int]:
 
 
 def get_lh_pattern_pitches(bass_pitch: int, chord: ResolvedChord) -> dict[str, int]:
-    """Calculate the components for broken LH accompaniment (root, 5th, 8ve, 10th)."""
+    """Calculate the components for broken LH accompaniment (root, 5th, 8ve, 10th).
+
+    The lowest note (root) is the chord bass (slash bass if specified).
+    All upper notes (fifth, octave, tenth) are strictly chord tones (in chord.pcs),
+    chosen near the standard fifth, octave, and tenth positions.
+    """
     root = bass_pitch
-    # 5th interval: 6 semitones for diminished/m7b5, 7 for standard
-    if chord.quality in ("dim", "m7b5"):
-        fifth = root + 6
-    elif chord.quality == "aug":
-        fifth = root + 8
+    chord_pcs = set(chord.pcs) if chord.pcs else {chord.root_pc}
+
+    # 1. "Fifth" (middle tone): chord tone strictly > root, near root + 7
+    cands_fifth = [p for p in range(root + 3, root + 12) if p % 12 in chord_pcs]
+    if cands_fifth:
+        # Prefer root or 5th, closest to root + 7
+        best_fifth = min(
+            cands_fifth,
+            key=lambda p: abs(p - (root + 7)) - (1.5 if p % 12 == chord.root_pc else 0.0),
+        )
     else:
-        fifth = root + 7
+        best_fifth = root + 7
 
-    octave = root + 12
+    # 2. "Octave" (upper tone): chord tone near root + 12
+    if (root + 12) % 12 in chord_pcs:
+        best_octave = root + 12
+    else:
+        cands_oct = [p for p in range(root + 8, root + 16) if p % 12 in chord_pcs]
+        if cands_oct:
+            best_octave = min(cands_oct, key=lambda p: abs(p - (root + 12)))
+        else:
+            best_octave = root + 12
 
-    # 10th interval: root + 15 (minor 10th) or root + 16 (major 10th)
+    # 3. "Tenth" (wide extension): chord tone > octave and <= 64 (below/at RH boundary)
     is_minor = chord.quality in ("m", "m7", "m6", "m9", "m7b5")
-    tenth = root + (15 if is_minor else 16)
-    # If tenth is too high (>= 64), pull back to 9th (root + 14) or octave
-    if tenth >= 64:
-        tenth = root + 14
+    is_sus = "sus" in chord.quality
+    if is_sus:
+        target_tenth = root + 17
+    elif is_minor:
+        target_tenth = root + 15
+    else:
+        target_tenth = root + 16
+
+    cands_tenth = [p for p in range(best_octave + 1, 65) if p % 12 in chord_pcs]
+    if cands_tenth:
+        best_tenth = min(cands_tenth, key=lambda p: abs(p - target_tenth))
+    else:
+        best_tenth = best_octave
 
     return {
         "root": root,
-        "fifth": fifth,
-        "octave": octave,
-        "tenth": tenth,
+        "fifth": best_fifth,
+        "octave": best_octave,
+        "tenth": best_tenth,
     }

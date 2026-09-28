@@ -322,11 +322,27 @@ class TestArrangementInvariants:
         sheet = make_sample_sheet()
         arr = arrange(sheet, start_key="F", difficulty="advanced")
 
-        # Measure 22 is is_stop=True: hit on beat 1, then rest
+        # Measure 22 is is_stop=True: hit and hold for the chord duration
         m22 = arr.measures[22]
-        assert len(m22.rh) == 2
-        assert m22.rh[0].onset == 0.0 and m22.rh[0].duration == 1.0 and len(m22.rh[0].notes) > 0
-        assert m22.rh[1].onset == 1.0 and m22.rh[1].duration == 3.0 and len(m22.rh[1].notes) == 0
+        assert len(m22.rh) == 1
+        assert m22.rh[0].onset == 0.0 and m22.rh[0].duration == 4.0 and len(m22.rh[0].notes) > 0
+        assert len(m22.lh) == 1
+        assert m22.lh[0].onset == 0.0 and m22.lh[0].duration == 4.0
+
+        # Multi-chord is_stop measure: hit and hold on every chord beat without dropping chords
+        stop_sheet = make_sample_sheet()
+        stop_sheet.systems[5].measures[2].chords = [
+            ChordSymbol(raw="2m7", beat=1.0),
+            ChordSymbol(raw="5", beat=3.0),
+        ]
+        stop_arr = arrange(stop_sheet, start_key="F", difficulty="intermediate")
+        m22_stop = stop_arr.measures[22]
+        assert len(m22_stop.rh) == 2
+        assert m22_stop.rh[0].onset == 0.0 and m22_stop.rh[0].duration == 2.0 and len(m22_stop.rh[0].notes) > 0
+        assert m22_stop.rh[1].onset == 2.0 and m22_stop.rh[1].duration == 2.0 and len(m22_stop.rh[1].notes) > 0
+        assert len(m22_stop.lh) == 2
+        assert m22_stop.lh[0].onset == 0.0 and m22_stop.lh[0].duration == 2.0
+        assert m22_stop.lh[1].onset == 2.0 and m22_stop.lh[1].duration == 2.0
 
         # Measure 23 has fill=True: fill figure on beat 4 (16th notes)
         m23 = arr.measures[23]
@@ -352,6 +368,12 @@ class TestArrangementInvariants:
             # Measure 2 is 2m7 -> Gm7 (root G=7, 7th F=5)
             m2_rh_notes = [n.midi % 12 for ev in arr.measures[2].rh for n in ev.notes]
             assert 5 in m2_rh_notes, f"7th (F/pc 5) missing from {diff} voicing of Gm7: {m2_rh_notes}"
+
+            # Measure 6 is 2m7/6 -> Gm7/D (root G=7, 3rd Bb=10, 5th D=2, 7th F=5)
+            # Intermediate and advanced must strictly retain 3rd (Bb) and 7th (F)
+            m6_rh_notes = [n.midi % 12 for ev in arr.measures[6].rh for n in ev.notes]
+            assert 10 in m6_rh_notes, f"3rd (Bb/pc 10) missing from {diff} voicing of Gm7/D: {m6_rh_notes}"
+            assert 5 in m6_rh_notes, f"7th (F/pc 5) missing from {diff} voicing of Gm7/D: {m6_rh_notes}"
 
             # Measure 7 is 5sus -> Csus4 (root C=0, 4th F=5)
             m7_rh_notes = [n.midi % 12 for ev in arr.measures[7].rh for n in ev.notes]
@@ -419,3 +441,31 @@ class TestArrangementInvariants:
         note = passing_ev[0].notes[0]
         assert note.midi == 43, f"Expected passing tone G2 (pitch 43), got {note.midi}"
         assert note.finger == 4, f"Expected finger 4 for passing tone degree 2, got {note.finger}"
+
+    @pytest.mark.parametrize("diff", ["beginner", "intermediate", "advanced"])
+    def test_lh_notes_are_chord_tones(self, diff):
+        """Assert that all LH accompaniment notes are strictly chord tones (or bass pc),
+
+        except for passing tones in bass_hint measures.
+        """
+        sheet = make_sample_sheet()
+        arr = arrange(sheet, start_key="F", difficulty=diff)
+        for m_arr in arr.measures:
+            orig_m = next((m for m in sheet.measures() if m.index == m_arr.measure_index), None)
+            has_bass_hint = bool(orig_m and orig_m.bass_hint)
+            for ev in m_arr.lh:
+                if not ev.notes:
+                    continue
+                active_chord = m_arr.chords[0]
+                for c in m_arr.chords:
+                    if (c.beat - 1.0) <= ev.onset + 1e-4:
+                        active_chord = c
+                chord_pcs = set(active_chord.pcs) | {active_chord.bass_pc % 12}
+                for note in ev.notes:
+                    pitch_pc = note.midi % 12
+                    if pitch_pc not in chord_pcs:
+                        assert has_bass_hint, (
+                            f"Measure {m_arr.measure_index} ({active_chord.name}) LH note {note.midi} "
+                            f"(pc {pitch_pc}) not in chord pcs {chord_pcs}"
+                        )
+

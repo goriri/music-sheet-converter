@@ -93,7 +93,11 @@ def ingest_uploaded_files(
     return page_paths
 
 
-def _do_parse_sheet(sheet_id: str, storage: Optional[Storage] = None) -> None:
+def _do_parse_sheet(
+    sheet_id: str,
+    storage: Optional[Storage] = None,
+    parse_fn: Optional[Any] = None,
+) -> None:
     """Worker task that runs OMR on the sheet's page images."""
     store = storage or get_storage()
     state_path = f"sheets/{sheet_id}/state.json"
@@ -133,10 +137,12 @@ def _do_parse_sheet(sheet_id: str, storage: Optional[Storage] = None) -> None:
         state["updated_at"] = datetime.now(timezone.utc).isoformat()
         store.put_json(state_path, state)
 
-        # Lazy import OMR module
-        from app.omr.gemini_omr import parse_pages
-
-        parsed_sheet = parse_pages(page_images)
+        # Use passed-in parse_fn (e.g. mocked in tests) or import from OMR module
+        if parse_fn is not None:
+            parsed_sheet = parse_fn(page_images)
+        else:
+            from app.omr.gemini_omr import parse_pages
+            parsed_sheet = parse_pages(page_images)
 
         state["progress"] = 0.8
         state["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -167,23 +173,31 @@ def start_parse(
     sheet_id: str,
     background: bool = True,
     storage: Optional[Storage] = None,
+    parse_fn: Optional[Any] = None,
 ) -> Optional[threading.Thread]:
     """Start OMR parse for sheet_id.
 
     Runs in a background thread if background=True, else synchronously.
     """
     store = storage or get_storage()
+    if parse_fn is None:
+        try:
+            from app.omr.gemini_omr import parse_pages
+            parse_fn = parse_pages
+        except Exception:
+            parse_fn = None
+
     if background:
         thread = threading.Thread(
             target=_do_parse_sheet,
-            args=(sheet_id, store),
+            args=(sheet_id, store, parse_fn),
             daemon=True,
             name=f"omr-parse-{sheet_id}",
         )
         thread.start()
         return thread
     else:
-        _do_parse_sheet(sheet_id, store)
+        _do_parse_sheet(sheet_id, store, parse_fn)
         return None
 
 

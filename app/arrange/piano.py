@@ -253,6 +253,7 @@ def arrange(
             active_bass_hint = None
             last_system_id = sys_id
 
+        is_inherited_bass_hint = False
         if m.bass_hint:
             m_bass_hint = m.bass_hint
             if "~" in m.bass_hint:
@@ -260,7 +261,11 @@ def arrange(
             else:
                 active_bass_hint = None
         else:
-            m_bass_hint = active_bass_hint
+            if active_bass_hint:
+                m_bass_hint = active_bass_hint
+                is_inherited_bass_hint = True
+            else:
+                m_bass_hint = None
 
         rh_events, lh_events = generate_measure_events(
             chords=m_chords,
@@ -275,6 +280,7 @@ def arrange(
             is_stop=m.is_stop,
             fill=m.fill,
             bass_hint=m_bass_hint,
+            is_inherited_bass_hint=is_inherited_bass_hint,
         )
 
         # Fingering

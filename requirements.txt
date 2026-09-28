@@ -10,3 +10,6 @@ opencv-python-headless>=4.10
 pymupdf>=1.24
 pytest>=8.0
 httpx>=0.27
+music21>=9.1
+hypothesis>=6.100
+anthropic[vertex]>=0.40

@@ -140,6 +140,44 @@ class TestJianpuConversion:
         assert midi_to_jianpu(41, 5, "lh").octave_dots == -1  # F2 (1 dot below in LH)
         assert midi_to_jianpu(36, 5, "lh").octave_dots == -2  # C2 (2 dots below in LH)
 
+    def test_chord_context_chromatic_spelling(self):
+        # 1. F key D7/F# -> '#1'
+        c_d7_fsharp = ResolvedChord(
+            raw="D7/F#", name="D7/F#", beat=1.0, root_pc=2, bass_pc=6, pcs=[2, 6, 9, 0], quality="7"
+        )
+        # F#3 = MIDI 54, F#4 = MIDI 66 (pc 6)
+        n1 = midi_to_jianpu(54, 5, hand="lh", chord=c_d7_fsharp, key_name="F")
+        assert n1.degree == 1 and n1.accidental == "♯"
+        assert n1.text == "♯1"
+
+        # 2. F key Cm/Eb bass -> 'b7'
+        c_cm_eb = ResolvedChord(
+            raw="Cm/Eb", name="Cm/Eb", beat=1.0, root_pc=0, bass_pc=3, pcs=[0, 3, 7], quality="m"
+        )
+        # Eb3 = MIDI 51, Eb4 = MIDI 63 (pc 3)
+        n2 = midi_to_jianpu(51, 5, hand="lh", chord=c_cm_eb, key_name="F")
+        assert n2.degree == 7 and n2.accidental == "♭"
+        assert n2.text == "♭7"
+
+        # 3. C key A7/C# -> '#1'
+        c_a7_csharp = ResolvedChord(
+            raw="A7/C#", name="A7/C#", beat=1.0, root_pc=9, bass_pc=1, pcs=[9, 1, 4, 7], quality="7"
+        )
+        # C#4 = MIDI 61 (pc 1)
+        n3 = midi_to_jianpu(61, 0, hand="lh", chord=c_a7_csharp, key_name="C")
+        assert n3.degree == 1 and n3.accidental == "♯"
+        assert n3.text == "♯1"
+
+        # 4. G key 'b7' chord (F) -> 'b7'
+        c_f = ResolvedChord(
+            raw="b7", name="F", beat=1.0, root_pc=5, bass_pc=5, pcs=[5, 9, 0], quality="maj"
+        )
+        # F3 = MIDI 53, F4 = MIDI 65 (pc 5)
+        n4 = midi_to_jianpu(65, 7, hand="rh", chord=c_f, key_name="G")
+        assert n4.degree == 7 and n4.accidental == "♭"
+        assert n4.text == "♭7"
+
+
 
 # --------------------------------------------------------------------------- Layout & Beaming Tests
 class TestLayoutAndBeaming:

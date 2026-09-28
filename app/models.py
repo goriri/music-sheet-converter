@@ -24,11 +24,26 @@ Difficulty = Literal["beginner", "intermediate", "advanced"]
 Instrument = Literal["piano", "guitar", "ukulele"]
 
 
+# --------------------------------------------------------------------------- quality assurance
+class QualityIssue(BaseModel):
+    """A finding from an automatic check. Only severity='needs_review' is surfaced to the user as
+    something to confirm; 'auto_fixed' is shown as an informational note; 'info' is log-only."""
+
+    stage: Literal["omr", "arrange", "render"]
+    measure_index: Optional[int] = None
+    severity: Literal["info", "auto_fixed", "needs_review"]
+    code: str = Field(description="Machine code, e.g. 'chord_disagreement', 'lh_non_chord_tone'")
+    message: str = Field(description="User-facing message in simplified Chinese")
+    detail: dict = Field(default_factory=dict)
+
+
 # --------------------------------------------------------------------------- OMR output
 class ChordSymbol(BaseModel):
     raw: str = Field(description="Chord exactly as printed inside the box, e.g. '2m7/5'")
     beat: float = Field(1.0, description="1-based beat inside the measure where the chord starts")
     bbox: Optional[BBox] = Field(None, description="Box of the printed chord symbol")
+    confidence: float = Field(1.0, ge=0.0, le=1.0, description="Post-verification confidence")
+    alternatives: list[str] = Field(default_factory=list, description="Other plausible readings")
 
 
 class Measure(BaseModel):
@@ -83,6 +98,7 @@ class ParsedSheet(BaseModel):
     systems: list[System]
     key_changes: list[KeyChange] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    issues: list[QualityIssue] = Field(default_factory=list)
 
     def measures(self) -> list[Measure]:
         return [m for s in self.systems for m in s.measures]
@@ -128,3 +144,4 @@ class Arrangement(BaseModel):
     style: str = ""
     measures: list[MeasureArrangement]
     notes: list[str] = Field(default_factory=list, description="Human-readable remarks for the player")
+    issues: list[QualityIssue] = Field(default_factory=list)

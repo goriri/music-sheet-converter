@@ -88,6 +88,7 @@ gcloud run deploy "${SERVICE}" \
   --max-instances=3 \
   --concurrency=10 \
   --allow-unauthenticated \
+  --quiet \
   --set-env-vars="${ENV_VARS}"
 
 echo "Deployment complete."

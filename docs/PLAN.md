@@ -55,3 +55,42 @@ Cloud Run: `--no-cpu-throttling` (background thread), `--timeout 900`, 2 CPU / 2
 - Strip content per Measure, x-aligned to the Measure bbox x-range: RH row (upper), LH row (lower), both movable-do jianpu relative to `tonic_pc` of that measure: digits 1–7 with ♯/♭ prefix, octave dots above/below (reference octave: RH C4–B4 = no dots... per tonic, LH one dot below baseline register), chord stacks drawn vertically (lowest note at bottom), rhythm by jianpu convention (underline = eighth, double = sixteenth, `-` = extra beat, dot = dotted), rests `0`. Finger numbers in small blue digits above RH notes / below LH notes. Thin bar lines at measure x-ranges; row labels "R"/"L" in margin.
 - Header strip on page 1: "Key: F (1=F) · 中级 · Piano" and modulation notice at the measure where the key changes ("1=G").
 - Font: bundled `app/render/fonts/` (download Noto Sans / Noto Sans SC or DejaVu Sans at build time; fall back to PIL default).
+
+## Quality assurance (production guardrails)
+Goal: never return a wrong note; minimise what the user must confirm. Findings are `QualityIssue`s
+(`app/models.py`) on `ParsedSheet.issues` / `Arrangement.issues`. Only `needs_review` reaches the user as a
+yellow "请核对" item (generation is still allowed; the PDF ends with a list of them). Everything else is
+auto-resolved and logged.
+
+### OMR verification — `app/qa/omr_verify.py` → `verify_sheet(pages: list[bytes], sheet) -> ParsedSheet`
+Ensemble + music priors, escalate only unresolved cases:
+1. Structural: measure count vs OpenCV barlines, beat sum of melody vs time signature, chord grammar
+   (`app.theory.chords.parse_chord`), chord bbox inside its measure, header keys vs detected key change
+   (e.g. printed `F#-Ab` ⇒ +2).
+2. Crop re-read: every chord box cropped (with margin) and read independently by Gemini Flash; agreement ⇒ conf↑.
+3. Music priors scored per candidate reading: melody/chord fit (strong-beat melody notes ∈ chord tones),
+   Bs-line first note == chord bass, typical progressions; used to pick between disagreeing readings and to
+   recover dropped accidentals.
+4. Arbiter: remaining disagreements/low scores → Claude Opus on Vertex AI (`app/qa/llm.py`) with the crop,
+   row image, candidate readings, melody and neighbouring chords; structured answer + confidence.
+5. Result: auto-correct when the combined evidence is decisive (issue `auto_fixed`), else keep best reading,
+   `alternatives` filled, issue `needs_review`.
+
+### Arrangement verification — `app/qa/arrange_check.py` → `check_and_repair(sheet, arrangement) -> Arrangement`
+Runs on every render request before the PDF is produced:
+1. Independent validator (chord pitch classes recomputed from `ResolvedChord.name` with **music21**, not our
+   own theory code): every chord voiced at its beat; RH contains defining tones (3rd, 7th, sus4, add2);
+   LH notes ⊂ chord tones except weak-subdivision passing tones; fills diatonic to the key in force; tiling;
+   ranges; spans; fingering physically valid (no reused finger on different simultaneous/consecutive pitches
+   without crossing/shift).
+2. Any failing measure is replaced by a verified safe fallback (block chord + bass, simple fingering) and
+   re-validated; issue `auto_fixed`. A failing fallback is a hard error (500), never a silent wrong note.
+3. Optional LLM musical review (env `QA_LLM_REVIEW=1`): Opus reads a compact text rendering of the song
+   (chords, RH/LH notes+fingers per measure) and flags implausible measures; flagged measures that also fail
+   a stricter heuristic get the fallback.
+4. CI: property-based tests (hypothesis) over all chord qualities × 12 keys × 3 levels × random sheets; golden
+   regression outputs in `tests/golden/` updated only via `scripts/update_golden.py` after human approval.
+
+### Render verification
+Layout self-check in the renderer: every event x inside its measure, no label/text bbox overlaps; failures
+logged as `render` issues.

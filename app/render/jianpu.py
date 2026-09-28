@@ -16,10 +16,19 @@ Conventions:
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from typing import Literal, Optional, Sequence, Tuple
 
 from PIL import ImageDraw, ImageFont
+
+from app.models import ResolvedChord
+from app.theory.keys import (
+    canonical_key_for_pc,
+    DIATONIC_SCALES,
+    KEY_NAME_TO_PC,
+)
+
 
 # --------------------------------------------------------------------------- Fonts cache
 _FONT_CACHE: dict[Tuple[str, int], ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
@@ -105,25 +114,133 @@ SEMITONE_TO_JIANPU_SHARPS = {
 }
 
 
+LETTERS: list[str] = ["C", "D", "E", "F", "G", "A", "B"]
+
+
+def get_chord_tone_letters(chord: ResolvedChord) -> dict[int, str]:
+    """Map each pitch class in chord (and slash bass) to its letter name."""
+    name = chord.name
+    parts = name.split("/")
+    root_part = parts[0]
+    bass_part = parts[1] if len(parts) > 1 else None
+
+    m_root = re.match(r"^([A-G])", root_part)
+    if not m_root:
+        return {}
+    root_letter = m_root.group(1)
+    root_idx = LETTERS.index(root_letter)
+
+    tone_letters: dict[int, str] = {}
+    # Root pitch class
+    tone_letters[chord.root_pc] = root_letter
+
+    # If explicit slash bass (e.g. D7/F# -> F#)
+    if bass_part:
+        m_bass = re.match(r"^([A-G])", bass_part)
+        if m_bass:
+            tone_letters[chord.bass_pc] = m_bass.group(1)
+
+    # Derived chord tones from root letter by interval:
+    # 3rd = root + 2, 5th = + 4, 7th = + 6, 9th/2nd = + 1, 4th = + 3, 6th = + 5
+    for pc in chord.pcs:
+        if pc in tone_letters:
+            continue
+        semi = (pc - chord.root_pc) % 12
+        if semi in (3, 4):  # minor or major 3rd
+            tone_letters[pc] = LETTERS[(root_idx + 2) % 7]
+        elif semi in (6, 7, 8):  # dim, perf, or aug 5th
+            tone_letters[pc] = LETTERS[(root_idx + 4) % 7]
+        elif semi in (10, 11):  # min or maj 7th
+            tone_letters[pc] = LETTERS[(root_idx + 6) % 7]
+        elif semi == 9:  # dim 7th or 6th
+            if chord.quality == "dim":
+                tone_letters[pc] = LETTERS[(root_idx + 6) % 7]
+            else:
+                tone_letters[pc] = LETTERS[(root_idx + 5) % 7]
+        elif semi == 2:  # 9th / 2nd
+            tone_letters[pc] = LETTERS[(root_idx + 1) % 7]
+        elif semi == 5:  # 4th / 11th
+            tone_letters[pc] = LETTERS[(root_idx + 3) % 7]
+        elif semi == 1:  # b9
+            tone_letters[pc] = LETTERS[(root_idx + 1) % 7]
+
+    return tone_letters
+
+
+def get_chord_context_spelling(
+    midi: int,
+    tonic_pc: int,
+    key_name: Optional[str],
+    chord: ResolvedChord,
+) -> Optional[Tuple[int, str]]:
+    """Determine (degree, accidental) of a note within its chord context."""
+    note_pc = midi % 12
+    canonical_key = canonical_key_for_pc(tonic_pc, key_name)
+    scale = DIATONIC_SCALES.get(canonical_key, DIATONIC_SCALES["C"])
+    diatonic_pcs = {KEY_NAME_TO_PC[name.upper()]: (i + 1) for i, name in enumerate(scale)}
+
+    # If note is diatonic in the key, degree has no accidental
+    if note_pc in diatonic_pcs:
+        return diatonic_pcs[note_pc], ""
+
+    # Note is chromatic: check active chord tone letters
+    tone_letters = get_chord_tone_letters(chord)
+    if note_pc not in tone_letters:
+        return None
+
+    letter = tone_letters[note_pc]
+    tonic_letter = canonical_key[0]
+    degree = ((LETTERS.index(letter) - LETTERS.index(tonic_letter)) % 7) + 1
+    diatonic_note = scale[degree - 1]
+    diatonic_pc = KEY_NAME_TO_PC[diatonic_note.upper()]
+
+    diff = (note_pc - diatonic_pc) % 12
+    if diff == 0:
+        accidental = ""
+    elif diff == 1:
+        accidental = "♯"
+    elif diff == 11:
+        accidental = "♭"
+    elif diff == 2:
+        accidental = "♯♯"
+    elif diff == 10:
+        accidental = "♭♭"
+    else:
+        return None
+
+    return degree, accidental
+
+
 def midi_to_jianpu(
     midi: int,
     tonic_pc: int,
     hand: Literal["rh", "lh"] = "rh",
     prefer_sharps: bool = False,
     finger: Optional[int] = None,
+    chord: Optional[ResolvedChord] = None,
+    key_name: Optional[str] = None,
 ) -> JianpuNote:
     """Convert MIDI pitch to movable-do JianpuNote.
 
     Reference octave rule:
     - RH: tonic nearest at/above C4 (MIDI 60 + tonic_pc%12) has 0 dots.
     - LH: reference one octave lower (MIDI 48 + tonic_pc%12) has 0 dots.
+
+    Chromatic spelling follows active chord context when provided.
     """
     ref_midi = (60 if hand == "rh" else 48) + (tonic_pc % 12)
     octave_dots = (midi - ref_midi) // 12
-    interval = (midi - (tonic_pc % 12)) % 12
 
-    table = SEMITONE_TO_JIANPU_SHARPS if prefer_sharps else SEMITONE_TO_JIANPU_DEFAULT
-    degree, accidental = table[interval]
+    spelling = None
+    if chord is not None:
+        spelling = get_chord_context_spelling(midi, tonic_pc, key_name, chord)
+
+    if spelling is not None:
+        degree, accidental = spelling
+    else:
+        interval = (midi - (tonic_pc % 12)) % 12
+        table = SEMITONE_TO_JIANPU_SHARPS if prefer_sharps else SEMITONE_TO_JIANPU_DEFAULT
+        degree, accidental = table[interval]
 
     return JianpuNote(
         degree=degree,
@@ -132,6 +249,7 @@ def midi_to_jianpu(
         finger=finger,
         midi=midi,
     )
+
 
 
 # --------------------------------------------------------------------------- Layout & Metrics
