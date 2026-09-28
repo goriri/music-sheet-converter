@@ -39,6 +39,7 @@ from app.qa.omr_verify import (
     align_measure_chords,
     map_transcribed_chords_to_measures,
     parse_header_key_changes,
+    resolve_chord_beat_geo,
     verify_sheet,
 )
 from app.qa.priors import (
@@ -652,5 +653,103 @@ def test_verify_sheet_barline_mismatch_downgraded_with_row_transcription(monkeyp
     assert consistent_issue is not None
     assert consistent_issue.severity == "info"
     assert mismatch_issue is None
+
+
+def test_resolve_chord_beat_geo_within_threshold():
+    m = Measure(index=0, beats=4, bbox=[0.2, 0.1, 0.6, 0.2])
+    c1 = ChordSymbol(raw="C", beat=1.0, bbox=[0.201, 0.11, 0.25, 0.19])
+    c2 = ChordSymbol(raw="F", beat=3.0, bbox=[0.405, 0.11, 0.45, 0.19])
+
+    resolved_b1, is_ambig1 = resolve_chord_beat_geo(c1, m, [1.0, 2.0])
+    assert is_ambig1 is False
+    assert resolved_b1 == 1.0
+
+    resolved_b2, is_ambig2 = resolve_chord_beat_geo(c2, m, [2.0, 3.0])
+    assert is_ambig2 is False
+    assert resolved_b2 == 3.0
+
+    resolved_b_no_competing, is_ambig_no_competing = resolve_chord_beat_geo(c2, m, [])
+    assert is_ambig_no_competing is False
+    assert resolved_b_no_competing == 3.0
+
+
+def test_resolve_chord_beat_geo_ambiguous():
+    m = Measure(index=0, beats=4, bbox=[0.2, 0.1, 0.6, 0.2])
+    c = ChordSymbol(raw="Am", beat=1.0, bbox=[0.30, 0.11, 0.35, 0.19])
+
+    resolved_b, is_ambig = resolve_chord_beat_geo(c, m, [1.0, 4.0])
+    assert is_ambig is True
+    assert resolved_b == 2.0
+
+    c_nobbox = ChordSymbol(raw="G", beat=1.0, bbox=None)
+    resolved_none, is_ambig_nobbox = resolve_chord_beat_geo(c_nobbox, m, [1.0])
+    assert is_ambig_nobbox is True
+    assert resolved_none is None
+
+
+def _mock_ask_json_geo_resolved(prompt: str, schema: Any, images=None, role: str = "reader", timeout_s: float = 60.0):
+    if schema == PageRowTranscriptionResponse:
+        return PageRowTranscriptionResponse(
+            rows=[
+                SystemRowChords(row_index=0, measure_count=4, chords=[]),
+                SystemRowChords(
+                    row_index=1,
+                    measure_count=4,
+                    chords=[
+                        RowTranscribedChord(measure_in_row=2, chord="17/7b", beat=1.0, approx_x=0.35),
+                        RowTranscribedChord(measure_in_row=2, chord="4M7", beat=2.0, approx_x=0.55),
+                    ],
+                ),
+            ]
+        )
+    elif schema == PageCropReadings:
+        return PageCropReadings()
+    elif schema == ArbiterBatchResponse:
+        return ArbiterBatchResponse()
+    elif schema == CandidateInsertionBatchResponse:
+        return CandidateInsertionBatchResponse()
+    return None
+
+
+def test_verify_sheet_melody_mismatch_resolved_geometrically(monkeypatch, clean_sheet, dummy_images):
+    m45 = next(m for s in clean_sheet.systems for m in s.measures if m.index == 45)
+    m45.melody = "1 2 3"
+
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_json_geo_resolved)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(dummy_images, clean_sheet, use_llm=True)
+
+    geo_resolved_issue = next(
+        (i for i in verified.issues if i.code == "chord_beat_resolved_geo" and i.measure_index == 45),
+        None,
+    )
+    assert geo_resolved_issue is not None
+    assert geo_resolved_issue.severity == "info"
+
+    review_issue_m45 = next(
+        (i for i in verified.issues if i.severity == "needs_review" and i.measure_index == 45),
+        None,
+    )
+    assert review_issue_m45 is None
+
+
+def test_verify_sheet_melody_mismatch_unresolved_geometrically_needs_review(monkeypatch, clean_sheet, dummy_images):
+    m45 = next(m for s in clean_sheet.systems for m in s.measures if m.index == 45)
+    m45.melody = "1 2 3"
+    m45.chords[1].bbox = None
+
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_json_geo_resolved)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(dummy_images, clean_sheet, use_llm=True)
+
+    review_issue_m45 = next(
+        (i for i in verified.issues if i.code == "melody_beat_sum_mismatch" and i.measure_index == 45),
+        None,
+    )
+    assert review_issue_m45 is not None
+    assert review_issue_m45.severity == "needs_review"
+
 
 

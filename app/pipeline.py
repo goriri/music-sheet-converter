@@ -272,7 +272,7 @@ def append_qa_appendix_pdf(pdf_bytes: bytes, issues: list[Any]) -> bytes:
         m_idx = issue.measure_index if isinstance(issue, QualityIssue) else issue.get("measure_index")
         m_info = f"第 {m_idx + 1} 小节" if m_idx is not None else "整曲"
         code = issue.code if isinstance(issue, QualityIssue) else issue.get("code", "")
-        header_text = f"{tag_text}  {m_info}  ({code})"
+        header_text = f"{tag_text}  {m_info}"
         draw.text((margin_x, y), header_text, fill=tag_color, font=tag_font)
         y += 28
 

@@ -249,6 +249,50 @@ def map_transcribed_chords_to_measures(
 
     return meas_map
 
+
+def resolve_chord_beat_geo(
+    chord: ChordSymbol,
+    measure: Measure,
+    competing_beats: list[float],
+) -> tuple[Optional[float], bool]:
+    """Resolve chord starting beat geometrically from chord bbox x0 relative to measure x-range.
+
+    Returns:
+        (resolved_beat, is_ambiguous)
+    """
+    if not chord.bbox or not measure.bbox:
+        return None, True
+
+    m_x0, m_x1 = measure.bbox[0], measure.bbox[2]
+    w_m = max(0.001, m_x1 - m_x0)
+    c_x0 = chord.bbox[0]
+
+    frac = max(0.0, min(1.0, (c_x0 - m_x0) / w_m))
+    raw_beat_geo = 1.0 + frac * measure.beats
+    beat_geo = round(raw_beat_geo * 2.0) / 2.0
+    beat_geo = max(1.0, min(float(measure.beats), beat_geo))
+
+    if not competing_beats:
+        return beat_geo, False
+
+    matching_reading = None
+    min_dist = 999.0
+    for cand_b in competing_beats:
+        dist = min(abs(raw_beat_geo - cand_b), abs(beat_geo - cand_b))
+        if dist < min_dist:
+            min_dist = dist
+            if dist <= 0.3:
+                matching_reading = cand_b
+
+    if matching_reading is not None:
+        return matching_reading, False
+
+    if min_dist <= 0.3:
+        return beat_geo, False
+
+    return beat_geo, True
+
+
 def _crop_chord_box(img_bgr: np.ndarray, chord: ChordSymbol) -> Optional[bytes]:
     """Extract a tight image crop of a chord box based on its normalized bounding box."""
     if not chord.bbox:
@@ -1091,19 +1135,54 @@ def verify_sheet(
     for m in all_measures:
         pm = parsed_melodies.get(m.index)
         if pm and pm.notes and abs(pm.beat_sum - m.beats) >= 1.0:
-            has_beat_disagreement = False
+            has_unresolved_beat_disagreement = False
             if len(m.chords) >= 2:
                 beats = [c.beat for c in m.chords]
-                if len(set(beats)) < len(beats) or any(c2.beat <= c1.beat for c1, c2 in zip(m.chords[:-1], m.chords[1:])):
-                    has_beat_disagreement = True
-                else:
-                    m_tcs = m_tc_map_global.get(m.index, [])
-                    if m_tcs and len(m_tcs) >= 2:
-                        tc_beats = [tc.beat for tc in m_tcs]
-                        if any(abs(b1 - b2) >= 0.5 for b1, b2 in zip(beats, tc_beats)):
-                            has_beat_disagreement = True
+                m_tcs = m_tc_map_global.get(m.index, [])
+                tc_beats = [tc.beat for tc in m_tcs] if m_tcs else []
 
-            if len(m.chords) >= 2 and has_beat_disagreement:
+                has_potential_disagreement = (
+                    len(set(beats)) < len(beats)
+                    or any(c2.beat <= c1.beat for c1, c2 in zip(m.chords[:-1], m.chords[1:]))
+                    or (len(tc_beats) >= len(beats) and any(abs(b1 - b2) >= 0.5 for b1, b2 in zip(beats, tc_beats)))
+                )
+
+                if has_potential_disagreement:
+                    is_all_geometrically_resolved = True
+                    resolved_beats = []
+                    for idx, c in enumerate(m.chords):
+                        competing = [c.beat]
+                        if idx < len(tc_beats):
+                            competing.append(tc_beats[idx])
+                        resolved_b, is_ambiguous = resolve_chord_beat_geo(c, m, competing)
+                        if is_ambiguous or resolved_b is None:
+                            is_all_geometrically_resolved = False
+                            break
+                        resolved_beats.append(resolved_b)
+
+                    if is_all_geometrically_resolved:
+                        if len(set(resolved_beats)) < len(resolved_beats) or any(
+                            b2 <= b1 for b1, b2 in zip(resolved_beats[:-1], resolved_beats[1:])
+                        ):
+                            is_all_geometrically_resolved = False
+
+                    if not is_all_geometrically_resolved:
+                        has_unresolved_beat_disagreement = True
+                    else:
+                        for c, rb in zip(m.chords, resolved_beats):
+                            c.beat = rb
+                        new_issues.append(
+                            QualityIssue(
+                                stage="omr",
+                                measure_index=m.index,
+                                severity="info",
+                                code="chord_beat_resolved_geo",
+                                message=f"第{m.index + 1}小节和弦起始拍依据打印框几何位置判定正常",
+                                detail={"measure": m.index, "beats": [c.beat for c in m.chords]},
+                            )
+                        )
+
+            if len(m.chords) >= 2 and has_unresolved_beat_disagreement:
                 new_issues.append(
                     QualityIssue(
                         stage="omr",
