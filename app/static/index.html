@@ -82,6 +82,24 @@
         </div>
       </div>
 
+      <!-- QA Summary Bar -->
+      <div id="qa-summary-bar" class="qa-summary-bar hidden">
+        <span id="qa-summary-text">自动校验：修正 0 处，需要您确认 0 处</span>
+        <span id="qa-policy-badge" style="font-size: 0.8rem; font-weight: 500;">✓ 允许直接生成</span>
+      </div>
+
+      <!-- Needs Review Items at top -->
+      <div id="qa-needs-review-section" class="hidden" style="margin-bottom: 20px;">
+        <h3 style="font-size: 1rem; color: #b45309; margin-bottom: 8px;">⚠️ 需要您确认的和弦：</h3>
+        <div id="qa-needs-review-list" class="qa-needs-review-list"></div>
+      </div>
+
+      <!-- Auto-fixed Items (Collapsed) -->
+      <details id="qa-autofixed-details" class="qa-autofixed-details hidden">
+        <summary id="qa-autofixed-summary">已自动修正 (0 处)</summary>
+        <div id="qa-autofixed-list" style="margin-top: 8px;"></div>
+      </details>
+
       <!-- Detected Song Header -->
       <div class="song-header-grid">
         <div class="field-group">
@@ -158,11 +176,18 @@
 
       <!-- Measures Editor -->
       <div style="margin-top: 24px;">
-        <h3 style="font-size: 1.05rem; margin-bottom: 8px;">识别小节与和弦编辑</h3>
-        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">
-          按乐谱行划分。您可以直接修改和弦级数（如 1(2)、2m7/5、57sus）和起始拍数。如有转调标记也可在此编辑。
-        </p>
-        <div id="systems-container" class="systems-container"></div>
+        <details id="measures-details" class="measures-collapse-details" open>
+          <summary class="measures-collapse-summary flex-between">
+            <span style="font-size: 1.05rem;">识别小节与和弦完整列表</span>
+            <span id="measures-collapse-hint" style="font-size: 0.8rem; color: var(--text-muted); font-weight: normal;">点击折叠/展开</span>
+          </summary>
+          <div style="padding: 16px;">
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">
+              按乐谱行划分。黄色高亮表示待确认小节。修改后点击生成将自动保存并更新确认状态。
+            </p>
+            <div id="systems-container" class="systems-container"></div>
+          </div>
+        </details>
       </div>
 
       <div style="margin-top: 24px; text-align: right;">

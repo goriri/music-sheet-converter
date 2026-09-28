@@ -41,7 +41,7 @@ QUALITY_SUFFIXES: dict[str, str] = {
     "maj7": "maj7",
     "m7": "m7",
     "m7b5": "m7b5",
-    "dim": "dim",
+    "dim": "dim7",
     "aug": "aug",
     "sus4": "sus4",
     "7sus4": "7sus4",

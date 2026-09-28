@@ -148,8 +148,50 @@ def update_parsed_sheet(sheet_id: str, parsed: ParsedSheet):
     if not storage.exists(state_path):
         raise HTTPException(status_code=404, detail=f"Sheet '{sheet_id}' not found")
 
+    # Re-validate chord grammar via app.theory.chords.parse_chord
+    from app.theory.chords import parse_chord
+    for m in parsed.measures():
+        for c in m.chords:
+            try:
+                parse_chord(c.raw)
+            except Exception as err:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"小节 #{m.index + 1} 和弦语法错误：'{c.raw}' ({err})",
+                )
+
+    # When the user edits a chord, mark it confidence=1.0 and drop needs_review issues for that measure
+    parsed_path = f"sheets/{sheet_id}/parsed.json"
+    measures_edited: set[int] = set()
+
+    if storage.exists(parsed_path):
+        existing = storage.get_json(parsed_path)
+        old_measures = {
+            m["index"]: [c.get("raw") for c in m.get("chords", [])]
+            for s in existing.get("systems", [])
+            for m in s.get("measures", [])
+        }
+        for m in parsed.measures():
+            old_raws = old_measures.get(m.index)
+            new_raws = [c.raw for c in m.chords]
+            if old_raws is None or old_raws != new_raws:
+                measures_edited.add(m.index)
+                for c in m.chords:
+                    c.confidence = 1.0
+
+    # Also check any chord that was marked with confidence=1.0
+    for m in parsed.measures():
+        if any(c.confidence == 1.0 for c in m.chords):
+            measures_edited.add(m.index)
+
+    # Drop needs_review issues for confirmed/edited measures
+    parsed.issues = [
+        issue for issue in parsed.issues
+        if not (issue.severity == "needs_review" and issue.measure_index in measures_edited)
+    ]
+
     parsed_dict = parsed.model_dump()
-    storage.put_json(f"sheets/{sheet_id}/parsed.json", parsed_dict)
+    storage.put_json(parsed_path, parsed_dict)
     return {"status": "ok", "parsed": parsed_dict}
 
 

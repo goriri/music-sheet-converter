@@ -178,11 +178,11 @@ def assign_lh_broken_pattern_fingering(
 
             interval_from_bass = note.midi - bass_pitch
 
-            if interval_from_bass <= 0:
+            if interval_from_bass == 0:
                 # Bass / root note
                 note.finger = 5
-            elif 1 <= interval_from_bass <= 3:
-                # Passing tone / degree 2 in bass hint
+            elif -2 <= interval_from_bass <= 3 and interval_from_bass != 0:
+                # Passing tone / degree 2 in bass hint / approach tone
                 note.finger = 4
             elif 4 <= interval_from_bass <= 9:
                 # 5th (or 6th in slash chords like Cm/Eb)
@@ -194,7 +194,7 @@ def assign_lh_broken_pattern_fingering(
                 # 10th / upper extension: crossover 3 in wide arpeggios, else 1
                 note.finger = 3 if pattern_type == "arpeggio_wide" else 1
             else:
-                note.finger = 5
+                note.finger = 4 if interval_from_bass != 0 else 5
         else:
             # Chord event in LH
             sorted_notes = sorted(ev.notes, key=lambda n: n.midi)

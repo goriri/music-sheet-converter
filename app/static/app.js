@@ -39,6 +39,16 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnTriggerRender = document.getElementById("btn-trigger-render");
   const btnTriggerRenderBottom = document.getElementById("btn-trigger-render-bottom");
 
+  // Step 3 QA Elements
+  const qaSummaryBar = document.getElementById("qa-summary-bar");
+  const qaSummaryText = document.getElementById("qa-summary-text");
+  const qaNeedsReviewSection = document.getElementById("qa-needs-review-section");
+  const qaNeedsReviewList = document.getElementById("qa-needs-review-list");
+  const qaAutofixedDetails = document.getElementById("qa-autofixed-details");
+  const qaAutofixedSummary = document.getElementById("qa-autofixed-summary");
+  const qaAutofixedList = document.getElementById("qa-autofixed-list");
+  const measuresDetails = document.getElementById("measures-details");
+
   // Step 4 Elements
   const btnBackToEdit = document.getElementById("btn-back-to-edit");
   const btnDownloadPdf = document.getElementById("btn-download-pdf");
@@ -287,6 +297,179 @@ document.addEventListener("DOMContentLoaded", () => {
     hdrTempo.value = hdr.tempo_bpm || "";
     hdrTimesig.value = hdr.time_signature || "4/4";
 
+    // QA Review Summary & Cards
+    const issues = currentParsedSheet.issues || [];
+    const needsReview = issues.filter(i => i.severity === "needs_review");
+    const autoFixed = issues.filter(i => i.severity === "auto_fixed");
+    const N = autoFixed.length;
+    const M = needsReview.length;
+
+    if (qaSummaryBar) {
+      qaSummaryBar.classList.remove("hidden", "has-issues", "all-clean");
+      if (M > 0) {
+        qaSummaryBar.classList.add("has-issues");
+      } else {
+        qaSummaryBar.classList.add("all-clean");
+      }
+      qaSummaryText.textContent = `自动校验：修正 ${N} 处，需要您确认 ${M} 处`;
+    }
+
+    const genLabel = M > 0 ? `生成（仍有 ${M} 处未确认） 🎶` : "生成伴奏谱 🎶";
+    btnTriggerRender.textContent = genLabel;
+    btnTriggerRenderBottom.textContent = genLabel;
+
+    if (measuresDetails) {
+      measuresDetails.open = (M > 0);
+    }
+
+    // Auto-fixed section
+    if (qaAutofixedDetails) {
+      if (N > 0) {
+        qaAutofixedDetails.classList.remove("hidden");
+        qaAutofixedSummary.textContent = `已自动修正 (${N} 处)`;
+        qaAutofixedList.innerHTML = "";
+        autoFixed.forEach(issue => {
+          const item = document.createElement("div");
+          item.className = "qa-autofixed-item";
+          const mText = issue.measure_index !== null && issue.measure_index !== undefined
+            ? `第 ${issue.measure_index + 1} 小节` : "全局";
+          item.innerHTML = `<span><strong>${mText}</strong>: ${issue.message}</span>`;
+          qaAutofixedList.appendChild(item);
+        });
+      } else {
+        qaAutofixedDetails.classList.add("hidden");
+      }
+    }
+
+    // Needs review section
+    if (qaNeedsReviewSection) {
+      if (M > 0) {
+        qaNeedsReviewSection.classList.remove("hidden");
+        qaNeedsReviewList.innerHTML = "";
+
+        needsReview.forEach(issue => {
+          const card = document.createElement("div");
+          card.className = "qa-review-card";
+
+          const mIdx = issue.measure_index;
+          let targetMeasure = null;
+          let targetSystem = null;
+          let targetChord = null;
+
+          (currentParsedSheet.systems || []).forEach(sys => {
+            (sys.measures || []).forEach(m => {
+              if (m.index === mIdx) {
+                targetMeasure = m;
+                targetSystem = sys;
+                if (m.chords && m.chords.length > 0) {
+                  targetChord = m.chords[0];
+                }
+              }
+            });
+          });
+
+          const cardHeader = document.createElement("div");
+          cardHeader.style.fontWeight = "600";
+          cardHeader.style.fontSize = "0.95rem";
+          cardHeader.style.color = "#92400e";
+          cardHeader.textContent = `第 ${mIdx + 1} 小节：${issue.message}`;
+          card.appendChild(cardHeader);
+
+          // Canvas crop of original chord box
+          if (targetChord && targetChord.bbox && targetSystem) {
+            const cropWrapper = document.createElement("div");
+            cropWrapper.style.display = "flex";
+            cropWrapper.style.alignItems = "center";
+            cropWrapper.style.gap = "12px";
+
+            const hint = document.createElement("span");
+            hint.style.fontSize = "0.8rem";
+            hint.style.color = "var(--text-muted)";
+            hint.textContent = "原谱截图：";
+            cropWrapper.appendChild(hint);
+
+            const canvas = document.createElement("canvas");
+            canvas.className = "qa-crop-canvas";
+
+            const pageImg = new Image();
+            pageImg.src = `/api/pages/${currentSheetId}/${targetSystem.page}`;
+            pageImg.onload = () => {
+              const bbox = targetChord.bbox;
+              const padX = 20;
+              const padY = 15;
+              const sx = Math.max(0, bbox[0] * pageImg.width - padX);
+              const sy = Math.max(0, bbox[1] * pageImg.height - padY);
+              const sw = Math.min(pageImg.width - sx, (bbox[2] - bbox[0]) * pageImg.width + padX * 2);
+              const sh = Math.min(pageImg.height - sy, (bbox[3] - bbox[1]) * pageImg.height + padY * 2);
+              canvas.width = sw;
+              canvas.height = sh;
+              const ctx = canvas.getContext("2d");
+              ctx.drawImage(pageImg, sx, sy, sw, sh, 0, 0, sw, sh);
+            };
+
+            cropWrapper.appendChild(canvas);
+            card.appendChild(cropWrapper);
+          }
+
+          // Alternatives as one-click buttons
+          const alts = (targetChord && targetChord.alternatives && targetChord.alternatives.length > 0)
+            ? targetChord.alternatives
+            : (issue.detail && issue.detail.alternatives ? issue.detail.alternatives : []);
+
+          const btnRow = document.createElement("div");
+          btnRow.style.display = "flex";
+          btnRow.style.gap = "8px";
+          btnRow.style.alignItems = "center";
+          btnRow.style.flexWrap = "wrap";
+
+          const altHint = document.createElement("span");
+          altHint.style.fontSize = "0.85rem";
+          altHint.style.fontWeight = "500";
+          altHint.textContent = "候选和弦：";
+          btnRow.appendChild(altHint);
+
+          alts.forEach(alt => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "qa-alt-btn";
+            btn.textContent = `选用 "${alt}"`;
+            btn.onclick = () => {
+              if (targetChord) {
+                targetChord.raw = alt;
+                targetChord.confidence = 1.0;
+              }
+              currentParsedSheet.issues = currentParsedSheet.issues.filter(
+                i => !(i.severity === "needs_review" && i.measure_index === mIdx)
+              );
+              renderStep3();
+            };
+            btnRow.appendChild(btn);
+          });
+
+          // Confirm button
+          const confirmBtn = document.createElement("button");
+          confirmBtn.type = "button";
+          confirmBtn.className = "btn btn-secondary btn-sm";
+          confirmBtn.textContent = `确认 "${targetChord ? targetChord.raw : '当前'}" 正确`;
+          confirmBtn.onclick = () => {
+            if (targetChord) {
+              targetChord.confidence = 1.0;
+            }
+            currentParsedSheet.issues = currentParsedSheet.issues.filter(
+              i => !(i.severity === "needs_review" && i.measure_index === mIdx)
+            );
+            renderStep3();
+          };
+          btnRow.appendChild(confirmBtn);
+
+          card.appendChild(btnRow);
+          qaNeedsReviewList.appendChild(card);
+        });
+      } else {
+        qaNeedsReviewSection.classList.add("hidden");
+      }
+    }
+
     // Printed Key Badges
     printedKeysWrapper.innerHTML = "";
     const keyBadges = [
@@ -309,7 +492,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     if (hdr.original_key) {
-      // Find matching option or set value
       const hasOpt = Array.from(selectStartKey.options).some(o => o.value === hdr.original_key);
       if (hasOpt) selectStartKey.value = hdr.original_key;
     }
@@ -338,12 +520,16 @@ document.addEventListener("DOMContentLoaded", () => {
       measuresRow.className = "measures-row";
 
       (sys.measures || []).forEach((m) => {
+        const isNeedsReview = (currentParsedSheet.issues || []).some(
+          i => i.severity === "needs_review" && i.measure_index === m.index
+        );
         const mBox = document.createElement("div");
-        mBox.className = "measure-box";
+        mBox.className = `measure-box ${isNeedsReview ? 'needs-review' : ''}`;
 
         const mNum = document.createElement("div");
         mNum.className = "measure-num";
-        mNum.innerHTML = `<span>小节 #${m.index + 1}</span> <span>${m.beats || 4} 拍</span>`;
+        const badge = isNeedsReview ? ' <span style="color:#d97706;font-size:0.75rem;">[待确认]</span>' : '';
+        mNum.innerHTML = `<span>小节 #${m.index + 1}${badge}</span> <span>${m.beats || 4} 拍</span>`;
         mBox.appendChild(mNum);
 
         if (m.melody) {
@@ -370,6 +556,12 @@ document.addEventListener("DOMContentLoaded", () => {
           rawInput.placeholder = "和弦";
           rawInput.onchange = (e) => {
             c.raw = e.target.value;
+            c.confidence = 1.0;
+            // Drop needs_review for this measure upon edit
+            currentParsedSheet.issues = (currentParsedSheet.issues || []).filter(
+              i => !(i.severity === "needs_review" && i.measure_index === m.index)
+            );
+            renderStep3();
           };
 
           const beatInput = document.createElement("input");
@@ -389,7 +581,10 @@ document.addEventListener("DOMContentLoaded", () => {
           delBtn.style.padding = "2px 6px";
           delBtn.onclick = () => {
             m.chords.splice(cIdx, 1);
-            renderSystemsAndMeasures();
+            currentParsedSheet.issues = (currentParsedSheet.issues || []).filter(
+              i => !(i.severity === "needs_review" && i.measure_index === m.index)
+            );
+            renderStep3();
           };
 
           cItem.appendChild(rawInput);
@@ -408,8 +603,11 @@ document.addEventListener("DOMContentLoaded", () => {
         addChordBtn.textContent = "+ 和弦";
         addChordBtn.onclick = () => {
           if (!m.chords) m.chords = [];
-          m.chords.push({ raw: "1", beat: 1.0, bbox: null });
-          renderSystemsAndMeasures();
+          m.chords.push({ raw: "1", beat: 1.0, bbox: null, confidence: 1.0, alternatives: [] });
+          currentParsedSheet.issues = (currentParsedSheet.issues || []).filter(
+            i => !(i.severity === "needs_review" && i.measure_index === m.index)
+          );
+          renderStep3();
         };
         mBox.appendChild(addChordBtn);
 
@@ -448,7 +646,18 @@ document.addEventListener("DOMContentLoaded", () => {
         body: JSON.stringify(currentParsedSheet),
       });
       if (!resp.ok) {
-        throw new Error(`保存失败 (HTTP ${resp.status})`);
+        const err = await resp.json().catch(() => ({}));
+        if (resp.status === 422) {
+          const msg = typeof err.detail === "string" ? err.detail : (err.detail && err.detail.message ? err.detail.message : JSON.stringify(err.detail));
+          alert(`和弦输入错误：${msg}`);
+          return false;
+        }
+        throw new Error(err.detail || `保存失败 (HTTP ${resp.status})`);
+      }
+      const data = await resp.json();
+      if (data && data.parsed) {
+        currentParsedSheet = data.parsed;
+        renderStep3();
       }
       return true;
     } catch (err) {

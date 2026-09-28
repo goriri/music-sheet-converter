@@ -10,7 +10,7 @@ from urllib.parse import quote
 from fastapi import HTTPException
 from PIL import Image, ImageOps
 
-from app.models import Difficulty, ParsedSheet
+from app.models import Arrangement, Difficulty, ParsedSheet, QualityIssue
 from app.storage import Storage, get_storage
 
 
@@ -144,20 +144,42 @@ def _do_parse_sheet(
             from app.omr.gemini_omr import parse_pages
             parsed_sheet = parse_pages(page_images)
 
-        state["progress"] = 0.8
+        if isinstance(parsed_sheet, dict):
+            parsed_sheet = ParsedSheet.model_validate(parsed_sheet)
+
+        state["progress"] = 0.85
+        state["progress_text"] = "校验中"
+        state["message"] = "校验中"
         state["updated_at"] = datetime.now(timezone.utc).isoformat()
         store.put_json(state_path, state)
 
+        # Wire OMR QA verify
+        try:
+            from app.qa.omr_verify import verify_sheet
+            parsed_sheet = verify_sheet(page_images, parsed_sheet, use_llm=True)
+            if isinstance(parsed_sheet, dict):
+                parsed_sheet = ParsedSheet.model_validate(parsed_sheet)
+        except Exception as qa_exc:
+            from app.models import QualityIssue
+            parsed_sheet.issues.append(
+                QualityIssue(
+                    stage="omr",
+                    severity="info",
+                    code="omr_qa_unavailable",
+                    message="OMR自动校验服务暂不可用",
+                    detail={"error": str(qa_exc)},
+                )
+            )
+
         # Save parsed sheet
-        if isinstance(parsed_sheet, dict):
-            parsed_dict = parsed_sheet
-        else:
-            parsed_dict = parsed_sheet.model_dump()
+        parsed_dict = parsed_sheet.model_dump()
         store.put_json(f"sheets/{sheet_id}/parsed.json", parsed_dict)
 
         # Mark ready
         state["status"] = "ready"
         state["progress"] = 1.0
+        state["progress_text"] = "已完成"
+        state["message"] = "已完成"
         state["error"] = None
         state["updated_at"] = datetime.now(timezone.utc).isoformat()
         store.put_json(state_path, state)
@@ -199,6 +221,74 @@ def start_parse(
     else:
         _do_parse_sheet(sheet_id, store, parse_fn)
         return None
+
+
+def append_qa_appendix_pdf(pdf_bytes: bytes, issues: list[Any]) -> bytes:
+    """Create a white A4 PDF page listing QA issues and append to pdf_bytes using PyMuPDF."""
+    from pathlib import Path
+    from PIL import Image, ImageDraw, ImageFont
+
+    width, height = 1240, 1754  # A4 proportion
+    img = Image.new("RGB", (width, height), color="white")
+    draw = ImageDraw.Draw(img)
+
+    font_path = Path(__file__).parent / "render" / "fonts" / "NotoSansSC.ttf"
+    try:
+        title_font = ImageFont.truetype(str(font_path), 32)
+        header_font = ImageFont.truetype(str(font_path), 20)
+        body_font = ImageFont.truetype(str(font_path), 18)
+        tag_font = ImageFont.truetype(str(font_path), 16)
+    except Exception:
+        title_font = ImageFont.load_default()
+        header_font = ImageFont.load_default()
+        body_font = ImageFont.load_default()
+        tag_font = ImageFont.load_default()
+
+    margin_x = 80
+    y = 80
+
+    draw.text((margin_x, y), "校验说明", fill="#0f172a", font=title_font)
+    y += 50
+    draw.text((margin_x, y), "以下为本乐谱自动识别与编配质量校验记录：", fill="#64748b", font=header_font)
+    y += 40
+
+    draw.line([(margin_x, y), (width - margin_x, y)], fill="#cbd5e1", width=2)
+    y += 25
+
+    for issue in issues:
+        if y > height - 100:
+            break
+        severity = issue.severity if isinstance(issue, QualityIssue) else issue.get("severity", "")
+        if severity == "needs_review":
+            tag_text = "[需要确认]"
+            tag_color = "#d97706"
+        elif severity == "auto_fixed":
+            tag_text = "[已自动修正]"
+            tag_color = "#16a34a"
+        else:
+            tag_text = "[提示]"
+            tag_color = "#2563eb"
+
+        m_idx = issue.measure_index if isinstance(issue, QualityIssue) else issue.get("measure_index")
+        m_info = f"第 {m_idx + 1} 小节" if m_idx is not None else "整曲"
+        code = issue.code if isinstance(issue, QualityIssue) else issue.get("code", "")
+        header_text = f"{tag_text}  {m_info}  ({code})"
+        draw.text((margin_x, y), header_text, fill=tag_color, font=tag_font)
+        y += 28
+
+        msg = issue.message if isinstance(issue, QualityIssue) else issue.get("message", "")
+        draw.text((margin_x + 10, y), msg, fill="#1e293b", font=body_font)
+        y += 36
+
+    buf = io.BytesIO()
+    img.save(buf, format="PDF")
+    appendix_pdf_bytes = buf.getvalue()
+
+    import pymupdf
+    main_doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    app_doc = pymupdf.open(stream=appendix_pdf_bytes, filetype="pdf")
+    main_doc.insert_pdf(app_doc)
+    return main_doc.tobytes()
 
 
 def render(
@@ -244,8 +334,52 @@ def render(
     from app.render.overlay import render_pages, render_pdf
 
     arrangement = arrange(sheet, start_key, difficulty)
+
+    # QA arrangement check & repair
+    import os
+    try:
+        from app.qa.arrange_check import ArrangementQAError, check_and_repair
+        try:
+            arrangement = check_and_repair(
+                sheet,
+                arrangement,
+                use_llm=os.environ.get("QA_LLM_REVIEW") == "1",
+            )
+        except ArrangementQAError as qa_err:
+            raise HTTPException(status_code=500, detail=f"编配自动修复失败：{qa_err}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if isinstance(arrangement, Arrangement):
+            arrangement.issues.append(
+                QualityIssue(
+                    stage="arrange",
+                    severity="info",
+                    code="arrange_qa_unavailable",
+                    message="编配自动校验服务暂不可用",
+                    detail={"error": str(exc)},
+                )
+            )
+
     pdf_bytes = render_pdf(page_images, sheet, arrangement)
     preview_pages = render_pages(page_images, sheet, arrangement)
+
+    # Append QA appendix page iff needs_review or auto_fixed issues exist
+    all_issues = []
+    if isinstance(sheet, ParsedSheet):
+        all_issues.extend(sheet.issues)
+    if isinstance(arrangement, Arrangement):
+        all_issues.extend(arrangement.issues)
+
+    relevant_issues = [
+        i for i in all_issues
+        if (i.severity if isinstance(i, QualityIssue) else i.get("severity", "")) in ("needs_review", "auto_fixed")
+    ]
+    if relevant_issues:
+        try:
+            pdf_bytes = append_qa_appendix_pdf(pdf_bytes, relevant_issues)
+        except Exception:
+            pass
 
     render_folder = f"sheets/{sheet_id}/renders/{start_key}_{difficulty}_{instrument}"
 
@@ -276,8 +410,14 @@ def render(
         arr_dict = arrangement.model_dump()
     store.put_json(f"{render_folder}/arrangement.json", arr_dict)
 
+    issues_data = [
+        i.model_dump() if isinstance(i, QualityIssue) else i
+        for i in all_issues
+    ]
+
     return {
         "pdf_url": f"/api/files/{quote(pdf_path, safe='/')}",
         "preview_urls": preview_urls,
         "arrangement": arr_dict,
+        "issues": issues_data,
     }

@@ -267,6 +267,9 @@ def arrange(
             else:
                 m_bass_hint = None
 
+        nxt_chord = flattened_chords[c_slice.stop] if c_slice.stop < len(flattened_chords) else None
+        nxt_bass = all_basses[c_slice.stop] if c_slice.stop < len(all_basses) else None
+
         rh_events, lh_events = generate_measure_events(
             chords=m_chords,
             rh_voicings=m_voicings,
@@ -281,6 +284,8 @@ def arrange(
             fill=m.fill,
             bass_hint=m_bass_hint,
             is_inherited_bass_hint=is_inherited_bass_hint,
+            next_bass_pitch=nxt_bass,
+            next_bass_pc=nxt_chord.bass_pc if nxt_chord else None,
         )
 
         # Fingering

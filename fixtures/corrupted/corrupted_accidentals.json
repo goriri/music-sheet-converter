@@ -1,0 +1,2538 @@
+{
+  "header": {
+    "title": "掉了",
+    "style": "Slow Soul",
+    "time_signature": "4/4",
+    "tempo_bpm": 81.0,
+    "original_key": "F#",
+    "male_key": "Bb",
+    "female_key": "F",
+    "raw": "Slow Soul 4/4 (F# - Ab) 男調(Bb-C) 女調(F-G) b7 ~ 5 ♩ = 81"
+  },
+  "pages": [
+    {
+      "width": 1056,
+      "height": 1402
+    },
+    {
+      "width": 1016,
+      "height": 1376
+    }
+  ],
+  "systems": [
+    {
+      "page": 0,
+      "bbox": [
+        0.058,
+        0.123,
+        0.928,
+        0.178
+      ],
+      "section_label": "Only PN(RHY) / / / ~",
+      "measures": [
+        {
+          "index": 0,
+          "bbox": [
+            0.0559,
+            0.148,
+            0.2737,
+            0.178
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1(2)",
+              "beat": 1.0,
+              "bbox": [
+                0.1,
+                0.123,
+                0.15,
+                0.146
+              ]
+            }
+          ],
+          "melody": "2 2 23 21",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 1,
+          "bbox": [
+            0.2737,
+            0.148,
+            0.4896,
+            0.178
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5/7",
+              "beat": 1.0,
+              "bbox": [
+                0.395,
+                0.123,
+                0.445,
+                0.146
+              ]
+            }
+          ],
+          "melody": "2 2 23 21",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 2,
+          "bbox": [
+            0.4896,
+            0.148,
+            0.7055,
+            0.178
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0,
+              "bbox": [
+                0.483,
+                0.123,
+                0.54,
+                0.146
+              ]
+            }
+          ],
+          "melody": "2 2 23 21",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 3,
+          "bbox": [
+            0.7055,
+            0.148,
+            0.9223,
+            0.178
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "2 2 2 2",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.058,
+        0.205,
+        0.928,
+        0.26
+      ],
+      "section_label": "Only PN+AG(RHY)",
+      "measures": [
+        {
+          "index": 4,
+          "bbox": [
+            0.0587,
+            0.23,
+            0.2737,
+            0.26
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1(2)",
+              "beat": 1.0,
+              "bbox": [
+                0.1,
+                0.205,
+                0.15,
+                0.228
+              ]
+            }
+          ],
+          "melody": "2 2 23 21",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 5,
+          "bbox": [
+            0.2737,
+            0.23,
+            0.4896,
+            0.26
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5/7",
+              "beat": 1.0,
+              "bbox": [
+                0.395,
+                0.205,
+                0.445,
+                0.228
+              ]
+            }
+          ],
+          "melody": "2 2 23 21",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 6,
+          "bbox": [
+            0.4896,
+            0.23,
+            0.7064,
+            0.26
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7/6",
+              "beat": 1.0,
+              "bbox": [
+                0.475,
+                0.205,
+                0.548,
+                0.228
+              ]
+            }
+          ],
+          "melody": "2 2 23 21",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 7,
+          "bbox": [
+            0.7064,
+            0.23,
+            0.9223,
+            0.26
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5sus",
+              "beat": 1.0,
+              "bbox": [
+                0.699,
+                0.205,
+                0.756,
+                0.228
+              ]
+            }
+          ],
+          "melody": "2 2 2 2",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.058,
+        0.285,
+        0.928,
+        0.365
+      ],
+      "section_label": "Only PN(RHY) / / / ~",
+      "measures": [
+        {
+          "index": 8,
+          "bbox": [
+            0.0559,
+            0.315,
+            0.2737,
+            0.365
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1(2)",
+              "beat": 1.0,
+              "bbox": [
+                0.1,
+                0.289,
+                0.15,
+                0.315
+              ]
+            }
+          ],
+          "melody": "1. 5 55 65",
+          "lyrics": "心 疼 的 玫 瑰",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 9,
+          "bbox": [
+            0.2737,
+            0.315,
+            0.4905,
+            0.365
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5/7",
+              "beat": 1.0,
+              "bbox": [
+                0.36,
+                0.29,
+                0.41,
+                0.315
+              ]
+            }
+          ],
+          "melody": "7. 5 55 65",
+          "lyrics": "半 夜 還 開 著",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 10,
+          "bbox": [
+            0.4905,
+            0.315,
+            0.7064,
+            0.365
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5m/7",
+              "beat": 1.0,
+              "bbox": [
+                0.475,
+                0.29,
+                0.55,
+                0.318
+              ]
+            }
+          ],
+          "melody": "7. 5 55 67",
+          "lyrics": "找 不 到 匆 匆",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 11,
+          "bbox": [
+            0.7064,
+            0.315,
+            0.9233,
+            0.365
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5m6/2",
+              "beat": 1.0,
+              "bbox": [
+                0.7,
+                0.29,
+                0.775,
+                0.318
+              ]
+            },
+            {
+              "raw": "67/1",
+              "beat": 3.0,
+              "bbox": [
+                0.802,
+                0.29,
+                0.872,
+                0.318
+              ]
+            }
+          ],
+          "melody": "76 65 5 3 4",
+          "lyrics": "掉 落 的 花 蕊",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.058,
+        0.385,
+        0.928,
+        0.45
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 12,
+          "bbox": [
+            0.0578,
+            0.405,
+            0.2737,
+            0.45
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0,
+              "bbox": [
+                0.053,
+                0.388,
+                0.108,
+                0.41
+              ]
+            }
+          ],
+          "melody": "4 06 66 7i",
+          "lyrics": "回 到 現 場",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 13,
+          "bbox": [
+            0.2737,
+            0.405,
+            0.4905,
+            0.45
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1(2)",
+              "beat": 1.0,
+              "bbox": [
+                0.27,
+                0.388,
+                0.32,
+                0.41
+              ]
+            }
+          ],
+          "melody": "3. 7 77 ii",
+          "lyrics": "卻 已 來 不 及",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 14,
+          "bbox": [
+            0.4905,
+            0.405,
+            0.7064,
+            0.45
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "6",
+              "beat": 1.0,
+              "bbox": [
+                0.488,
+                0.388,
+                0.53,
+                0.41
+              ]
+            },
+            {
+              "raw": "6m7-5",
+              "beat": 3.0,
+              "bbox": [
+                0.578,
+                0.388,
+                0.651,
+                0.41
+              ]
+            }
+          ],
+          "melody": "3. 7 77 ii",
+          "lyrics": "等 待 任 何 回",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 15,
+          "bbox": [
+            0.7064,
+            0.405,
+            0.9233,
+            0.45
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5sus",
+              "beat": 1.0,
+              "bbox": [
+                0.708,
+                0.388,
+                0.766,
+                0.41
+              ]
+            },
+            {
+              "raw": "5",
+              "beat": 3.0,
+              "bbox": [
+                0.83,
+                0.388,
+                0.858,
+                0.41
+              ]
+            }
+          ],
+          "melody": "17 76 65 5",
+          "lyrics": "音 都 不 可 得",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.058,
+        0.465,
+        0.928,
+        0.54
+      ],
+      "section_label": "Only PN+AG(RHY)",
+      "measures": [
+        {
+          "index": 16,
+          "bbox": [
+            0.0559,
+            0.495,
+            0.2737,
+            0.54
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1(2)",
+              "beat": 1.0,
+              "bbox": [
+                0.053,
+                0.47,
+                0.103,
+                0.495
+              ]
+            }
+          ],
+          "melody": "1. 5 55 65",
+          "lyrics": "微 弱 的 風 箏",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 17,
+          "bbox": [
+            0.2737,
+            0.495,
+            0.4905,
+            0.54
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5/7",
+              "beat": 1.0,
+              "bbox": [
+                0.27,
+                0.47,
+                0.32,
+                0.495
+              ]
+            }
+          ],
+          "melody": "7. 5 55 65",
+          "lyrics": "冬 天 裡 飄 著",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 18,
+          "bbox": [
+            0.4905,
+            0.495,
+            0.7064,
+            0.54
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5m/7",
+              "beat": 1.0,
+              "bbox": [
+                0.475,
+                0.47,
+                0.55,
+                0.495
+              ]
+            }
+          ],
+          "melody": "7. 5 55 67",
+          "lyrics": "回 不 去 手 中",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 19,
+          "bbox": [
+            0.7064,
+            0.495,
+            0.9233,
+            0.54
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5m/7b",
+              "beat": 1.0,
+              "bbox": [
+                0.7,
+                0.47,
+                0.775,
+                0.495
+              ]
+            },
+            {
+              "raw": "67",
+              "beat": 3.0,
+              "bbox": [
+                0.818,
+                0.47,
+                0.856,
+                0.495
+              ]
+            }
+          ],
+          "melody": "76 65 5 3 4",
+          "lyrics": "纏 線 的 那 個",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.058,
+        0.555,
+        0.928,
+        0.628
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 20,
+          "bbox": [
+            0.0587,
+            0.575,
+            0.2746,
+            0.628
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0,
+              "bbox": [
+                0.053,
+                0.558,
+                0.108,
+                0.582
+              ]
+            }
+          ],
+          "melody": "4 06 66 7i",
+          "lyrics": "沒 有 藍 天",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 21,
+          "bbox": [
+            0.2746,
+            0.575,
+            0.4905,
+            0.628
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1(2)",
+              "beat": 1.0,
+              "bbox": [
+                0.27,
+                0.558,
+                0.32,
+                0.582
+              ]
+            }
+          ],
+          "melody": "3. 7 77 ii",
+          "lyrics": "又 何 必 去 飛",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 22,
+          "bbox": [
+            0.4905,
+            0.575,
+            0.7074,
+            0.628
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "6",
+              "beat": 1.0,
+              "bbox": [
+                0.5,
+                0.558,
+                0.541,
+                0.582
+              ]
+            }
+          ],
+          "melody": "0i 32 2 i2",
+          "lyrics": "怎 麼 適 合",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 23,
+          "bbox": [
+            0.7074,
+            0.575,
+            0.9233,
+            0.628
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "57sus",
+              "beat": 1.0,
+              "bbox": [
+                0.695,
+                0.558,
+                0.763,
+                0.582
+              ]
+            },
+            {
+              "raw": "57",
+              "beat": 3.0,
+              "bbox": [
+                0.82,
+                0.558,
+                0.858,
+                0.582
+              ]
+            }
+          ],
+          "melody": "2 - 0 0",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": true
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.058,
+        0.638,
+        0.928,
+        0.715
+      ],
+      "section_label": "Only PN+AG(RHY)+Bs in",
+      "measures": [
+        {
+          "index": 24,
+          "bbox": [
+            0.0568,
+            0.665,
+            0.2746,
+            0.715
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0,
+              "bbox": [
+                0.07,
+                0.645,
+                0.096,
+                0.668
+              ]
+            }
+          ],
+          "melody": "0 57 i7 ii",
+          "lyrics": "黑 色 笑 靨 掉 了",
+          "bass_hint": "11 11 11 112",
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 25,
+          "bbox": [
+            0.2746,
+            0.665,
+            0.4905,
+            0.715
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1/3",
+              "beat": 1.0,
+              "bbox": [
+                0.27,
+                0.645,
+                0.32,
+                0.668
+              ]
+            }
+          ],
+          "melody": "i 57 i7 ii",
+          "lyrics": "雪 白 眼 淚 掉 了",
+          "bass_hint": "11 11 11 112",
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 26,
+          "bbox": [
+            0.4905,
+            0.665,
+            0.7027,
+            0.715
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "6m7",
+              "beat": 1.0,
+              "bbox": [
+                0.486,
+                0.645,
+                0.541,
+                0.668
+              ]
+            }
+          ],
+          "melody": "i 57 i7 i2",
+          "lyrics": "該 出 現 的 所 有",
+          "bass_hint": "11 11 11 112",
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 27,
+          "bbox": [
+            0.7027,
+            0.665,
+            0.9233,
+            0.715
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "6m7/5",
+              "beat": 1.0,
+              "bbox": [
+                0.685,
+                0.645,
+                0.76,
+                0.668
+              ]
+            }
+          ],
+          "melody": "3i 15 5i 2i",
+          "lyrics": "表 情 瞬 間 掉 了",
+          "bass_hint": "11 11 11 112",
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.058,
+        0.725,
+        0.928,
+        0.8
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 28,
+          "bbox": [
+            0.0597,
+            0.75,
+            0.2746,
+            0.8
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0,
+              "bbox": [
+                0.07,
+                0.732,
+                0.096,
+                0.755
+              ]
+            }
+          ],
+          "melody": "0 i7 ii 2i",
+          "lyrics": "瞳 孔 沒 有 顏 色",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 29,
+          "bbox": [
+            0.2746,
+            0.75,
+            0.4915,
+            0.8
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1/3",
+              "beat": 1.0,
+              "bbox": [
+                0.27,
+                0.732,
+                0.32,
+                0.755
+              ]
+            }
+          ],
+          "melody": "i i7 i2 3i",
+          "lyrics": "結 了 冰 的 長 河",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 30,
+          "bbox": [
+            0.4915,
+            0.75,
+            0.7074,
+            0.8
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0,
+              "bbox": [
+                0.486,
+                0.732,
+                0.541,
+                0.755
+              ]
+            }
+          ],
+          "melody": "i i7 i2 3i",
+          "lyrics": "回 憶 是 最 可 怕",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 31,
+          "bbox": [
+            0.7074,
+            0.75,
+            0.9233,
+            0.8
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7/5",
+              "beat": 1.0,
+              "bbox": [
+                0.695,
+                0.732,
+                0.77,
+                0.755
+              ]
+            },
+            {
+              "raw": "5",
+              "beat": 3.0,
+              "bbox": [
+                0.813,
+                0.732,
+                0.841,
+                0.755
+              ]
+            }
+          ],
+          "melody": "3 45 543 2i",
+          "lyrics": "的 敵..........人",
+          "bass_hint": null,
+          "rhythm_hint": "/ / / /",
+          "fill": true,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.058,
+        0.81,
+        0.928,
+        0.89
+      ],
+      "section_label": "Tempo(小鼓2.4拍)OG in",
+      "measures": [
+        {
+          "index": 32,
+          "bbox": [
+            0.0568,
+            0.84,
+            0.2746,
+            0.89
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0,
+              "bbox": [
+                0.07,
+                0.82,
+                0.096,
+                0.842
+              ]
+            }
+          ],
+          "melody": "0 57 i7 ii",
+          "lyrics": "故 事 情 節 掉 了",
+          "bass_hint": "11 11 11 112",
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 33,
+          "bbox": [
+            0.2746,
+            0.84,
+            0.4915,
+            0.89
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1/3",
+              "beat": 1.0,
+              "bbox": [
+                0.27,
+                0.82,
+                0.32,
+                0.842
+              ]
+            }
+          ],
+          "melody": "i 57 i2 3.i",
+          "lyrics": "主 角 對 白 掉 了",
+          "bass_hint": "11 11 11 112",
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 34,
+          "bbox": [
+            0.4915,
+            0.84,
+            0.7074,
+            0.89
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "6m7",
+              "beat": 1.0,
+              "bbox": [
+                0.486,
+                0.82,
+                0.541,
+                0.842
+              ]
+            }
+          ],
+          "melody": "i 57 i7 i2",
+          "lyrics": "該 屬 於 劇 中 的",
+          "bass_hint": "11 11 11 112",
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 35,
+          "bbox": [
+            0.7074,
+            0.84,
+            0.9242,
+            0.89
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "6m7/5",
+              "beat": 1.0,
+              "bbox": [
+                0.695,
+                0.82,
+                0.77,
+                0.842
+              ]
+            }
+          ],
+          "melody": "3 i 5 5i 2i",
+          "lyrics": "對 角 戲 也 掉 了",
+          "bass_hint": "11 11 11 112",
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.058,
+        0.898,
+        0.928,
+        0.978
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 36,
+          "bbox": [
+            0.058,
+            0.925,
+            0.265,
+            0.978
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0,
+              "bbox": [
+                0.07,
+                0.908,
+                0.096,
+                0.93
+              ]
+            }
+          ],
+          "melody": "0 i7 ii 2.i",
+          "lyrics": "胸 口 沒 有 快 樂",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 37,
+          "bbox": [
+            0.265,
+            0.925,
+            0.475,
+            0.978
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1/3",
+              "beat": 1.0,
+              "bbox": [
+                0.27,
+                0.908,
+                0.32,
+                0.93
+              ]
+            }
+          ],
+          "melody": "i i7 i2 3.i",
+          "lyrics": "斷 了 翅 的 白 鴿",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 38,
+          "bbox": [
+            0.475,
+            0.925,
+            0.7,
+            0.978
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0,
+              "bbox": [
+                0.486,
+                0.908,
+                0.541,
+                0.93
+              ]
+            }
+          ],
+          "melody": "i i7 i2 3i",
+          "lyrics": "不 枯 萎 的 藉 口",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 39,
+          "bbox": [
+            0.7,
+            0.925,
+            0.928,
+            0.978
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7/5",
+              "beat": 1.0,
+              "bbox": [
+                0.695,
+                0.908,
+                0.77,
+                0.93
+              ]
+            },
+            {
+              "raw": "5",
+              "beat": 3.0,
+              "bbox": [
+                0.813,
+                0.908,
+                0.841,
+                0.93
+              ]
+            }
+          ],
+          "melody": "5. 43 2 2.i",
+          "lyrics": "全.......... 掉 了...",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": true,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "bbox": [
+        0.062,
+        0.08,
+        0.942,
+        0.168
+      ],
+      "section_label": "(小鼓2.4拍)OG in",
+      "measures": [
+        {
+          "index": 40,
+          "bbox": [
+            0.0728,
+            0.108,
+            0.2972,
+            0.168
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1(2)",
+              "beat": 1.0,
+              "bbox": [
+                0.068,
+                0.083,
+                0.118,
+                0.115
+              ]
+            }
+          ],
+          "melody": "i - - -",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": true
+        },
+        {
+          "index": 41,
+          "bbox": [
+            0.2972,
+            0.108,
+            0.5374,
+            0.168
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5sus",
+              "beat": 1.0,
+              "bbox": [
+                0.298,
+                0.083,
+                0.354,
+                0.115
+              ]
+            }
+          ],
+          "melody": "0 23 23 23",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": "/ / / /",
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 42,
+          "bbox": [
+            0.5374,
+            0.108,
+            0.752,
+            0.168
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "7",
+              "beat": 1.0,
+              "bbox": [
+                0.53,
+                0.083,
+                0.574,
+                0.115
+              ]
+            }
+          ],
+          "melody": "0 .76 .77 ii",
+          "lyrics": "曾經 唱過 的歌",
+          "bass_hint": ".7.7 .7.74 .7.7 .7.7",
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 43,
+          "bbox": [
+            0.752,
+            0.108,
+            0.9685,
+            0.168
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0,
+              "bbox": [
+                0.782,
+                0.083,
+                0.808,
+                0.115
+              ]
+            }
+          ],
+          "melody": "65 67 ii i",
+          "lyrics": "分享 過的 笑聲",
+          "bass_hint": ".7.7 .7.74 .7.7 .7.7",
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "bbox": [
+        0.062,
+        0.17,
+        0.942,
+        0.258
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 44,
+          "bbox": [
+            0.0719,
+            0.198,
+            0.2972,
+            0.258
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0,
+              "bbox": [
+                0.078,
+                0.173,
+                0.104,
+                0.205
+              ]
+            },
+            {
+              "raw": "3m/7",
+              "beat": 3.0,
+              "bbox": [
+                0.162,
+                0.173,
+                0.224,
+                0.205
+              ]
+            }
+          ],
+          "melody": "i 535 5 121",
+          "lyrics": "在心 中 不斷",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 45,
+          "bbox": [
+            0.2972,
+            0.198,
+            0.5285,
+            0.258
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "17/7",
+              "beat": 1.0,
+              "bbox": [
+                0.298,
+                0.173,
+                0.364,
+                0.205
+              ]
+            },
+            {
+              "raw": "4M7",
+              "beat": 3.0,
+              "bbox": [
+                0.418,
+                0.173,
+                0.474,
+                0.205
+              ]
+            }
+          ],
+          "melody": "i 165 321 543 21",
+          "lyrics": "拉.............扯",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 46,
+          "bbox": [
+            0.5285,
+            0.198,
+            0.747,
+            0.258
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "7",
+              "beat": 1.0,
+              "bbox": [
+                0.524,
+                0.173,
+                0.568,
+                0.205
+              ]
+            }
+          ],
+          "melody": "0 .76 .77 ii i",
+          "lyrics": "想念 不能 承認",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 47,
+          "bbox": [
+            0.747,
+            0.198,
+            0.9705,
+            0.258
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0,
+              "bbox": [
+                0.756,
+                0.173,
+                0.782,
+                0.205
+              ]
+            }
+          ],
+          "melody": "65 67 ii i",
+          "lyrics": "偷偷 擦去 淚痕",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "bbox": [
+        0.062,
+        0.26,
+        0.942,
+        0.35
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 48,
+          "bbox": [
+            0.0719,
+            0.29,
+            0.3041,
+            0.35
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0,
+              "bbox": [
+                0.08,
+                0.268,
+                0.136,
+                0.3
+              ]
+            }
+          ],
+          "melody": "i 166 66 67 i5",
+          "lyrics": "冬天 過了還是 會很",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 49,
+          "bbox": [
+            0.3041,
+            0.29,
+            0.5344,
+            0.35
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5sus",
+              "beat": 1.0,
+              "bbox": [
+                0.298,
+                0.268,
+                0.354,
+                0.3
+              ]
+            },
+            {
+              "raw": "5",
+              "beat": 3.0,
+              "bbox": [
+                0.432,
+                0.268,
+                0.458,
+                0.3
+              ]
+            }
+          ],
+          "melody": "i 55 543 3 2 i",
+          "lyrics": "冷............... 啊",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 50,
+          "bbox": [
+            0.5344,
+            0.29,
+            0.7559,
+            0.35
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5sus",
+              "beat": 1.0,
+              "bbox": [
+                0.522,
+                0.285,
+                0.58,
+                0.317
+              ]
+            },
+            {
+              "raw": "5",
+              "beat": 3.0,
+              "bbox": [
+                0.658,
+                0.268,
+                0.684,
+                0.3
+              ]
+            }
+          ],
+          "melody": "5 - - -",
+          "lyrics": "啊",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": true,
+          "is_stop": true
+        },
+        {
+          "index": 51,
+          "bbox": [
+            0.7559,
+            0.29,
+            0.9715,
+            0.35
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5",
+              "beat": 1.0,
+              "bbox": [
+                0.754,
+                0.268,
+                0.78,
+                0.3
+              ]
+            }
+          ],
+          "melody": "- 0 3 4 321 i",
+          "lyrics": "耶..................",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "bbox": [
+        0.048,
+        0.358,
+        0.975,
+        0.442
+      ],
+      "section_label": "(小鼓2.4拍)OG in",
+      "measures": [
+        {
+          "index": 52,
+          "bbox": [
+            0.0728,
+            0.39,
+            0.2972,
+            0.442
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0,
+              "bbox": [
+                0.12,
+                0.373,
+                0.146,
+                0.405
+              ]
+            }
+          ],
+          "melody": "0 57 i7 ii",
+          "lyrics": "黑色 笑靨 掉了",
+          "bass_hint": "11 11 11 112",
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 53,
+          "bbox": [
+            0.2972,
+            0.39,
+            0.5226,
+            0.442
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1/3",
+              "beat": 1.0,
+              "bbox": [
+                0.304,
+                0.373,
+                0.34,
+                0.405
+              ]
+            }
+          ],
+          "melody": "ii i 57 i2 3.i",
+          "lyrics": "雪白 眼淚 掉了",
+          "bass_hint": "11 11 11 112",
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 54,
+          "bbox": [
+            0.5226,
+            0.39,
+            0.7421,
+            0.442
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "6m7",
+              "beat": 1.0,
+              "bbox": [
+                0.518,
+                0.373,
+                0.574,
+                0.405
+              ]
+            }
+          ],
+          "melody": "i i 57 i7 i2",
+          "lyrics": "該出 現的 所有",
+          "bass_hint": "11 11 11 112",
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 55,
+          "bbox": [
+            0.7421,
+            0.39,
+            0.9715,
+            0.442
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "6m7/5",
+              "beat": 1.0,
+              "bbox": [
+                0.724,
+                0.373,
+                0.796,
+                0.405
+              ]
+            }
+          ],
+          "melody": "13i i5 '5i 2i i",
+          "lyrics": "表情 瞬 間 掉了",
+          "bass_hint": "11 11 11 112",
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "bbox": [
+        0.062,
+        0.45,
+        0.975,
+        0.532
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 56,
+          "bbox": [
+            0.0728,
+            0.478,
+            0.2972,
+            0.532
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0,
+              "bbox": [
+                0.08,
+                0.46,
+                0.106,
+                0.492
+              ]
+            }
+          ],
+          "melody": "0 i7 ii 2i",
+          "lyrics": "瞳孔 沒有 顏色",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 57,
+          "bbox": [
+            0.2972,
+            0.478,
+            0.5226,
+            0.532
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1/3",
+              "beat": 1.0,
+              "bbox": [
+                0.292,
+                0.46,
+                0.338,
+                0.492
+              ]
+            }
+          ],
+          "melody": "i i i7 i2 3i",
+          "lyrics": "結了 冰的 長河",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 58,
+          "bbox": [
+            0.5226,
+            0.478,
+            0.747,
+            0.532
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0,
+              "bbox": [
+                0.516,
+                0.46,
+                0.572,
+                0.492
+              ]
+            }
+          ],
+          "melody": "i i i7 i2 3i",
+          "lyrics": "回憶 是最 可怕",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 59,
+          "bbox": [
+            0.747,
+            0.478,
+            0.9715,
+            0.532
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7/5",
+              "beat": 1.0,
+              "bbox": [
+                0.732,
+                0.46,
+                0.804,
+                0.492
+              ]
+            },
+            {
+              "raw": "5",
+              "beat": 3.0,
+              "bbox": [
+                0.856,
+                0.46,
+                0.882,
+                0.492
+              ]
+            }
+          ],
+          "melody": "3 '45 543 21",
+          "lyrics": "的 敵........人",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": true,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "bbox": [
+        0.062,
+        0.54,
+        0.975,
+        0.622
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 60,
+          "bbox": [
+            0.0728,
+            0.568,
+            0.2972,
+            0.622
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0,
+              "bbox": [
+                0.08,
+                0.55,
+                0.106,
+                0.582
+              ]
+            }
+          ],
+          "melody": "0 57 i7 ii",
+          "lyrics": "故事 情節 掉了",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 61,
+          "bbox": [
+            0.2972,
+            0.568,
+            0.5226,
+            0.622
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1/3",
+              "beat": 1.0,
+              "bbox": [
+                0.292,
+                0.55,
+                0.338,
+                0.582
+              ]
+            }
+          ],
+          "melody": "i i 57 i2 3.i",
+          "lyrics": "主角 對白 掉了",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 62,
+          "bbox": [
+            0.5226,
+            0.568,
+            0.747,
+            0.622
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "4M7",
+              "beat": 1.0,
+              "bbox": [
+                0.518,
+                0.55,
+                0.574,
+                0.582
+              ]
+            }
+          ],
+          "melody": "i i 57 i7 i2",
+          "lyrics": "該屬 於劇 中的",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 63,
+          "bbox": [
+            0.747,
+            0.568,
+            0.9724,
+            0.622
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "57sus",
+              "beat": 1.0,
+              "bbox": [
+                0.734,
+                0.55,
+                0.802,
+                0.582
+              ]
+            }
+          ],
+          "melody": "13 i 5 '5i 2i",
+          "lyrics": "對角 戲 也 掉了",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "bbox": [
+        0.062,
+        0.63,
+        0.975,
+        0.712
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 64,
+          "bbox": [
+            0.0728,
+            0.658,
+            0.2972,
+            0.712
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "4M7",
+              "beat": 1.0,
+              "bbox": [
+                0.07,
+                0.638,
+                0.126,
+                0.67
+              ]
+            }
+          ],
+          "melody": "0 i7 ii 2.i",
+          "lyrics": "胸口 沒有 快樂",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 65,
+          "bbox": [
+            0.2972,
+            0.658,
+            0.5226,
+            0.712
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1/3",
+              "beat": 1.0,
+              "bbox": [
+                0.294,
+                0.638,
+                0.34,
+                0.67
+              ]
+            }
+          ],
+          "melody": "i i i7 i2 3.i",
+          "lyrics": "斷了 翅的 白鴿",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 66,
+          "bbox": [
+            0.5226,
+            0.658,
+            0.747,
+            0.712
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0,
+              "bbox": [
+                0.518,
+                0.638,
+                0.574,
+                0.67
+              ]
+            }
+          ],
+          "melody": "i i i7 i2 3i",
+          "lyrics": "不枯 萎的 藉口",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 67,
+          "bbox": [
+            0.747,
+            0.658,
+            0.9715,
+            0.712
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7/5",
+              "beat": 1.0,
+              "bbox": [
+                0.732,
+                0.638,
+                0.804,
+                0.67
+              ]
+            },
+            {
+              "raw": "5",
+              "beat": 3.0,
+              "bbox": [
+                0.866,
+                0.638,
+                0.892,
+                0.67
+              ]
+            }
+          ],
+          "melody": "5. 43 2 -",
+          "lyrics": "全..................",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": true,
+          "is_stop": true
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "bbox": [
+        0.062,
+        0.72,
+        0.975,
+        0.8
+      ],
+      "section_label": "Only PN(RHY) / / / ~",
+      "measures": [
+        {
+          "index": 68,
+          "bbox": [
+            0.0728,
+            0.748,
+            0.2972,
+            0.8
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5",
+              "beat": 1.0,
+              "bbox": [
+                0.08,
+                0.728,
+                0.106,
+                0.76
+              ]
+            }
+          ],
+          "melody": "0 0 0 0",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": "/ / / ~",
+          "fill": false,
+          "is_stop": true
+        },
+        {
+          "index": 69,
+          "bbox": [
+            0.2972,
+            0.748,
+            0.5285,
+            0.8
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1(2)",
+              "beat": 1.0,
+              "bbox": [
+                0.302,
+                0.728,
+                0.352,
+                0.76
+              ]
+            }
+          ],
+          "melody": "2 - 0 23 21",
+          "lyrics": "掉 了",
+          "bass_hint": null,
+          "rhythm_hint": "/ / / ~",
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 70,
+          "bbox": [
+            0.5285,
+            0.748,
+            0.747,
+            0.8
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5/7",
+              "beat": 1.0,
+              "bbox": [
+                0.522,
+                0.728,
+                0.57,
+                0.76
+              ]
+            }
+          ],
+          "melody": "2 2 23 21",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": "/ / / ~",
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 71,
+          "bbox": [
+            0.747,
+            0.748,
+            0.9715,
+            0.8
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0,
+              "bbox": [
+                0.742,
+                0.728,
+                0.798,
+                0.76
+              ]
+            }
+          ],
+          "melody": "2 2 23 21",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": "/ / / ~",
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "bbox": [
+        0.062,
+        0.805,
+        0.942,
+        0.885
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 72,
+          "bbox": [
+            0.0738,
+            0.832,
+            0.247,
+            0.885
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0,
+              "bbox": [
+                0.068,
+                0.818,
+                0.124,
+                0.85
+              ]
+            }
+          ],
+          "melody": "2 2 2 2",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 73,
+          "bbox": [
+            0.247,
+            0.832,
+            0.4439,
+            0.885
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "1(2)",
+              "beat": 1.0,
+              "bbox": [
+                0.242,
+                0.818,
+                0.288,
+                0.85
+              ]
+            }
+          ],
+          "melody": "2 2 23 21",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 74,
+          "bbox": [
+            0.4439,
+            0.832,
+            0.6417,
+            0.885
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5/7",
+              "beat": 1.0,
+              "bbox": [
+                0.438,
+                0.818,
+                0.486,
+                0.85
+              ]
+            }
+          ],
+          "melody": "2 2 23 21",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 75,
+          "bbox": [
+            0.6417,
+            0.832,
+            0.8396,
+            0.885
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "2m7/6",
+              "beat": 1.0,
+              "bbox": [
+                0.618,
+                0.818,
+                0.692,
+                0.85
+              ]
+            }
+          ],
+          "melody": "2 2 23 21",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 76,
+          "bbox": [
+            0.8396,
+            0.832,
+            0.9744,
+            0.885
+          ],
+          "beats": 4.0,
+          "chords": [
+            {
+              "raw": "5sus",
+              "beat": 1.0,
+              "bbox": [
+                0.824,
+                0.818,
+                0.882,
+                0.85
+              ]
+            }
+          ],
+          "melody": "2 - - -",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": true
+        }
+      ]
+    }
+  ],
+  "key_changes": [
+    {
+      "at_measure": 50,
+      "raw": "(轉成2調)(Ab)",
+      "semitones": 2
+    }
+  ],
+  "warnings": [
+    "Corrected potential OCR errors in melody: m22 ('oi' -> '0i'), m28 ('lo' -> '0', 'żi' -> '2i').",
+    "Page 1 System 10: detected 5 barlines for 4 measures (expected 5); kept Gemini measure boundaries."
+  ]
+}

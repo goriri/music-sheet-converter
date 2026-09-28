@@ -112,6 +112,25 @@ def create_dummy_png_bytes(width: int = 200, height: int = 200) -> bytes:
     return buf.getvalue()
 
 
+def make_valid_pdf_bytes() -> bytes:
+    import pymupdf
+    doc = pymupdf.open()
+    doc.new_page(width=595, height=842)
+    return doc.tobytes()
+
+
+class ArrangementQAError(Exception):
+    pass
+
+
+def _mock_fail_verify(*args, **kwargs):
+    raise RuntimeError("OMR QA service unavailable")
+
+
+def _mock_failing_repair(sheet, arr, use_llm=False):
+    raise ArrangementQAError("Safe fallback failed voice-leading constraints")
+
+
 @pytest.fixture(autouse=True)
 def setup_test_environment(tmp_path, monkeypatch):
     """Set up temporary local storage and mock external OMR / arrange / render modules."""
@@ -136,9 +155,20 @@ def setup_test_environment(tmp_path, monkeypatch):
 
     # Mock app.render.overlay module
     render_mod = types.ModuleType("app.render.overlay")
-    render_mod.render_pdf = lambda pages, sheet, arrangement: b"%PDF-1.4 test accompaniment pdf"
+    render_mod.render_pdf = lambda pages, sheet, arrangement: make_valid_pdf_bytes()
     render_mod.render_pages = lambda pages, sheet, arrangement: [Image.new("RGB", (150, 150), "white")]
     monkeypatch.setitem(sys.modules, "app.render.overlay", render_mod)
+
+    # Mock app.qa.omr_verify module
+    omr_qa_mod = types.ModuleType("app.qa.omr_verify")
+    omr_qa_mod.verify_sheet = lambda pages, sheet, use_llm=True: sheet
+    monkeypatch.setitem(sys.modules, "app.qa.omr_verify", omr_qa_mod)
+
+    # Mock app.qa.arrange_check module
+    arrange_qa_mod = types.ModuleType("app.qa.arrange_check")
+    arrange_qa_mod.ArrangementQAError = ArrangementQAError
+    arrange_qa_mod.check_and_repair = lambda sheet, arr, use_llm=False: arr
+    monkeypatch.setitem(sys.modules, "app.qa.arrange_check", arrange_qa_mod)
 
     yield store
     set_storage(None)
@@ -256,7 +286,7 @@ def test_full_pipeline_upload_poll_put_render(client):
     pdf_resp = client.get(render_data["pdf_url"])
     assert pdf_resp.status_code == 200
     assert pdf_resp.headers["content-type"] == "application/pdf"
-    assert b"%PDF-1.4 test accompaniment pdf" in pdf_resp.content
+    assert pdf_resp.content.startswith(b"%PDF-")
 
     prev_resp = client.get(render_data["preview_urls"][0])
     assert prev_resp.status_code == 200
@@ -340,3 +370,171 @@ def test_parsing_timeout_reported_as_error(client, setup_test_environment):
     data = resp.json()
     assert data["status"] == "error"
     assert "timed out" in data["error"].lower()
+
+
+def test_qa_missing_job_still_ready_with_info_issue(client, monkeypatch):
+    omr_qa_mod = types.ModuleType("app.qa.omr_verify")
+    omr_qa_mod.verify_sheet = _mock_fail_verify
+    monkeypatch.setitem(sys.modules, "app.qa.omr_verify", omr_qa_mod)
+
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    assert resp.status_code == 200
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        data = get_resp.json()
+        if data.get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    assert data.get("status") == "ready"
+    assert data.get("parsed") is not None
+    issues = data["parsed"].get("issues", [])
+    assert any(i.get("code") == "omr_qa_unavailable" and i.get("severity") == "info" for i in issues)
+
+
+def test_arrangement_qa_error_returns_500_and_no_pdf_stored(client, setup_test_environment, monkeypatch):
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    assert resp.status_code == 200
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    arrange_qa_mod = types.ModuleType("app.qa.arrange_check")
+    arrange_qa_mod.ArrangementQAError = ArrangementQAError
+    arrange_qa_mod.check_and_repair = _mock_failing_repair
+    monkeypatch.setitem(sys.modules, "app.qa.arrange_check", arrange_qa_mod)
+
+    render_resp = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "F#", "difficulty": "intermediate", "instrument": "piano"},
+    )
+    assert render_resp.status_code == 500
+    detail = render_resp.json()["detail"]
+    assert "编配自动修复失败" in detail
+
+    pdf_path = f"sheets/{sheet_id}/renders/F#_intermediate_piano/score.pdf"
+    assert not store.exists(pdf_path)
+
+
+def test_put_clears_needs_review_and_marks_confidence(client, setup_test_environment):
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    parsed = get_resp.json()["parsed"]
+    from app.models import QualityIssue
+    issue = QualityIssue(
+        stage="omr",
+        measure_index=0,
+        severity="needs_review",
+        code="chord_disagreement",
+        message="第1小节和弦存疑：识别为 1(2)，候选为 5/7",
+    )
+    parsed["issues"].append(issue.model_dump())
+    parsed["systems"][0]["measures"][0]["chords"][0]["confidence"] = 0.5
+    store.put_json(f"sheets/{sheet_id}/parsed.json", parsed)
+
+    state_before = client.get(f"/api/sheets/{sheet_id}").json()
+    assert any(i["severity"] == "needs_review" and i["measure_index"] == 0 for i in state_before["parsed"]["issues"])
+
+    parsed["systems"][0]["measures"][0]["chords"][0]["raw"] = "5/7"
+    put_resp = client.put(f"/api/sheets/{sheet_id}/parsed", json=parsed)
+    assert put_resp.status_code == 200
+
+    state_after = client.get(f"/api/sheets/{sheet_id}").json()
+    updated_chord = state_after["parsed"]["systems"][0]["measures"][0]["chords"][0]
+    assert updated_chord["confidence"] == 1.0
+    assert updated_chord["raw"] == "5/7"
+    assert not any(i["severity"] == "needs_review" and i["measure_index"] == 0 for i in state_after["parsed"]["issues"])
+
+
+def test_put_garbage_chord_returns_422(client):
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    parsed = get_resp.json()["parsed"]
+    parsed["systems"][0]["measures"][0]["chords"][0]["raw"] = "xyz_garbage"
+    put_resp = client.put(f"/api/sheets/{sheet_id}/parsed", json=parsed)
+    assert put_resp.status_code == 422
+    assert "语法错误" in str(put_resp.json()) or "xyz_garbage" in str(put_resp.json())
+
+
+def test_appendix_page_present_iff_issues(client, setup_test_environment):
+    import pymupdf
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    parsed = get_resp.json()["parsed"]
+
+    # Case A: No needs_review or auto_fixed issues
+    parsed["issues"] = []
+    store.put_json(f"sheets/{sheet_id}/parsed.json", parsed)
+
+    render_resp1 = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "C", "difficulty": "intermediate", "instrument": "piano"},
+    )
+    assert render_resp1.status_code == 200
+    pdf_url1 = render_resp1.json()["pdf_url"]
+    pdf_bytes1 = client.get(pdf_url1).content
+    doc1 = pymupdf.open(stream=pdf_bytes1, filetype="pdf")
+    assert len(doc1) == 1
+
+    # Case B: With needs_review / auto_fixed issue
+    from app.models import QualityIssue
+    parsed["issues"] = [
+        QualityIssue(
+            stage="omr",
+            measure_index=0,
+            severity="needs_review",
+            code="chord_disagreement",
+            message="第1小节和弦需确认",
+        ).model_dump()
+    ]
+    store.put_json(f"sheets/{sheet_id}/parsed.json", parsed)
+
+    render_resp2 = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "C", "difficulty": "intermediate", "instrument": "piano"},
+    )
+    assert render_resp2.status_code == 200
+    pdf_url2 = render_resp2.json()["pdf_url"]
+    pdf_bytes2 = client.get(pdf_url2).content
+    doc2 = pymupdf.open(stream=pdf_bytes2, filetype="pdf")
+    assert len(doc2) == 2

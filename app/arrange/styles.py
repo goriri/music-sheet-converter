@@ -93,6 +93,64 @@ def degree_to_bass_pitch(
     return p
 
 
+def get_pickup_approach_pitch(
+    curr_bass_pitch: int,
+    curr_chord: Optional[ResolvedChord],
+    next_bass_pitch: Optional[int],
+    next_bass_pc: Optional[int],
+    tonic_pc: int,
+) -> int:
+    """Calculate pickup / approach note pitch approaching next bass or holding chord tone."""
+    curr_bass_pc = curr_chord.bass_pc if curr_chord else (curr_bass_pitch % 12)
+    curr_pcs = set(curr_chord.pcs) if curr_chord else {curr_bass_pc, (curr_bass_pc + 4) % 12, (curr_bass_pc + 7) % 12}
+    diatonic_pcs = set((tonic_pc + s) % 12 for s in (0, 2, 4, 5, 7, 9, 11))
+
+    if next_bass_pc is None or (next_bass_pc % 12) == (curr_bass_pc % 12):
+        cands = [curr_bass_pitch + 7, curr_bass_pitch + 6, curr_bass_pitch + 12]
+        valid_cands = [p for p in cands if 36 <= p <= 64 and p % 12 in curr_pcs]
+        return valid_cands[0] if valid_cands else curr_bass_pitch
+
+    target_pitch = next_bass_pitch
+    if target_pitch is None:
+        target_pitch = min(
+            [p for p in range(36, 61) if p % 12 == next_bass_pc % 12],
+            key=lambda p: abs(p - curr_bass_pitch),
+        )
+
+    # Bring target pitch to same general octave as curr_bass_pitch
+    while target_pitch - curr_bass_pitch > 6 and target_pitch - 12 >= 36:
+        target_pitch -= 12
+    while curr_bass_pitch - target_pitch > 6 and target_pitch + 12 <= 64:
+        target_pitch += 12
+
+    diff_pitch = target_pitch - curr_bass_pitch
+    if diff_pitch == 2:
+        res = curr_bass_pitch + 1
+    elif diff_pitch == -2:
+        res = curr_bass_pitch - 1
+    elif diff_pitch > 2:
+        cand = target_pitch - 1
+        res = cand if (cand % 12) in diatonic_pcs else (target_pitch - 2)
+    elif diff_pitch < -2:
+        cand = target_pitch + 1
+        res = cand if (cand % 12) in diatonic_pcs else (target_pitch + 2)
+    elif diff_pitch == 1:
+        cand = target_pitch + 2
+        res = cand if (cand % 12) in diatonic_pcs else (target_pitch + 1)
+    elif diff_pitch == -1:
+        cand = target_pitch - 2
+        res = cand if (cand % 12) in diatonic_pcs else (target_pitch - 1)
+    else:
+        res = curr_bass_pitch
+
+    while res < 36:
+        res += 12
+    while res > 64:
+        res -= 12
+
+    return res
+
+
 def parse_bass_hint(
     bass_hint: str,
     bass_pitch: int,
@@ -100,6 +158,9 @@ def parse_bass_hint(
     measure_beats: float = 4.0,
     chord_bass_pc: Optional[int] = None,
     is_inherited: bool = False,
+    next_bass_pitch: Optional[int] = None,
+    next_bass_pc: Optional[int] = None,
+    curr_chord: Optional[ResolvedChord] = None,
 ) -> list[tuple[float, float, int]]:
     """Parse printed 'Bs:' notation (e.g. '11 11 11 112') into (onset, duration, midi_pitch) tuples.
 
@@ -153,11 +214,25 @@ def parse_bass_hint(
     events: list[tuple[float, float, int]] = []
     diatonic_offsets = [0, 2, 4, 5, 7, 9, 11]
 
-    for r_onset, r_dur, tok in raw_events:
+    for idx, (r_onset, r_dur, tok) in enumerate(raw_events):
         m = re.match(r"^([b#♭♯]?)([1-7])$", re.sub(r"[^b#♭♯0-9]", "", tok))
         deg = int(m.group(2)) if m else 1
 
-        if deg == first_deg:
+        is_last_pickup = (
+            idx == len(raw_events) - 1
+            and r_onset >= measure_beats - 0.5
+            and deg != first_deg
+        )
+
+        if is_last_pickup:
+            p = get_pickup_approach_pitch(
+                curr_bass_pitch=bass_pitch,
+                curr_chord=curr_chord,
+                next_bass_pitch=next_bass_pitch,
+                next_bass_pc=next_bass_pc,
+                tonic_pc=tonic_pc,
+            )
+        elif deg == first_deg:
             p = bass_pitch
         elif (first_deg in (1, 7)) and deg == 4:
             # Upper fifth interval above root (e.g. .7.74 where 7 is root and 4 is fifth)
@@ -229,6 +304,8 @@ def generate_measure_events(
     fill: bool = False,
     bass_hint: Optional[str] = None,
     is_inherited_bass_hint: bool = False,
+    next_bass_pitch: Optional[int] = None,
+    next_bass_pc: Optional[int] = None,
 ) -> tuple[list[Event], list[Event]]:
     """Generate strictly tiled RH and LH events for a single measure according to style and texture."""
     # Check section label for texture modifiers
@@ -316,6 +393,9 @@ def generate_measure_events(
             measure_beats=measure_beats,
             chord_bass_pc=chord_segments[0]["chord"].bass_pc,
             is_inherited=is_inherited_bass_hint,
+            next_bass_pitch=next_bass_pitch,
+            next_bass_pc=next_bass_pc,
+            curr_chord=chord_segments[0]["chord"],
         )
 
     for seg_idx, seg in enumerate(chord_segments):

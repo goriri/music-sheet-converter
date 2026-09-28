@@ -179,6 +179,14 @@ def resolve_degree(
     diatonic_note = scale[degree - 1]
     spelled_note = apply_accidental_to_note_name(diatonic_note, accidental)
 
+    # Simplify double accidentals for chord symbols (e.g. Bbb -> A)
+    double_acc_map = {
+        "Bbb": "A", "Cbb": "Bb", "Dbb": "C", "Ebb": "D", "Fbb": "Eb", "Gbb": "F", "Abb": "G",
+        "B##": "C#", "C##": "D", "D##": "E", "E##": "F#", "F##": "G", "G##": "A", "A##": "B",
+    }
+    if spelled_note in double_acc_map:
+        spelled_note = double_acc_map[spelled_note]
+
     # Compute pitch class
     base_semitone = DEGREE_SEMITONES[degree - 1]
     pc = (tonic_pc + base_semitone + accidental) % 12

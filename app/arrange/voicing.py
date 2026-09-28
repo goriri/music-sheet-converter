@@ -98,26 +98,52 @@ def get_candidate_rh_voicings(chord: ResolvedChord, difficulty: Difficulty) -> l
             doubled_fifth_pcs = [pcs[0], pcs[2], pcs[1], pcs[2]]
             candidates.extend(_generate_close_voicings(doubled_root_pcs, max_notes=4, max_span=max_span))
             candidates.extend(_generate_close_voicings(doubled_fifth_pcs, max_notes=4, max_span=max_span))
-        else:
-            # 4-note chords (7, maj7, m7, m7b5, 7sus4, add9, 6, m6):
+        elif len(pcs) == 4:
+            # 4-note chords (7, maj7, m7, m7b5, dim, 7sus4, add9, 6, m6):
             # 1. 4-note voicings (guaranteed to contain all 4 tones including color tone)
-            candidates.extend(_generate_close_voicings(pcs[:4], max_notes=4, max_span=max_span))
+            candidates.extend(_generate_close_voicings(pcs, max_notes=4, max_span=max_span))
 
-            # 2. 3-note voicings that RETAIN the 3rd (pcs[1]) AND the color tone (pcs[3]):
-            color_tone = pcs[3]
-            v_3note_patterns = [
-                [pcs[0], pcs[1], color_tone],  # Root + 3rd + color tone (omits 5th)
-                [pcs[1], pcs[2], color_tone],  # 3rd + 5th + color tone (omits root)
-            ]
+            # 2. 3-note voicings
+            if chord.quality in ("m7b5", "dim"):
+                # Must retain 3rd (b3), b5 (pcs[2]), and 7th (pcs[3])
+                v_3note_patterns = [
+                    [pcs[1], pcs[2], pcs[3]],
+                ]
+            else:
+                color_tone = pcs[3]
+                v_3note_patterns = [
+                    [pcs[0], pcs[1], color_tone],  # Root + 3rd + color tone (omits 5th)
+                    [pcs[1], pcs[2], color_tone],  # 3rd + 5th + color tone (omits root)
+                ]
             for pat in v_3note_patterns:
                 candidates.extend(_generate_close_voicings(pat, max_notes=3, max_span=max_span))
+        else:
+            # 5-note chords (9, m9, maj9): [root, 3rd, 5th, 7th, 9th]
+            # Defining tones are 3rd (pcs[1]), 7th (pcs[3]), 9th (pcs[4]).
+            # 1. 4-note voicings (omit 5th or omit root):
+            candidates.extend(_generate_close_voicings([pcs[0], pcs[1], pcs[3], pcs[4]], max_notes=4, max_span=max_span))
+            candidates.extend(_generate_close_voicings([pcs[1], pcs[2], pcs[3], pcs[4]], max_notes=4, max_span=max_span))
+
+            # 2. 3-note voicings that RETAIN all defining tones (3rd, 7th, 9th):
+            candidates.extend(_generate_close_voicings([pcs[1], pcs[3], pcs[4]], max_notes=3, max_span=max_span))
 
     # Remove duplicates preserving order
     unique_candidates = list(dict.fromkeys(candidates))
 
     # Fallback safety: ensure candidates is never empty
     if not unique_candidates:
-        fb_pcs = pcs[:4] if len(pcs) >= 4 and difficulty != "beginner" else pcs[:3]
+        if difficulty == "beginner":
+            if chord.quality in ("sus4", "7sus4"):
+                fb_pcs = [pcs[0], pcs[1], pcs[2]]
+            elif chord.quality in ("m7b5", "dim"):
+                fb_pcs = [pcs[0], pcs[1], pcs[2]]
+            else:
+                fb_pcs = pcs[:3] if len(pcs) >= 3 else pcs
+        else:
+            if len(pcs) >= 5:
+                fb_pcs = [pcs[0], pcs[1], pcs[3], pcs[4]]
+            else:
+                fb_pcs = pcs[:4] if len(pcs) >= 4 else pcs[:3]
         fb = []
         for pc in fb_pcs:
             note = 60 + pc
