@@ -125,6 +125,42 @@ def parse_pages(
         ParsedSheet containing stitched systems, global measure indices, and key changes.
     """
     omr_model = model or os.environ.get("OMR_MODEL", DEFAULT_OMR_MODEL)
+
+    # 0. Check for classical CV layout stage (v2 OMR pipeline)
+    layout_mod = None
+    try:
+        import importlib
+
+        layout_mod = importlib.import_module("app.omr.layout")
+    except ImportError:
+        layout_mod = None
+
+    geoms = []
+    layout_ok = True
+    if layout_mod is not None:
+        try:
+            analyze_fn = layout_mod.analyze_page
+        except AttributeError:
+            analyze_fn = None
+
+        if analyze_fn is not None:
+            for p_idx, img_bytes in enumerate(images):
+                try:
+                    g = analyze_fn(img_bytes, p_idx)
+                    geoms.append(g)
+                except Exception as exc:
+                    logger.warning("Layout analysis failed on page %d: %s", p_idx + 1, exc)
+                    layout_ok = False
+                    break
+
+        if layout_ok and len(geoms) == len(images):
+            if all(g.confidence >= 0.6 and len(g.systems) >= 1 for g in geoms):
+                logger.info("Layout confidence >= 0.6; proceeding with v2 content reader.")
+                from app.omr.reader import read_sheet
+                return read_sheet(images, geoms, model=model)
+
+    min_layout_conf = min((g.confidence for g in geoms), default=0.5)
+
     client = get_client(project=project)
     total_pages = len(images)
 
@@ -245,12 +281,17 @@ def parse_pages(
                 )
             )
 
+    fallback_warning = "Layout analysis unavailable or low confidence; fell back to whole-page OMR."
+    if fallback_warning not in all_warnings:
+        all_warnings.append(fallback_warning)
+
     sheet = ParsedSheet(
         header=header,
         pages=pages_info,
         systems=all_systems,
         key_changes=key_changes,
         warnings=all_warnings,
+        layout_confidence=min_layout_conf,
     )
 
     # 4. Refine measure boxes using OpenCV barline detection

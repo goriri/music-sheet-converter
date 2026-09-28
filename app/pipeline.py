@@ -291,6 +291,16 @@ def append_qa_appendix_pdf(pdf_bytes: bytes, issues: list[Any]) -> bytes:
     return main_doc.tobytes()
 
 
+def _is_structural(iss: QualityIssue | dict) -> bool:
+    c = iss.code if isinstance(iss, QualityIssue) else iss.get("code", "")
+    return (
+        c == "barline_count_mismatch"
+        or c.startswith("barline_")
+        or c.startswith("structural_")
+        or "measure_count" in c
+    )
+
+
 def render(
     sheet_id: str,
     start_key: str,
@@ -313,6 +323,50 @@ def render(
 
     parsed_dict = store.get_json(parsed_path)
     sheet = ParsedSheet.model_validate(parsed_dict)
+
+    # Layout gate: if layout_confidence < 0.6 or > 25% of measures carry needs_review
+    all_meas = sheet.measures()
+    total_meas = len(all_meas)
+    rev_meas = {
+        i.measure_index for i in sheet.issues
+        if (i.severity if isinstance(i, QualityIssue) else i.get("severity")) == "needs_review"
+        and (i.measure_index if isinstance(i, QualityIssue) else i.get("measure_index")) is not None
+    }
+    rev_ratio = (len(rev_meas) / total_meas) if total_meas > 0 else 0.0
+    is_low_conf = sheet.layout_confidence < 0.6
+    is_high_rev = rev_ratio > 0.25
+
+    unconfirmed_structural = [
+        iss for iss in sheet.issues
+        if (iss.severity if isinstance(iss, QualityIssue) else iss.get("severity")) == "needs_review"
+        and _is_structural(iss)
+    ]
+
+    state_path = f"sheets/{sheet_id}/state.json"
+    state_data = store.get_json(state_path) if store.exists(state_path) else {}
+    structural_confirmed = state_data.get("structural_confirmed", False) or any(
+        "已确认版面结构" in w or "structural_confirmed" in w for w in sheet.warnings
+    )
+
+    gate_triggered = False
+    if is_low_conf and (unconfirmed_structural or not structural_confirmed):
+        gate_triggered = True
+    elif is_high_rev and unconfirmed_structural:
+        gate_triggered = True
+
+    if gate_triggered:
+        reasons = []
+        if is_low_conf:
+            reasons.append(f"版面置信度过低 ({sheet.layout_confidence:.2f} < 0.6)")
+        if is_high_rev:
+            reasons.append(f"待核对小节比例过高 ({rev_ratio:.1%} > 25%)")
+        if unconfirmed_structural:
+            reasons.append(f"存在 {len(unconfirmed_structural)} 处未确认的版面结构问题")
+        reasons_text = f"（{', '.join(reasons)}）" if reasons else ""
+        raise HTTPException(
+            status_code=409,
+            detail=f"此谱版面识别不可靠，暂不生成{reasons_text}",
+        )
 
     # Load page images
     state_path = f"sheets/{sheet_id}/state.json"

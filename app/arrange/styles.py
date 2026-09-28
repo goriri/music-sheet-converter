@@ -10,17 +10,17 @@ from app.arrange.voicing import get_lh_pattern_pitches
 SUPPORTED_STYLES = {"slow soul", "ballad", "slow rock", "pop", "waltz"}
 
 
-def normalize_style(raw_style: Optional[str]) -> str:
-    """Normalize style name string to canonical style name."""
-    if not raw_style:
-        return "ballad"
-    s = raw_style.strip().lower()
+def normalize_style(raw_style: Optional[str] = None, time_signature: Optional[str] = None) -> str:
+    """Normalize style name string and/or time signature to canonical style name."""
+    s = (raw_style or "").strip().lower()
+    ts = (time_signature or "").strip().lower()
+
+    if ts in ("12/8", "6/8") or "slow rock" in s:
+        return "slow rock"
+    if ts == "3/4" or "waltz" in s or "3/4" in s:
+        return "waltz"
     if "slow soul" in s or "soul" in s:
         return "slow soul"
-    if "slow rock" in s:
-        return "slow rock"
-    if "waltz" in s or "3/4" in s:
-        return "waltz"
     if "pop" in s:
         return "pop"
     if "ballad" in s:
@@ -317,22 +317,28 @@ def generate_measure_events(
         if "+bs in" in norm_label or "og in" in norm_label or "tempo" in norm_label:
             is_sparse = False
 
-    # Calculate chord segment boundaries
-    num_chords = len(chords)
+    # Deduplicate chords with identical beat/onset (e.g. OMR alternative artifacts)
+    unique_chords_data = []
+    seen_onsets = set()
+    for ch, v, b in zip(reversed(chords), reversed(rh_voicings), reversed(lh_bass_pitches)):
+        c_onset = round(max(0.0, min(measure_beats - 0.25, ch.beat - 1.0)), 4)
+        if c_onset not in seen_onsets:
+            seen_onsets.add(c_onset)
+            unique_chords_data.append((c_onset, ch, v, b))
+    unique_chords_data.sort(key=lambda item: item[0])
+
     chord_segments: list[dict] = []
-    for i in range(num_chords):
-        c_onset = round(chords[i].beat - 1.0, 4)
-        c_onset = max(0.0, min(measure_beats - 0.25, c_onset))
-        next_onset = round(chords[i + 1].beat - 1.0, 4) if i + 1 < num_chords else measure_beats
-        next_onset = max(c_onset + 0.25, min(measure_beats, next_onset))
+    for i, (c_onset, ch, v, b) in enumerate(unique_chords_data):
+        next_onset = unique_chords_data[i + 1][0] if i + 1 < len(unique_chords_data) else measure_beats
         chord_dur = round(next_onset - c_onset, 4)
-        chord_segments.append({
-            "onset": c_onset,
-            "duration": chord_dur,
-            "chord": chords[i],
-            "voicing": rh_voicings[i],
-            "bass": lh_bass_pitches[i],
-        })
+        if chord_dur > 0:
+            chord_segments.append({
+                "onset": c_onset,
+                "duration": chord_dur,
+                "chord": ch,
+                "voicing": v,
+                "bass": b,
+            })
 
     # Lead-in rest if first chord starts after beat 1
     rh_events: list[Event] = []
@@ -341,6 +347,90 @@ def generate_measure_events(
         gap = chord_segments[0]["onset"]
         rh_events.append(Event(onset=0.0, duration=gap, notes=[]))
         lh_events.append(Event(onset=0.0, duration=gap, notes=[]))
+
+    # ---------------- Beginner (Enforced density by construction <= 2 attacks) ----------------
+    if difficulty == "beginner":
+        if not chord_segments:
+            return [Event(onset=0.0, duration=measure_beats, notes=[])], [Event(onset=0.0, duration=measure_beats, notes=[])]
+
+        if round(measure_beats, 1) == 4.0:
+            first_seg = chord_segments[0]
+            beat3_seg = None
+            for seg in chord_segments[1:]:
+                if seg["onset"] >= 1.5:
+                    beat3_seg = seg
+                    break
+
+            if len(chord_segments) >= 3:
+                # Measure with 3+ chords at beginner: hold first, hit only chord changes on beats 1 and 3, merging others
+                if beat3_seg is not None:
+                    rh_events = [
+                        Event(onset=0.0, duration=2.0, notes=[Note(midi=p) for p in first_seg["voicing"]]),
+                        Event(onset=2.0, duration=2.0, notes=[Note(midi=p) for p in beat3_seg["voicing"]]),
+                    ]
+                    lh_events = [
+                        Event(onset=0.0, duration=2.0, notes=[Note(midi=first_seg["bass"])]),
+                        Event(onset=2.0, duration=2.0, notes=[Note(midi=beat3_seg["bass"])]),
+                    ]
+                else:
+                    rh_events = [Event(onset=0.0, duration=4.0, notes=[Note(midi=p) for p in first_seg["voicing"]])]
+                    lh_events = [Event(onset=0.0, duration=4.0, notes=[Note(midi=first_seg["bass"])])]
+            elif len(chord_segments) == 2:
+                s1 = chord_segments[0]
+                s2 = chord_segments[1]
+                rh_events = [
+                    Event(onset=s1["onset"], duration=s1["duration"], notes=[Note(midi=p) for p in s1["voicing"]]),
+                    Event(onset=s2["onset"], duration=s2["duration"], notes=[Note(midi=p) for p in s2["voicing"]]),
+                ]
+                lh_events = [
+                    Event(onset=s1["onset"], duration=s1["duration"], notes=[Note(midi=s1["bass"])]),
+                    Event(onset=s2["onset"], duration=s2["duration"], notes=[Note(midi=s2["bass"])]),
+                ]
+            else:
+                rh_events = [Event(onset=0.0, duration=4.0, notes=[Note(midi=p) for p in first_seg["voicing"]])]
+                lh_events = [Event(onset=0.0, duration=4.0, notes=[Note(midi=first_seg["bass"])])]
+        elif round(measure_beats, 1) == 3.0:
+            first_seg = chord_segments[0]
+            if len(chord_segments) == 1:
+                rh_events = [Event(onset=0.0, duration=3.0, notes=[Note(midi=p) for p in first_seg["voicing"]])]
+                lh_events = [Event(onset=0.0, duration=3.0, notes=[Note(midi=first_seg["bass"])])]
+            else:
+                s1 = chord_segments[0]
+                s2 = chord_segments[1]
+                rh_events = [
+                    Event(onset=s1["onset"], duration=s1["duration"], notes=[Note(midi=p) for p in s1["voicing"]]),
+                    Event(onset=s2["onset"], duration=round(measure_beats - s2["onset"], 4), notes=[Note(midi=p) for p in s2["voicing"]]),
+                ]
+                lh_events = [
+                    Event(onset=s1["onset"], duration=s1["duration"], notes=[Note(midi=s1["bass"])]),
+                    Event(onset=s2["onset"], duration=round(measure_beats - s2["onset"], 4), notes=[Note(midi=s2["bass"])]),
+                ]
+        elif round(measure_beats, 1) in (12.0, 6.0):
+            first_seg = chord_segments[0]
+            half = measure_beats / 2.0
+            beat2_seg = None
+            for seg in chord_segments[1:]:
+                if seg["onset"] >= half * 0.75:
+                    beat2_seg = seg
+                    break
+            if beat2_seg is not None:
+                rh_events = [
+                    Event(onset=0.0, duration=half, notes=[Note(midi=p) for p in first_seg["voicing"]]),
+                    Event(onset=half, duration=half, notes=[Note(midi=p) for p in beat2_seg["voicing"]]),
+                ]
+                lh_events = [
+                    Event(onset=0.0, duration=half, notes=[Note(midi=first_seg["bass"])]),
+                    Event(onset=half, duration=half, notes=[Note(midi=beat2_seg["bass"])]),
+                ]
+            else:
+                rh_events = [Event(onset=0.0, duration=measure_beats, notes=[Note(midi=p) for p in first_seg["voicing"]])]
+                lh_events = [Event(onset=0.0, duration=measure_beats, notes=[Note(midi=first_seg["bass"])])]
+        else:
+            first_seg = chord_segments[0]
+            rh_events = [Event(onset=0.0, duration=measure_beats, notes=[Note(midi=p) for p in first_seg["voicing"]])]
+            lh_events = [Event(onset=0.0, duration=measure_beats, notes=[Note(midi=first_seg["bass"])])]
+
+        return ensure_exact_tiling(rh_events, measure_beats), ensure_exact_tiling(lh_events, measure_beats)
 
     # 1. Stop measure: play EVERY chord at its beat (hit and hold), only drop running LH/RH pattern
     if is_stop:
@@ -363,27 +453,75 @@ def generate_measure_events(
             chord = seg["chord"]
             lh_comp = get_lh_pattern_pitches(b, chord)
 
-            if difficulty == "beginner":
+            # Oom-pah-pah: LH on 1, RH chords on 2 and 3
+            if s_dur >= 3.0:
+                lh_events.append(Event(onset=s_onset, duration=1.0, notes=[Note(midi=b)]))
+                lh_events.append(Event(onset=s_onset + 1.0, duration=1.0, notes=[Note(midi=lh_comp["fifth"])]))
+                lh_events.append(Event(onset=s_onset + 2.0, duration=1.0, notes=[Note(midi=lh_comp["octave"])]))
+
+                rh_events.append(Event(onset=s_onset, duration=1.0, notes=[]))
+                rh_events.append(Event(onset=s_onset + 1.0, duration=1.0, notes=[Note(midi=p) for p in v]))
+                rh_events.append(Event(onset=s_onset + 2.0, duration=1.0, notes=[Note(midi=p) for p in v]))
+            else:
                 rh_events.append(Event(onset=s_onset, duration=s_dur, notes=[Note(midi=p) for p in v]))
                 lh_events.append(Event(onset=s_onset, duration=s_dur, notes=[Note(midi=b)]))
-            else:
-                # Oom-pah-pah: LH on 1, RH chords on 2 and 3
-                if s_dur >= 3.0:
-                    lh_events.append(Event(onset=s_onset, duration=1.0, notes=[Note(midi=b)]))
-                    lh_events.append(Event(onset=s_onset + 1.0, duration=1.0, notes=[Note(midi=lh_comp["fifth"])]))
-                    lh_events.append(Event(onset=s_onset + 2.0, duration=1.0, notes=[Note(midi=lh_comp["octave"])]))
-
-                    rh_events.append(Event(onset=s_onset, duration=1.0, notes=[]))
-                    rh_events.append(Event(onset=s_onset + 1.0, duration=1.0, notes=[Note(midi=p) for p in v]))
-                    rh_events.append(Event(onset=s_onset + 2.0, duration=1.0, notes=[Note(midi=p) for p in v]))
-                else:
-                    rh_events.append(Event(onset=s_onset, duration=s_dur, notes=[Note(midi=p) for p in v]))
-                    lh_events.append(Event(onset=s_onset, duration=s_dur, notes=[Note(midi=b)]))
 
         return ensure_exact_tiling(rh_events, measure_beats), ensure_exact_tiling(lh_events, measure_beats)
 
-    # 3. 4/4 Ballad / Slow Soul / Pop
-    # Check if custom bass_hint applies to LH
+    # 3. 12/8 or 6/8 Compound Meter
+    if round(measure_beats, 1) in (12.0, 6.0):
+        for seg in chord_segments:
+            s_onset = seg["onset"]
+            s_dur = seg["duration"]
+            v = seg["voicing"]
+            b = seg["bass"]
+            chord = seg["chord"]
+            lh_comp = get_lh_pattern_pitches(b, chord)
+
+            beats_in_seg = int(round(s_dur))
+            for step in range(0, beats_in_seg, 3):
+                t = s_onset + step
+                lh_events.append(Event(onset=t, duration=1.0, notes=[Note(midi=b)]))
+                if t + 1.0 < s_onset + s_dur:
+                    lh_events.append(Event(onset=t + 1.0, duration=1.0, notes=[Note(midi=lh_comp["fifth"])]))
+                if t + 2.0 < s_onset + s_dur:
+                    lh_events.append(Event(onset=t + 2.0, duration=1.0, notes=[Note(midi=lh_comp["octave"])]))
+                rh_events.append(Event(onset=t, duration=min(3.0, round(s_onset + s_dur - t, 4)), notes=[Note(midi=p) for p in v]))
+
+        return ensure_exact_tiling(rh_events, measure_beats), ensure_exact_tiling(lh_events, measure_beats)
+
+    # 4. Slow Rock in 4/4 (Shuffle feel on 16th grid)
+    if style == "slow rock" and round(measure_beats, 1) == 4.0:
+        for seg in chord_segments:
+            s_onset = seg["onset"]
+            s_dur = seg["duration"]
+            v = seg["voicing"]
+            b = seg["bass"]
+            chord = seg["chord"]
+            lh_comp = get_lh_pattern_pitches(b, chord)
+
+            if s_dur >= 4.0:
+                rh_events.append(Event(onset=s_onset, duration=2.0, notes=[Note(midi=p) for p in v]))
+                rh_events.append(Event(onset=s_onset + 2.0, duration=2.0, notes=[Note(midi=p) for p in v]))
+
+                lh_events.append(Event(onset=s_onset, duration=0.75, notes=[Note(midi=b)]))
+                lh_events.append(Event(onset=s_onset + 0.75, duration=0.25, notes=[Note(midi=lh_comp["fifth"])]))
+                lh_events.append(Event(onset=s_onset + 1.0, duration=1.0, notes=[Note(midi=lh_comp["octave"])]))
+                lh_events.append(Event(onset=s_onset + 2.0, duration=0.75, notes=[Note(midi=b)]))
+                lh_events.append(Event(onset=s_onset + 2.75, duration=0.25, notes=[Note(midi=lh_comp["fifth"])]))
+                lh_events.append(Event(onset=s_onset + 3.0, duration=1.0, notes=[Note(midi=lh_comp["octave"])]))
+            elif s_dur >= 2.0:
+                rh_events.append(Event(onset=s_onset, duration=s_dur, notes=[Note(midi=p) for p in v]))
+                lh_events.append(Event(onset=s_onset, duration=0.75, notes=[Note(midi=b)]))
+                lh_events.append(Event(onset=s_onset + 0.75, duration=0.25, notes=[Note(midi=lh_comp["fifth"])]))
+                lh_events.append(Event(onset=s_onset + 1.0, duration=s_dur - 1.0, notes=[Note(midi=lh_comp["octave"])]))
+            else:
+                rh_events.append(Event(onset=s_onset, duration=s_dur, notes=[Note(midi=p) for p in v]))
+                lh_events.append(Event(onset=s_onset, duration=s_dur, notes=[Note(midi=b)]))
+
+        return ensure_exact_tiling(rh_events, measure_beats), ensure_exact_tiling(lh_events, measure_beats)
+
+    # 5. 4/4 Ballad / Slow Soul / Pop
     custom_lh_rhythm = None
     if bass_hint and chord_segments:
         custom_lh_rhythm = parse_bass_hint(
@@ -408,15 +546,8 @@ def generate_measure_events(
 
         is_last_seg = (seg_idx == len(chord_segments) - 1)
 
-        # ---------------- Beginner ----------------
-        if difficulty == "beginner":
-            # RH: Hit chord voicing on chord change, hold for duration (max 2 attacks/bar)
-            rh_events.append(Event(onset=s_onset, duration=s_dur, notes=[Note(midi=p) for p in v]))
-            # LH: Bass root note on chord change, hold for duration
-            lh_events.append(Event(onset=s_onset, duration=s_dur, notes=[Note(midi=b)]))
-
         # ---------------- Intermediate ----------------
-        elif difficulty == "intermediate":
+        if difficulty == "intermediate":
             # RH comping
             if s_dur >= 4.0:
                 if is_sparse:

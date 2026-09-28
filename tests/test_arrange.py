@@ -1,4 +1,6 @@
 """Unit tests for piano arrangement, voice leading, fingering, styling, and invariants."""
+import glob
+import json
 import os
 import pytest
 
@@ -468,4 +470,148 @@ class TestArrangementInvariants:
                             f"Measure {m_arr.measure_index} ({active_chord.name}) LH note {note.midi} "
                             f"(pc {pitch_pc}) not in chord pcs {chord_pcs}"
                         )
+
+
+class TestCrashFixAndBatchSweep:
+    """Tests for crash resilience, beginner density enforcement, and 14-song batch sweep (Objective 3)."""
+
+    def test_xindong_measure_29_beginner_density(self):
+        """Heartbeat test: xindong measure 29 beginner RH attacks must be <= 2 without exceptions."""
+        path = "out/batch/xindong/verified.json"
+        assert os.path.exists(path), f"Missing {path}"
+        with open(path, encoding="utf-8") as f:
+            sheet = ParsedSheet.model_validate(json.load(f))
+
+        arr = arrange(sheet, start_key="C", difficulty="beginner")
+        m29 = next(m for m in arr.measures if m.measure_index == 29)
+        attacks = sum(1 for e in m29.rh if len(e.notes) > 0)
+        assert attacks <= 2, f"Measure 29 beginner RH has {attacks} attacks (> 2)"
+
+    def test_all_14_batch_songs_sweep(self):
+        """Run arrange on all 14 out/batch/*/verified.json x keys {C, G, Eb} x 3 levels and assert 0 exceptions."""
+        paths = sorted(glob.glob("out/batch/*/verified.json"))
+        assert len(paths) >= 14, f"Found {len(paths)} batch songs, expected at least 14"
+
+        keys = ["C", "G", "Eb"]
+        levels = ["beginner", "intermediate", "advanced"]
+        total_runs = 0
+
+        for p in paths:
+            with open(p, encoding="utf-8") as f:
+                sheet = ParsedSheet.model_validate(json.load(f))
+
+            for k in keys:
+                for lvl in levels:
+                    arr = arrange(sheet, start_key=k, difficulty=lvl)
+                    total_runs += 1
+                    assert arr is not None
+                    if lvl == "beginner":
+                        for m in arr.measures:
+                            attacks = sum(1 for e in m.rh if len(e.notes) > 0)
+                            assert attacks <= 2, f"{p} key={k} m{m.measure_index} attacks={attacks} > 2"
+
+        assert total_runs == len(paths) * 3 * 3
+
+
+class TestTimeSignatures:
+    """Tests for 3/4 and 12/8 / 6/8 pattern selection and generation (Objective 4)."""
+
+    def test_xiaobaichuan_3_4_waltz(self):
+        """Verify 3/4 time signature triggers waltz pattern with exact 3.0 duration tiling."""
+        path = "out/batch/xiaobaichuan/verified.json"
+        with open(path, encoding="utf-8") as f:
+            sheet = ParsedSheet.model_validate(json.load(f))
+
+        for lvl in ["beginner", "intermediate", "advanced"]:
+            arr = arrange(sheet, start_key="Eb", difficulty=lvl)
+            assert arr.style == "waltz"
+            for m in arr.measures:
+                rh_dur = round(sum(e.duration for e in m.rh), 4)
+                lh_dur = round(sum(e.duration for e in m.lh), 4)
+                assert rh_dur == 3.0, f"m{m.measure_index} RH tiling mismatch: {rh_dur} != 3.0"
+                assert lh_dur == 3.0, f"m{m.measure_index} LH tiling mismatch: {lh_dur} != 3.0"
+
+    def test_huochuai_12_8_slow_rock(self):
+        """Verify 12/8 and Slow Rock selection and accompaniment generation."""
+        path = "out/batch/huochuai/verified.json"
+        with open(path, encoding="utf-8") as f:
+            sheet = ParsedSheet.model_validate(json.load(f))
+
+        # Test natural Slow Soul
+        arr_natural = arrange(sheet, start_key="F#", difficulty="intermediate")
+        assert arr_natural.style == "slow soul"
+
+        # Test override to 12/8 and Slow Rock
+        sheet.header.time_signature = "12/8"
+        sheet.header.style = "Slow Rock"
+        arr_sr = arrange(sheet, start_key="G", difficulty="intermediate")
+        assert arr_sr.style == "slow rock"
+        for m in arr_sr.measures:
+            rh_dur = round(sum(e.duration for e in m.rh), 4)
+            lh_dur = round(sum(e.duration for e in m.lh), 4)
+            assert rh_dur == 4.0, f"m{m.measure_index} RH tiling mismatch: {rh_dur} != 4.0"
+            assert lh_dur == 4.0, f"m{m.measure_index} LH tiling mismatch: {lh_dur} != 4.0"
+
+
+class TestLetterChordArrangement:
+    """Tests for arrangement with letter-notation chord charts (Objective 1)."""
+
+    def test_letter_chart_arrangement_and_transposition(self):
+        header = SongHeader(
+            title="Letter Test",
+            style="Ballad",
+            original_key="C",
+            chord_notation="letter",
+        )
+        measures = [
+            Measure(
+                index=0,
+                bbox=(0.1, 0.1, 0.9, 0.9),
+                beats=4.0,
+                chords=[ChordSymbol(raw="C", beat=1.0), ChordSymbol(raw="G/B", beat=3.0)],
+            ),
+            Measure(
+                index=1,
+                bbox=(0.1, 0.1, 0.9, 0.9),
+                beats=4.0,
+                chords=[ChordSymbol(raw="Am7", beat=1.0), ChordSymbol(raw="F", beat=3.0)],
+            ),
+        ]
+        sheet = ParsedSheet(
+            header=header,
+            pages=[],
+            systems=[System(page=0, bbox=(0, 0, 1, 1), measures=measures)],
+        )
+
+        # Transpose from printed key C to target key G (+7 semitones)
+        arr_g = arrange(sheet, start_key="G", difficulty="intermediate")
+        assert arr_g.measures[0].chords[0].name == "G"
+        assert arr_g.measures[0].chords[1].name == "D/F#"
+        assert arr_g.measures[1].chords[0].name == "Em7"
+        assert arr_g.measures[1].chords[1].name == "C"
+
+    def test_letter_chart_missing_original_key_remark(self):
+        header = SongHeader(
+            title="Letter Test No Key",
+            style="Ballad",
+            original_key=None,
+            chord_notation="letter",
+        )
+        measures = [
+            Measure(
+                index=0,
+                bbox=(0.1, 0.1, 0.9, 0.9),
+                beats=4.0,
+                chords=[ChordSymbol(raw="C", beat=1.0)],
+            ),
+        ]
+        sheet = ParsedSheet(
+            header=header,
+            pages=[],
+            systems=[System(page=0, bbox=(0, 0, 1, 1), measures=measures)],
+        )
+
+        arr = arrange(sheet, start_key="C", difficulty="beginner")
+        assert any("No original key specified" in n for n in arr.notes)
+
 

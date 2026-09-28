@@ -1,7 +1,7 @@
 """Unit tests for music theory, chord parsing, key resolution, and enharmonic spelling."""
 import pytest
 
-from app.theory.chords import parse_chord, resolve_chord
+from app.theory.chords import parse_chord, parse_letter_chord, resolve_chord
 from app.theory.keys import key_name_to_pc, spell
 
 
@@ -195,3 +195,95 @@ class TestEnharmonicSpelling:
         # In F (1 flat: Bb)
         assert spell(10, tonic_pc=5) == "Bb"
         assert spell(3, tonic_pc=5) == "Eb"
+
+
+class TestLetterChords:
+    """Tests for letter-notation chord parsing and resolution (Objective 1)."""
+
+    def test_letter_chord_catalog(self):
+        cases = [
+            ("C", 0, "C", [0, 4, 7]),
+            ("C#m7", 1, "C#m7", [1, 4, 8, 11]),
+            ("Bb/D", 10, "Bb/D", [10, 2, 5]),
+            ("Am7b5", 9, "Am7b5", [9, 0, 3, 7]),
+            ("F#dim7", 6, "F#dim7", [6, 9, 0, 3]),
+            ("Gsus4", 7, "Gsus4", [7, 0, 2]),
+            ("G7sus4", 7, "G7sus4", [7, 0, 2, 5]),
+            ("Cadd9", 0, "Cadd9", [0, 4, 7, 2]),
+            ("C(add9)", 0, "Cadd9", [0, 4, 7, 2]),
+            ("Cmaj7", 0, "Cmaj7", [0, 4, 7, 11]),
+            ("CM7", 0, "Cmaj7", [0, 4, 7, 11]),
+            ("C6", 0, "C6", [0, 4, 7, 9]),
+            ("Cm6", 0, "Cm6", [0, 3, 7, 9]),
+            ("C9", 0, "C9", [0, 4, 7, 10, 2]),
+            ("C7(b9)", 0, "C7b9", [0, 4, 7, 10, 1]),
+            ("E7(#9)", 4, "E7#9", [4, 8, 11, 2, 7]),
+            ("Dm7/G", 2, "Dm7/G", [2, 5, 9, 0]),
+        ]
+        for raw, tonic, exp_name, exp_pcs in cases:
+            rc = resolve_chord(raw, tonic, notation="letter")
+            assert rc.name == exp_name, f"Failed for {raw}: {rc.name} != {exp_name}"
+            assert rc.pcs == exp_pcs, f"Pcs failed for {raw}: {rc.pcs} != {exp_pcs}"
+
+    def test_letter_chord_transposition(self):
+        # Printed in C (0), transposed to G (7)
+        res_g = resolve_chord("C", 7, notation="letter", printed_tonic_pc=0)
+        assert res_g.name == "G"
+        assert res_g.root_pc == 7
+
+        # Printed Bb/D in Bb (10), transposed to C (0): shift = +2
+        res_c = resolve_chord("Bb/D", 0, notation="letter", printed_tonic_pc=10)
+        assert res_c.name == "C/E"
+        assert res_c.root_pc == 0
+        assert res_c.bass_pc == 4
+
+        # Printed Dm7/G in C (0), transposed to F (5): shift = +5
+        res_f = resolve_chord("Dm7/G", 5, notation="letter", printed_tonic_pc=0)
+        assert res_f.name == "Gm7/C"
+        assert res_f.root_pc == 7
+        assert res_f.bass_pc == 0
+
+        # Printed C#m7 in F# (6), transposed to F (5): shift = -1
+        res_cm7 = resolve_chord("C#m7", 5, notation="letter", printed_tonic_pc=6)
+        assert res_cm7.name == "Cm7"
+        assert res_cm7.root_pc == 0
+
+
+class TestNumberChordSpellings:
+    """Tests for advanced Taiwanese number chord spellings (Objective 2)."""
+
+    def test_number_chord_spellings_catalog(self):
+        cases = [
+            ("5sus7", "G7sus4"),
+            ("7b(6.9)", "Bb6/9"),
+            ("7b(b9)", "Bb7b9"),
+            ("57(b9)", "G7b9"),
+            ("4m/6b", "Fm/Ab"),
+            ("4/5", "F/G"),
+            ("2m7/5", "Dm7/G"),
+            ("6m7/5", "Am7/G"),
+            ("1/5", "C/G"),
+            ("1/6m", "C/A"),
+            ("1(9)", "Cadd9"),
+            ("1(11)", "C11"),
+            ("1(13)", "C13"),
+            ("1add9", "Cadd9"),
+            ("169", "C6/9"),
+            ("1m(maj7)", "CmM7"),
+            ("1+", "Caug"),
+            ("1aug", "Caug"),
+            ("57(#5)", "G7#5"),
+            ("57(#9)", "G7#9"),
+            ("57(13)", "G7add13"),
+        ]
+        for raw, exp_name in cases:
+            rc = resolve_chord(raw, 0)
+            assert rc.name == exp_name, f"Failed for {raw}: got {rc.name}, expected {exp_name}"
+
+    def test_garbage_and_invalid_degree_raises_value_error(self):
+        bad_cases = ["056", "0", "07", "8m", "99", "", "   "]
+        for bad in bad_cases:
+            with pytest.raises(ValueError):
+                parse_chord(bad)
+            with pytest.raises(ValueError):
+                resolve_chord(bad, 0)

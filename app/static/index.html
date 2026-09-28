@@ -82,6 +82,16 @@
         </div>
       </div>
 
+      <!-- Layout Gate Banner -->
+      <div id="qa-layout-gate-banner" class="qa-layout-gate-banner hidden">
+        <div class="qa-layout-gate-header">
+          <span class="qa-layout-gate-icon">🚫</span>
+          <span class="qa-layout-gate-title">此谱版面识别不可靠，暂不生成</span>
+        </div>
+        <p id="qa-layout-gate-desc" class="qa-layout-gate-desc"></p>
+        <div id="qa-layout-gate-details" class="qa-layout-gate-details"></div>
+      </div>
+
       <!-- QA Summary Bar -->
       <div id="qa-summary-bar" class="qa-summary-bar hidden">
         <span id="qa-summary-text">自动校验：修正 0 处，需要您确认 0 处</span>
@@ -90,7 +100,7 @@
 
       <!-- Needs Review Items at top -->
       <div id="qa-needs-review-section" class="hidden" style="margin-bottom: 20px;">
-        <h3 style="font-size: 1rem; color: #b45309; margin-bottom: 8px;">⚠️ 需要您确认的和弦：</h3>
+        <h3 id="qa-needs-review-heading" style="font-size: 1rem; color: #b45309; margin-bottom: 8px;">⚠️ 待核对问题列表（点击任意截图可查看高清原图）：</h3>
         <div id="qa-needs-review-list" class="qa-needs-review-list"></div>
       </div>
 
@@ -242,6 +252,31 @@
       <div id="render-previews" class="preview-container"></div>
     </section>
   </main>
+
+  <!-- Lightbox Modal for Full Resolution Zoom and Pan -->
+  <div id="lightbox-modal" class="lightbox-modal hidden">
+    <div id="lightbox-backdrop" class="lightbox-backdrop"></div>
+    <div class="lightbox-dialog">
+      <div class="lightbox-header">
+        <span id="lightbox-title" class="lightbox-title">🔍 乐谱高清大图</span>
+        <div class="lightbox-toolbar">
+          <button type="button" id="lightbox-zoom-out" class="btn btn-secondary btn-sm" title="缩小 (−)">−</button>
+          <span id="lightbox-zoom-level" class="lightbox-zoom-text">100%</span>
+          <button type="button" id="lightbox-zoom-in" class="btn btn-secondary btn-sm" title="放大 (+)">+</button>
+          <button type="button" id="lightbox-zoom-reset" class="btn btn-secondary btn-sm" title="适应窗口/重置">适应</button>
+          <button type="button" id="lightbox-close" class="btn btn-danger btn-sm" title="关闭 (Esc)">✕ 关闭</button>
+        </div>
+      </div>
+      <div id="lightbox-viewport" class="lightbox-viewport">
+        <div id="lightbox-canvas-container" class="lightbox-canvas-container">
+          <canvas id="lightbox-canvas" class="lightbox-canvas"></canvas>
+        </div>
+      </div>
+      <div class="lightbox-footer">
+        <span>💡 支持鼠标滚轮缩放、左键按住拖拽平移，触屏双指缩放，按 Esc 退出</span>
+      </div>
+    </div>
+  </div>
 
   <script src="/app.js"></script>
 </body>

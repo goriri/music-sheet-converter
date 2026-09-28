@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import sys
 import time
 import types
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -538,3 +540,317 @@ def test_appendix_page_present_iff_issues(client, setup_test_environment):
     pdf_bytes2 = client.get(pdf_url2).content
     doc2 = pymupdf.open(stream=pdf_bytes2, filetype="pdf")
     assert len(doc2) == 2
+
+
+def test_render_gate_409_on_low_layout_confidence(client, setup_test_environment):
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    parsed = get_resp.json()["parsed"]
+    from app.models import QualityIssue
+    parsed["layout_confidence"] = 0.5
+    parsed["issues"].append(
+        QualityIssue(
+            stage="omr",
+            measure_index=0,
+            severity="needs_review",
+            code="barline_count_mismatch",
+            message="第1页第1行小节线检测数量不符，请核对小节划分",
+        ).model_dump()
+    )
+    store.put_json(f"sheets/{sheet_id}/parsed.json", parsed)
+
+    render_resp = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "C", "difficulty": "intermediate", "instrument": "piano"},
+    )
+    assert render_resp.status_code == 409
+    assert "此谱版面识别不可靠，暂不生成" in render_resp.json()["detail"]
+
+
+def test_render_gate_409_cleared_after_confirming_structural_issues(client, setup_test_environment):
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    parsed = get_resp.json()["parsed"]
+    from app.models import QualityIssue
+    parsed["layout_confidence"] = 0.5
+    parsed["issues"].append(
+        QualityIssue(
+            stage="omr",
+            measure_index=0,
+            severity="needs_review",
+            code="barline_count_mismatch",
+            message="第1页第1行小节线检测数量不符，请核对小节划分",
+        ).model_dump()
+    )
+    store.put_json(f"sheets/{sheet_id}/parsed.json", parsed)
+
+    # 1. First render should fail with 409
+    render_resp1 = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "C", "difficulty": "intermediate", "instrument": "piano"},
+    )
+    assert render_resp1.status_code == 409
+
+    # 2. Confirm structural issue
+    confirm_resp = client.post(
+        f"/api/sheets/{sheet_id}/confirm",
+        json={"issue_code": "barline_count_mismatch", "measure_index": 0, "action": "confirm"},
+    )
+    assert confirm_resp.status_code == 200
+    assert confirm_resp.json()["status"] == "ok"
+
+    # 3. Second render should now succeed with 200
+    render_resp2 = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "C", "difficulty": "intermediate", "instrument": "piano"},
+    )
+    assert render_resp2.status_code == 200
+    assert "pdf_url" in render_resp2.json()
+
+
+def test_confirm_endpoint_clears_needs_review_for_issue(client, setup_test_environment):
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    parsed = get_resp.json()["parsed"]
+    from app.models import QualityIssue
+    parsed["issues"] = [
+        QualityIssue(
+            stage="omr",
+            measure_index=0,
+            severity="needs_review",
+            code="barline_count_mismatch",
+            message="第1页第1行小节线检测数量不符，请核对小节划分",
+        ).model_dump(),
+        QualityIssue(
+            stage="omr",
+            measure_index=1,
+            severity="needs_review",
+            code="chord_ambiguous",
+            message="第2小节和弦存疑",
+        ).model_dump(),
+    ]
+    store.put_json(f"sheets/{sheet_id}/parsed.json", parsed)
+
+    # Confirm the structural issue with correction note
+    conf1 = client.post(
+        f"/api/sheets/{sheet_id}/confirm",
+        json={
+            "issue_code": "barline_count_mismatch",
+            "measure_index": 0,
+            "action": "correct",
+            "measure_count": 4,
+            "note": "第1页第1行小节数应为 4",
+        },
+    )
+    assert conf1.status_code == 200
+    issues1 = conf1.json()["parsed"]["issues"]
+    assert not any(i["code"] == "barline_count_mismatch" and i["severity"] == "needs_review" for i in issues1)
+    warnings1 = conf1.json()["parsed"]["warnings"]
+    assert any("第1页第1行小节数应为 4" in w for w in warnings1)
+
+    # Confirm chord issue with specific chord
+    conf2 = client.post(
+        f"/api/sheets/{sheet_id}/confirm",
+        json={
+            "issue_code": "chord_ambiguous",
+            "measure_index": 1,
+            "action": "confirm",
+            "chord": "5m7/2",
+        },
+    )
+    assert conf2.status_code == 200
+    p2 = conf2.json()["parsed"]
+    assert not any(i["code"] == "chord_ambiguous" and i["severity"] == "needs_review" for i in p2["issues"])
+    c2 = p2["systems"][0]["measures"][1]["chords"][0]
+    assert c2["raw"] == "5m7/2"
+    assert c2["confidence"] == 1.0
+
+
+def test_put_and_confirm_payloads_validated(client, setup_test_environment):
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    # 1. Invalid chord syntax to confirm -> 422
+    bad_chord = client.post(
+        f"/api/sheets/{sheet_id}/confirm",
+        json={"chord": "not_a_valid_chord_!@#$"},
+    )
+    assert bad_chord.status_code == 422
+    assert "和弦语法错误" in bad_chord.json()["detail"]
+
+    # 2. Invalid measure_count (<= 0) to confirm -> 422
+    bad_count = client.post(
+        f"/api/sheets/{sheet_id}/confirm",
+        json={"measure_count": 0},
+    )
+    assert bad_count.status_code == 422
+    assert "小节数必须大于 0" in bad_count.json()["detail"]
+
+    # 3. Invalid beat (<= 0) to confirm -> 422
+    bad_beat = client.post(
+        f"/api/sheets/{sheet_id}/confirm",
+        json={"beat": -1.0},
+    )
+    assert bad_beat.status_code == 422
+    assert "拍数必须大于 0" in bad_beat.json()["detail"]
+
+    # 4. Non-existent sheet to confirm -> 404
+    not_found = client.post(
+        "/api/sheets/nonexistent123/confirm",
+        json={"action": "confirm"},
+    )
+    assert not_found.status_code == 404
+
+
+def test_qianlizhiwai_review_and_gate_workflow(client, setup_test_environment):
+    batch_dir = Path("out/batch/qianlizhiwai")
+    verified_file = batch_dir / "verified.json"
+    if not verified_file.exists():
+        pytest.skip("out/batch/qianlizhiwai/verified.json not found")
+
+    store = setup_test_environment
+    sheet_id = "test_qianlizhiwai_suite"
+
+    with open(verified_file) as f:
+        parsed_data = json.load(f)
+
+    store.put_json(
+        f"sheets/{sheet_id}/state.json",
+        {
+            "sheet_id": sheet_id,
+            "status": "ready",
+            "created_at": "2026-09-28T00:00:00Z",
+            "page_count": 2,
+            "structural_confirmed": False,
+        },
+    )
+    store.put_json(f"sheets/{sheet_id}/parsed.json", parsed_data)
+    p1_path = batch_dir / "p1.png"
+    p2_path = batch_dir / "p2.png"
+    if p1_path.exists():
+        store.put_bytes(f"sheets/{sheet_id}/pages/page_0.png", p1_path.read_bytes(), "image/png")
+    if p2_path.exists():
+        store.put_bytes(f"sheets/{sheet_id}/pages/page_1.png", p2_path.read_bytes(), "image/png")
+
+    # 1. Sheet state retrieval
+    get_res = client.get(f"/api/sheets/{sheet_id}")
+    assert get_res.status_code == 200
+    state = get_res.json()
+    assert state["status"] == "ready"
+    assert state["parsed"]["header"]["title"] == "千里之外"
+
+    # 2. Page image serving
+    if p1_path.exists():
+        page0_res = client.get(f"/api/pages/{sheet_id}/0")
+        assert page0_res.status_code == 200
+        assert page0_res.headers["content-type"] == "image/png"
+
+    # 3. Confirm ambiguous chord
+    r_c1 = client.post(
+        f"/api/sheets/{sheet_id}/confirm",
+        json={
+            "issue_code": "chord_ambiguous",
+            "measure_index": 5,
+            "action": "confirm",
+            "chord": "3m",
+        },
+    )
+    assert r_c1.status_code == 200
+    p_c1 = r_c1.json()["parsed"]
+    assert not any(
+        i["code"] == "chord_ambiguous" and i.get("measure_index") == 5 and i["severity"] == "needs_review"
+        for i in p_c1["issues"]
+    )
+
+    # 4. Confirm missing chord
+    r_c2 = client.post(
+        f"/api/sheets/{sheet_id}/confirm",
+        json={
+            "issue_code": "missing_chord_suspected",
+            "measure_index": 26,
+            "action": "confirm",
+            "chord": "57sus",
+        },
+    )
+    assert r_c2.status_code == 200
+    p_c2 = r_c2.json()["parsed"]
+    assert not any(
+        i["code"] == "missing_chord_suspected" and i.get("measure_index") == 26 and i["severity"] == "needs_review"
+        for i in p_c2["issues"]
+    )
+
+    # 5. Confirm unlocated key change
+    r_c3 = client.post(
+        f"/api/sheets/{sheet_id}/confirm",
+        json={
+            "issue_code": "key_change_unlocated",
+            "action": "confirm",
+            "at_measure": 16,
+            "semitones": 1,
+        },
+    )
+    assert r_c3.status_code == 200
+    p_c3 = r_c3.json()["parsed"]
+    assert not any(
+        i["code"] == "key_change_unlocated" and i["severity"] == "needs_review"
+        for i in p_c3["issues"]
+    )
+    assert any(kc["at_measure"] == 16 for kc in p_c3["key_changes"])
+
+    # 6. Confirm melody beat mismatch
+    r_c4 = client.post(
+        f"/api/sheets/{sheet_id}/confirm",
+        json={
+            "issue_code": "melody_beat_sum_mismatch",
+            "measure_index": 22,
+            "action": "confirm",
+            "beat": 1.0,
+        },
+    )
+    assert r_c4.status_code == 200
+    p_c4 = r_c4.json()["parsed"]
+    assert not any(
+        i["code"] == "melody_beat_sum_mismatch" and i.get("measure_index") == 22 and i["severity"] == "needs_review"
+        for i in p_c4["issues"]
+    )
+
+

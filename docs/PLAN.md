@@ -94,3 +94,18 @@ Runs on every render request before the PDF is produced:
 ### Render verification
 Layout self-check in the renderer: every event x inside its measure, no label/text bbox overlaps; failures
 logged as `render` issues.
+
+## v2 OMR architecture (after testing on 14 external charts)
+Finding: Gemini page-level bboxes are fine on sparse charts but wrong on dense ones (strips cut through rows,
+3/5-bar rows forced into 4, chords shifted by one bar). v2 separates *where* from *what*:
+1. `app/omr/layout.py` — classical CV → `PageGeometry` (`app/omr/geometry.py`): deskew, watermark suppression,
+   line classification (melody/chord/label/lyrics/Bs), barlines (any count per row), chord boxes (rounded-rect
+   contours; unboxed text tokens for letter-chord charts), beat_geo from x position, confidence.
+2. `app/omr/reader.py` — LLM reads *content* of upscaled crops with numbered measures/boxes; answers mapped by
+   number only. Model: `OMR_READER_MODEL` (Gemini 2.5 Pro vs Claude Opus 5.5, chosen by A/B on the answer key).
+3. `parse_pages` = layout → reader; falls back to the v1 whole-page method only for low-confidence pages.
+4. Letter-chord charts (`SongHeader.chord_notation='letter'`) are transposed from the printed key.
+5. Gate: `ParsedSheet.layout_confidence < 0.6` or >25% of measures needing review ⇒ no PDF until the user
+   confirms structural issues (HTTP 409).
+6. Evaluation: hand-checked answer key `fixtures/groundtruth/*.json` (7 songs) + `scripts/eval_omr.py`.
+   Third-party charts live in `fixtures/external/` (git-ignored, local testing only).

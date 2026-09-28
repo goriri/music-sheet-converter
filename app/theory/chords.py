@@ -7,6 +7,7 @@ from typing import Optional
 
 from app.models import ResolvedChord
 from app.theory.keys import (
+    KEY_NAME_TO_PC,
     canonical_key_for_pc,
     key_name_to_pc,
     resolve_degree,
@@ -31,6 +32,19 @@ QUALITY_INTERVALS: dict[str, list[int]] = {
     "9": [0, 4, 7, 10, 2],
     "m9": [0, 3, 7, 10, 2],
     "maj9": [0, 4, 7, 11, 2],
+    "7b9": [0, 4, 7, 10, 1],
+    "7#9": [0, 4, 7, 10, 3],
+    "7#5": [0, 4, 8, 10],
+    "7add13": [0, 4, 7, 10, 9],
+    "11": [0, 4, 7, 10, 2, 5],
+    "13": [0, 4, 7, 10, 2, 5, 9],
+    "mM7": [0, 3, 7, 11],
+    "sus2": [0, 2, 7],
+}
+
+# Non-standard or music21-incompatible qualities (e.g. 6/9 where slash collides with slash bass)
+EXTRA_QUALITY_INTERVALS: dict[str, list[int]] = {
+    "69": [0, 4, 7, 9, 2],
 }
 
 # Display suffixes for chord names
@@ -51,6 +65,15 @@ QUALITY_SUFFIXES: dict[str, str] = {
     "9": "9",
     "m9": "m9",
     "maj9": "maj9",
+    "7b9": "7b9",
+    "7#9": "7#9",
+    "7#5": "7#5",
+    "7add13": "7add13",
+    "11": "11",
+    "13": "13",
+    "mM7": "mM7",
+    "sus2": "sus2",
+    "69": "6/9",
 }
 
 
@@ -64,6 +87,18 @@ class ChordSpec:
     quality: str  # normalized quality string
     bass_degree: Optional[int] = None
     bass_accidental: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class LetterChordSpec:
+    """Parsed representation of a letter-notation chord."""
+
+    raw: str
+    root_name: str
+    root_pc: int
+    quality: str
+    bass_name: Optional[str] = None
+    bass_pc: Optional[int] = None
 
 
 def clean_raw_chord(raw: str) -> str:
@@ -145,51 +180,78 @@ def normalize_quality(q_str: str, raw: str) -> str:
     - 7 (from '7')
     - maj7 (from 'M7', 'maj7', 'Maj7', '△7')
     - m7 (from 'm7', '-7', 'min7')
-    - m7b5 (from 'm7-5', 'm7b5', 'm7(-5)', 'm7(b5)', '-7-5', '-7b5')
+    - m7b5 (from 'm7-5', 'm7b5', 'm7(-5)', 'm7(b5)', '-7-5', '-7b5', 'm7(9-5)')
     - dim (from 'dim', 'dim7', 'o', 'o7')
     - aug (from 'aug', '+')
     - sus4 (from 'sus', 'sus4')
-    - 7sus4 (from '7sus', '7sus4')
+    - 7sus4 (from '7sus', '7sus4', 'sus7', 'sus47')
     - 6 (from '6')
     - m6 (from 'm6', '-6')
-    - add9 (from '(2)', '2', 'add2', '(9)', 'add9')
-    - 9 (from '9')
+    - add9 (from '(2)', '2', 'add2', '(9)', 'add9', '9add', '(add9)')
+    - 9 (from '9', '7(9)')
     - m9 (from 'm9', '-9')
     - maj9 (from 'M9', 'maj9', 'Maj9')
+    - 7b9 (from '7b9', '7(b9)', 'b9', '(b9)')
+    - 7#9 (from '7#9', '7(#9)', '#9', '(#9)')
+    - 7#5 (from '7#5', '7(#5)')
+    - 7add13 (from '7add13', '7(13)', '713')
+    - 11 (from '11', '(11)', '7(11)')
+    - 13 (from '13', '(13)')
+    - mM7 (from 'm(maj7)', 'mM7', 'mmaj7')
+    - sus2 (from 'sus2')
+    - 69 (from '69', '6/9', '6.9', '(6.9)', '(6/9)')
     """
     q = q_str.strip()
     if q in ("", "maj", "Maj"):
         return "maj"
 
     # Explicit lookup order: most specific first
-    if q in ("m7-5", "m7b5", "m7(-5)", "m7(b5)", "-7-5", "-7b5", "m7-5", "min7b5"):
+    if q in ("m7-5", "m7b5", "m7(-5)", "m7(b5)", "-7-5", "-7b5", "min7b5", "m7-5", "min7-5", "m7(9-5)"):
         return "m7b5"
-    if q in ("7sus4", "7sus"):
+    if q in ("7sus4", "7sus", "sus7", "sus47"):
         return "7sus4"
     if q in ("sus4", "sus"):
         return "sus4"
+    if q in ("sus2",):
+        return "sus2"
     if q in ("maj7", "M7", "Maj7", "△7", "△"):
         return "maj7"
     if q in ("maj9", "M9", "Maj9"):
         return "maj9"
+    if q in ("m(maj7)", "mM7", "m/maj7", "m/M7", "min(maj7)", "mmaj7", "mmaj7(9)", "mmaj7/9"):
+        return "mM7"
     if q in ("m7", "-7", "min7"):
         return "m7"
     if q in ("m6", "-6", "min6"):
         return "m6"
     if q in ("m9", "-9", "min9"):
         return "m9"
-    if q in ("(2)", "2", "add2", "(9)", "add9", "9add"):
+    if q in ("7b9", "7(b9)", "7(-9)", "7-9", "(b9)", "b9", "(-9)", "-9", "7(9b)", "79b"):
+        return "7b9"
+    if q in ("7#9", "7(#9)", "7(+9)", "7+9", "(#9)", "#9"):
+        return "7#9"
+    if q in ("7#5", "7(#5)", "7(+5)", "7+5"):
+        return "7#5"
+    if q in ("7add13", "7(13)", "713", "7/13"):
+        return "7add13"
+    if q in ("13", "(13)"):
+        return "13"
+    if q in ("11", "(11)", "7(11)", "7/11", "7(11-9)"):
+        return "11"
+    if q in ("(2)", "2", "add2", "(9)", "add9", "9add", "(add9)", "add(9)", "add(2)"):
         return "add9"
+    if q in ("69", "6/9", "6.9", "(6.9)", "(6/9)", "(69)"):
+        return "69"
     if q in ("dim", "dim7", "o", "o7"):
         return "dim"
     if q in ("aug", "+", "aug7"):
         return "aug"
     if q == "6":
         return "6"
+    if q in ("9", "7(9)", "7/9", "79"):
+        return "9"
     if q == "7":
         return "7"
-    if q == "9":
-        return "9"
     if q in ("m", "-", "min"):
         return "m"
 
@@ -216,7 +278,7 @@ def parse_chord(raw: str) -> ChordSpec:
     if not cleaned:
         raise ValueError(f"Cannot parse chord from empty string: {raw!r}")
 
-    # Check for slash bass
+    # Check for slash bass or slash extension
     if "/" in cleaned:
         parts = cleaned.split("/")
         if len(parts) != 2:
@@ -225,9 +287,22 @@ def parse_chord(raw: str) -> ChordSpec:
         if not bass_part:
             raise ValueError(f"Missing bass degree after slash in chord: {raw!r}")
 
-        bass_deg, bass_acc, bass_rem = parse_accidental_and_degree(bass_part)
-        if bass_rem:
-            raise ValueError(f"Trailing garbage in slash bass: {bass_part!r} in {raw!r}")
+        # If bass_part is an extension (e.g. 9, 13, 11, 9b, b9, 9-5, 11-9, 6.9, 69)
+        if (
+            bass_part.startswith(("9", "11", "13", "b9", "#9"))
+            or bass_part in ("6.9", "69")
+            or "-9" in bass_part
+        ):
+            root_part = f"{root_part}({bass_part})"
+            bass_deg = None
+            bass_acc = None
+        else:
+            # Strip trailing 'm' if present (e.g. '1/6m')
+            if bass_part.endswith("m") and len(bass_part) > 1:
+                bass_part = bass_part[:-1]
+            bass_deg, bass_acc, bass_rem = parse_accidental_and_degree(bass_part)
+            if bass_rem:
+                raise ValueError(f"Trailing garbage in slash bass: {bass_part!r} in {raw!r}")
     else:
         root_part = cleaned
         bass_deg = None
@@ -246,6 +321,74 @@ def parse_chord(raw: str) -> ChordSpec:
     )
 
 
+def parse_letter_chord(raw: str) -> LetterChordSpec:
+    """Parse a letter-notation chord symbol into LetterChordSpec.
+
+    Examples:
+      'C'       -> root='C', root_pc=0, qual='maj'
+      'C#m7'    -> root='C#', root_pc=1, qual='m7'
+      'Bb/D'    -> root='Bb', root_pc=10, bass='D', bass_pc=2, qual='maj'
+      'Am7b5'   -> root='A', root_pc=9, qual='m7b5'
+      'Dm7/G'   -> root='D', root_pc=2, bass='G', bass_pc=7, qual='m7'
+    """
+    cleaned = clean_raw_chord(raw)
+    if not cleaned:
+        raise ValueError(f"Cannot parse chord from empty string: {raw!r}")
+
+    if "/" in cleaned:
+        parts = cleaned.split("/")
+        if len(parts) != 2:
+            raise ValueError(f"Multiple slashes in chord: {raw!r}")
+        root_part, bass_part = parts[0], parts[1]
+        if not bass_part:
+            raise ValueError(f"Missing bass after slash in chord: {raw!r}")
+
+        # Check if bass is a letter note A..G
+        m_bass = re.match(r"^([A-Ga-g])([b#♭♯]?)$", bass_part)
+        if m_bass:
+            b_let = m_bass.group(1).upper()
+            b_acc_raw = m_bass.group(2)
+            b_acc = "b" if b_acc_raw in ("b", "♭") else ("#" if b_acc_raw in ("#", "♯") else "")
+            bass_name = f"{b_let}{b_acc}"
+            bass_pc = KEY_NAME_TO_PC.get(bass_name.upper())
+            if bass_pc is None:
+                raise ValueError(f"Unrecognized bass note in letter chord: {bass_part!r}")
+        elif bass_part.startswith(("9", "11", "13", "b9", "#9")) or bass_part in ("6.9", "69"):
+            root_part = f"{root_part}({bass_part})"
+            bass_name = None
+            bass_pc = None
+        else:
+            raise ValueError(f"Invalid bass note in letter chord: {bass_part!r} in {raw!r}")
+    else:
+        root_part = cleaned
+        bass_name = None
+        bass_pc = None
+
+    m_root = re.match(r"^([A-Ga-g])([b#♭♯]?)(.*)$", root_part)
+    if not m_root:
+        raise ValueError(f"Cannot identify root note (A-G) in letter chord: {raw!r}")
+
+    r_let = m_root.group(1).upper()
+    r_acc_raw = m_root.group(2)
+    r_acc = "b" if r_acc_raw in ("b", "♭") else ("#" if r_acc_raw in ("#", "♯") else "")
+    root_name = f"{r_let}{r_acc}"
+    root_pc = KEY_NAME_TO_PC.get(root_name.upper())
+    if root_pc is None:
+        raise ValueError(f"Unrecognized root note in letter chord: {root_name!r}")
+
+    q_part = m_root.group(3)
+    quality = normalize_quality(q_part, raw)
+
+    return LetterChordSpec(
+        raw=raw,
+        root_name=root_name,
+        root_pc=root_pc,
+        quality=quality,
+        bass_name=bass_name,
+        bass_pc=bass_pc,
+    )
+
+
 def format_chord_name(root_name: str, quality: str) -> str:
     """Format root note name and quality into standard chord name."""
     suffix = QUALITY_SUFFIXES.get(quality, quality)
@@ -254,7 +397,7 @@ def format_chord_name(root_name: str, quality: str) -> str:
 
 def get_chord_pcs(root_pc: int, quality: str) -> list[int]:
     """Return pitch classes for chord tones with root first."""
-    intervals = QUALITY_INTERVALS.get(quality, QUALITY_INTERVALS["maj"])
+    intervals = QUALITY_INTERVALS.get(quality, EXTRA_QUALITY_INTERVALS.get(quality, QUALITY_INTERVALS["maj"]))
     return [(root_pc + i) % 12 for i in intervals]
 
 
@@ -263,28 +406,65 @@ def resolve_chord(
     tonic_pc: int,
     beat: float = 1.0,
     key_name: Optional[str] = None,
+    *,
+    notation: str = "number",
+    printed_tonic_pc: Optional[int] = None,
 ) -> ResolvedChord:
-    """Resolve a Taiwanese number-notation chord symbol into a concrete ResolvedChord.
+    """Resolve a Taiwanese number-notation or letter-notation chord symbol into a concrete ResolvedChord.
 
-    Spells the chord and slash bass with enharmonically correct note names for the target key.
+    - If notation == 'letter': transposes letter chord by (tonic_pc - printed_tonic_pc).
+    - If notation == 'number': resolves scale degree relative to tonic_pc.
     """
-    spec = parse_chord(raw)
+    if notation == "letter":
+        spec = parse_letter_chord(raw)
+        shift = (tonic_pc - printed_tonic_pc) % 12 if printed_tonic_pc is not None else 0
 
-    root_name, root_pc = resolve_degree(spec.degree, spec.accidental, tonic_pc, key_name)
+        target_root_pc = (spec.root_pc + shift) % 12
+        target_bass_pc = ((spec.bass_pc + shift) % 12) if spec.bass_pc is not None else target_root_pc
 
-    if spec.bass_degree is not None:
-        bass_acc = spec.bass_accidental if spec.bass_accidental is not None else 0
-        bass_name, bass_pc = resolve_degree(spec.bass_degree, bass_acc, tonic_pc, key_name)
+        if shift == 0:
+            target_root_name = spec.root_name
+            target_bass_name = spec.bass_name if spec.bass_name is not None else target_root_name
+        else:
+            target_root_name = spell(target_root_pc, tonic_pc=tonic_pc, key_name=key_name)
+            target_bass_name = spell(target_bass_pc, tonic_pc=tonic_pc, key_name=key_name) if spec.bass_pc is not None else target_root_name
+
+        root_chord_name = format_chord_name(target_root_name, spec.quality)
+        if spec.bass_pc is not None:
+            full_name = f"{root_chord_name}/{target_bass_name}"
+        else:
+            full_name = root_chord_name
+
+        pcs = get_chord_pcs(target_root_pc, spec.quality)
+
+        return ResolvedChord(
+            raw=raw,
+            name=full_name,
+            beat=beat,
+            root_pc=target_root_pc,
+            bass_pc=target_bass_pc,
+            pcs=pcs,
+            quality=spec.quality,
+        )
+
+    # Number notation (default)
+    num_spec = parse_chord(raw)
+
+    root_name, root_pc = resolve_degree(num_spec.degree, num_spec.accidental, tonic_pc, key_name)
+
+    if num_spec.bass_degree is not None:
+        bass_acc = num_spec.bass_accidental if num_spec.bass_accidental is not None else 0
+        bass_name, bass_pc = resolve_degree(num_spec.bass_degree, bass_acc, tonic_pc, key_name)
     else:
         bass_name, bass_pc = root_name, root_pc
 
-    root_chord_name = format_chord_name(root_name, spec.quality)
-    if spec.bass_degree is not None:
+    root_chord_name = format_chord_name(root_name, num_spec.quality)
+    if num_spec.bass_degree is not None:
         full_name = f"{root_chord_name}/{bass_name}"
     else:
         full_name = root_chord_name
 
-    pcs = get_chord_pcs(root_pc, spec.quality)
+    pcs = get_chord_pcs(root_pc, num_spec.quality)
 
     return ResolvedChord(
         raw=raw,
@@ -293,5 +473,5 @@ def resolve_chord(
         root_pc=root_pc,
         bass_pc=bass_pc,
         pcs=pcs,
-        quality=spec.quality,
+        quality=num_spec.quality,
     )

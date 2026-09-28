@@ -1,0 +1,62 @@
+{
+  "fixtures/pages/page1.jpg": {
+    "num_systems": 10,
+    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "total_measures": 40
+  },
+  "fixtures/pages/page2.jpg": {
+    "num_systems": 9,
+    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4, 5],
+    "total_measures": 37
+  },
+  "fixtures/external/qianlizhiwai/page1.jpg": {
+    "num_systems": 10,
+    "measures_per_system": [3, 3, 3, 3, 3, 3, 4, 4, 4, 3],
+    "total_measures": 33
+  },
+  "fixtures/external/tinghai/page1.jpg": {
+    "num_systems": 12,
+    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "total_measures": 48
+  },
+  "fixtures/external/tinghai/page2.jpg": {
+    "num_systems": 8,
+    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4],
+    "total_measures": 32
+  },
+  "fixtures/external/diandao/page1.jpg": {
+    "num_systems": 9,
+    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "total_measures": 36
+  },
+  "fixtures/external/diandao/page2.jpg": {
+    "num_systems": 7,
+    "measures_per_system": [4, 4, 4, 4, 4, 4, 1],
+    "total_measures": 25
+  },
+  "fixtures/external/xiaobaichuan/page1.jpg": {
+    "num_systems": 10,
+    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "total_measures": 40
+  },
+  "fixtures/external/xiaobaichuan/page2.jpg": {
+    "num_systems": 8,
+    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4],
+    "total_measures": 32
+  },
+  "fixtures/external/phone_photo_skewed/page1.jpg": {
+    "num_systems": 10,
+    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "total_measures": 40
+  },
+  "fixtures/external/liusha/page2.jpg": {
+    "num_systems": 7,
+    "measures_per_system": [4, 4, 4, 2, 4, 4, 1],
+    "total_measures": 23
+  },
+  "fixtures/external/langrenqingge/page1.jpg": {
+    "num_systems": 12,
+    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "total_measures": 48
+  }
+}

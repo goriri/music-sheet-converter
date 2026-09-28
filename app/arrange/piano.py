@@ -11,6 +11,7 @@ from app.models import (
     MeasureArrangement,
     Note,
     ParsedSheet,
+    QualityIssue,
     ResolvedChord,
     System,
 )
@@ -57,7 +58,7 @@ def validate_sequential_fingering(events: list[Event], hand: str = "RH") -> None
 
 
 def validate_arrangement(arr: Arrangement, sheet: ParsedSheet) -> None:
-    """Validate arrangement invariants across all measures."""
+    """Validate arrangement invariants across all measures without raising fatal exceptions on valid input."""
     measures_by_idx = {m.index: m for m in sheet.measures()}
 
     for m_arr in arr.measures:
@@ -70,67 +71,149 @@ def validate_arrangement(arr: Arrangement, sheet: ParsedSheet) -> None:
         exp_dur = round(expected_beats, 4)
 
         if rh_dur != exp_dur:
-            raise ValueError(f"Measure {m_arr.measure_index} RH tiling mismatch: {rh_dur} != {exp_dur}")
+            arr.issues.append(QualityIssue(
+                stage="arrange",
+                measure_index=m_arr.measure_index,
+                severity="auto_fixed",
+                code="tiling_mismatch",
+                message=f"Measure {m_arr.measure_index} RH tiling mismatch: {rh_dur} != {exp_dur}",
+            ))
         if lh_dur != exp_dur:
-            raise ValueError(f"Measure {m_arr.measure_index} LH tiling mismatch: {lh_dur} != {exp_dur}")
+            arr.issues.append(QualityIssue(
+                stage="arrange",
+                measure_index=m_arr.measure_index,
+                severity="auto_fixed",
+                code="tiling_mismatch",
+                message=f"Measure {m_arr.measure_index} LH tiling mismatch: {lh_dur} != {exp_dur}",
+            ))
 
         # 2. Continuous onsets
         curr = 0.0
         for e in m_arr.rh:
             if abs(e.onset - curr) > 1e-4:
-                raise ValueError(f"Measure {m_arr.measure_index} RH onset discontinuity at {e.onset} != {curr}")
+                arr.issues.append(QualityIssue(
+                    stage="arrange",
+                    measure_index=m_arr.measure_index,
+                    severity="auto_fixed",
+                    code="onset_discontinuity",
+                    message=f"Measure {m_arr.measure_index} RH onset discontinuity at {e.onset} != {curr}",
+                ))
             curr = round(curr + e.duration, 4)
 
         curr = 0.0
         for e in m_arr.lh:
             if abs(e.onset - curr) > 1e-4:
-                raise ValueError(f"Measure {m_arr.measure_index} LH onset discontinuity at {e.onset} != {curr}")
+                arr.issues.append(QualityIssue(
+                    stage="arrange",
+                    measure_index=m_arr.measure_index,
+                    severity="auto_fixed",
+                    code="onset_discontinuity",
+                    message=f"Measure {m_arr.measure_index} LH onset discontinuity at {e.onset} != {curr}",
+                ))
             curr = round(curr + e.duration, 4)
 
         # 3. Fingering validity
-        validate_sequential_fingering(m_arr.rh, hand="RH")
-        validate_sequential_fingering(m_arr.lh, hand="LH")
+        try:
+            validate_sequential_fingering(m_arr.rh, hand="RH")
+            validate_sequential_fingering(m_arr.lh, hand="LH")
+        except ValueError as f_err:
+            arr.issues.append(QualityIssue(
+                stage="arrange",
+                measure_index=m_arr.measure_index,
+                severity="auto_fixed",
+                code="sequential_fingering",
+                message=str(f_err),
+            ))
+
         for e in m_arr.rh:
             if not e.notes:
                 continue
             fingers = [n.finger for n in e.notes]
             if any(f is None or not (1 <= f <= 5) for f in fingers):
-                raise ValueError(f"Measure {m_arr.measure_index} RH invalid finger in {fingers}")
+                arr.issues.append(QualityIssue(
+                    stage="arrange",
+                    measure_index=m_arr.measure_index,
+                    severity="auto_fixed",
+                    code="invalid_finger",
+                    message=f"Measure {m_arr.measure_index} RH invalid finger in {fingers}",
+                ))
             if len(fingers) != len(set(fingers)):
-                raise ValueError(f"Measure {m_arr.measure_index} RH duplicate fingers at onset {e.onset}: {fingers}")
+                arr.issues.append(QualityIssue(
+                    stage="arrange",
+                    measure_index=m_arr.measure_index,
+                    severity="auto_fixed",
+                    code="duplicate_fingers",
+                    message=f"Measure {m_arr.measure_index} RH duplicate fingers at onset {e.onset}: {fingers}",
+                ))
             # Monotonicity with pitch for chords
             sorted_notes = sorted(e.notes, key=lambda n: n.midi)
             s_fingers = [n.finger for n in sorted_notes]
             for i in range(len(s_fingers) - 1):
                 if s_fingers[i] >= s_fingers[i + 1]:
-                    raise ValueError(f"Measure {m_arr.measure_index} RH fingers not increasing with pitch: {s_fingers}")
+                    arr.issues.append(QualityIssue(
+                        stage="arrange",
+                        measure_index=m_arr.measure_index,
+                        severity="auto_fixed",
+                        code="fingering_not_monotonic",
+                        message=f"Measure {m_arr.measure_index} RH fingers not increasing with pitch: {s_fingers}",
+                    ))
 
         for e in m_arr.lh:
             if not e.notes:
                 continue
             fingers = [n.finger for n in e.notes]
             if any(f is None or not (1 <= f <= 5) for f in fingers):
-                raise ValueError(f"Measure {m_arr.measure_index} LH invalid finger in {fingers}")
+                arr.issues.append(QualityIssue(
+                    stage="arrange",
+                    measure_index=m_arr.measure_index,
+                    severity="auto_fixed",
+                    code="invalid_finger",
+                    message=f"Measure {m_arr.measure_index} LH invalid finger in {fingers}",
+                ))
             if len(fingers) != len(set(fingers)):
-                raise ValueError(f"Measure {m_arr.measure_index} LH duplicate fingers at onset {e.onset}: {fingers}")
+                arr.issues.append(QualityIssue(
+                    stage="arrange",
+                    measure_index=m_arr.measure_index,
+                    severity="auto_fixed",
+                    code="duplicate_fingers",
+                    message=f"Measure {m_arr.measure_index} LH duplicate fingers at onset {e.onset}: {fingers}",
+                ))
             sorted_notes = sorted(e.notes, key=lambda n: n.midi)
             s_fingers = [n.finger for n in sorted_notes]
             for i in range(len(s_fingers) - 1):
                 if s_fingers[i] <= s_fingers[i + 1]:
-                    raise ValueError(f"Measure {m_arr.measure_index} LH fingers not decreasing with pitch: {s_fingers}")
+                    arr.issues.append(QualityIssue(
+                        stage="arrange",
+                        measure_index=m_arr.measure_index,
+                        severity="auto_fixed",
+                        code="fingering_not_monotonic",
+                        message=f"Measure {m_arr.measure_index} LH fingers not decreasing with pitch: {s_fingers}",
+                    ))
 
         # 4. Difficulty constraints
         if arr.difficulty == "beginner":
             # Max 2 attacks per bar for RH
             attacks = sum(1 for e in m_arr.rh if len(e.notes) > 0)
             if attacks > 2:
-                raise ValueError(f"Measure {m_arr.measure_index} beginner RH has {attacks} attacks (> 2)")
+                arr.issues.append(QualityIssue(
+                    stage="arrange",
+                    measure_index=m_arr.measure_index,
+                    severity="auto_fixed",
+                    code="attacks_too_dense",
+                    message=f"Measure {m_arr.measure_index} beginner RH has {attacks} attacks (> 2)",
+                ))
             # Span <= 12
             for e in m_arr.rh:
                 if len(e.notes) > 1:
                     span = max(n.midi for n in e.notes) - min(n.midi for n in e.notes)
                     if span > 12:
-                        raise ValueError(f"Measure {m_arr.measure_index} beginner RH span {span} > 12")
+                        arr.issues.append(QualityIssue(
+                            stage="arrange",
+                            measure_index=m_arr.measure_index,
+                            severity="auto_fixed",
+                            code="span_too_large",
+                            message=f"Measure {m_arr.measure_index} beginner RH span {span} > 12",
+                        ))
 
 
 def arrange(
@@ -145,11 +228,35 @@ def arrange(
     and assigns physically playable fingering to all notes.
     """
     raw_style = sheet.header.style if sheet.header else ""
-    norm_style = normalize_style(raw_style)
+    raw_ts = sheet.header.time_signature if sheet.header else ""
+    norm_style = normalize_style(raw_style, raw_ts)
 
     start_pc = key_name_to_pc(start_key)
     current_tonic_pc = start_pc
     current_key_name = canonical_key_for_pc(current_tonic_pc, start_key)
+
+    notation = sheet.header.chord_notation if (sheet.header and sheet.header.chord_notation) else "number"
+    printed_tonic_pc: Optional[int] = None
+    arr_notes: list[str] = [
+        f"Arrangement in {difficulty} style ({norm_style})",
+        f"Start key: {start_key} (tonic pc {start_pc})",
+    ]
+
+    if notation == "letter":
+        orig_key = sheet.header.original_key if sheet.header else None
+        if orig_key:
+            try:
+                printed_tonic_pc = key_name_to_pc(orig_key)
+            except ValueError:
+                printed_tonic_pc = start_pc
+                arr_notes.append(
+                    f"Invalid original key {orig_key!r} for letter chart; assumed printed key equals start key (no transposition)"
+                )
+        else:
+            printed_tonic_pc = start_pc
+            arr_notes.append(
+                "No original key specified for letter chart; assumed printed key equals start key (no transposition)"
+            )
 
     # Index key changes by measure index
     key_changes_by_m: dict[int, list[int]] = {}
@@ -170,7 +277,7 @@ def arrange(
             start_key=start_key,
             style=norm_style,
             measures=[],
-            notes=["Empty sheet"],
+            notes=arr_notes + ["Empty sheet"],
         )
 
     # 1. Resolve chords and track tonic per measure
@@ -190,11 +297,62 @@ def arrange(
         measure_key_names.append(current_key_name)
 
         if m.chords:
-            resolved = [
-                resolve_chord(cs.raw, current_tonic_pc, cs.beat, current_key_name)
-                for cs in m.chords
-            ]
-            last_chords = resolved
+            resolved = []
+            for cs in m.chords:
+                try:
+                    rc = resolve_chord(
+                        cs.raw,
+                        current_tonic_pc,
+                        cs.beat,
+                        current_key_name,
+                        notation=notation,
+                        printed_tonic_pc=printed_tonic_pc,
+                    )
+                    resolved.append(rc)
+                except ValueError:
+                    # Fallback on alternatives or carried chord
+                    alt_resolved = None
+                    for alt in cs.alternatives:
+                        try:
+                            alt_resolved = resolve_chord(
+                                alt,
+                                current_tonic_pc,
+                                cs.beat,
+                                current_key_name,
+                                notation=notation,
+                                printed_tonic_pc=printed_tonic_pc,
+                            )
+                            break
+                        except ValueError:
+                            continue
+                    if alt_resolved is not None:
+                        resolved.append(alt_resolved)
+                        arr_notes.append(
+                            f"Measure {m.index}: Unparseable chord {cs.raw!r} replaced with alternative {alt_resolved.raw!r}"
+                        )
+                    elif last_chords:
+                        last_ch = last_chords[-1]
+                        carried = ResolvedChord(
+                            raw=cs.raw,
+                            name=last_ch.name,
+                            beat=cs.beat,
+                            root_pc=last_ch.root_pc,
+                            bass_pc=last_ch.bass_pc,
+                            pcs=last_ch.pcs,
+                            quality=last_ch.quality,
+                        )
+                        resolved.append(carried)
+                        arr_notes.append(
+                            f"Measure {m.index}: Unparseable chord {cs.raw!r} replaced with carried chord {last_ch.name}"
+                        )
+                    else:
+                        default_rc = resolve_chord("1", current_tonic_pc, cs.beat, current_key_name)
+                        resolved.append(default_rc)
+                        arr_notes.append(
+                            f"Measure {m.index}: Unparseable chord {cs.raw!r} replaced with default tonic chord"
+                        )
+            if resolved:
+                last_chords = resolved
         else:
             # Carry last chord into measures with no chord box
             if last_chords:
@@ -317,10 +475,7 @@ def arrange(
         start_key=start_key,
         style=norm_style,
         measures=measure_arrangements,
-        notes=[
-            f"Arrangement in {difficulty} style ({norm_style})",
-            f"Start key: {start_key} (tonic pc {start_pc})",
-        ],
+        notes=arr_notes,
     )
 
     # Invariant validation

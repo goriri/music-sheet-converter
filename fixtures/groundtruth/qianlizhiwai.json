@@ -1,0 +1,452 @@
+{
+  "slug": "qianlizhiwai",
+  "pages": 1,
+  "header": {
+    "time_signature": "4/4",
+    "original_key": "D",
+    "chord_notation": "number"
+  },
+  "key_changes": [],
+  "rows": [
+    {
+      "page": 1,
+      "row": 1,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "1sus",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "1sus",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 2,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m7",
+              "beat": 1.0
+            },
+            {
+              "raw": "/5",
+              "beat": 4.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 3,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1(2)",
+              "beat": 1.0
+            },
+            {
+              "raw": "5/7",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4/6",
+              "beat": 1.0
+            },
+            {
+              "raw": "1/5",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            },
+            {
+              "raw": "1/3",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 4,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0
+            },
+            {
+              "raw": "5sus7",
+              "beat": 3.0
+            },
+            {
+              "raw": "57",
+              "beat": 4.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1(2)",
+              "beat": 1.0
+            },
+            {
+              "raw": "5/7",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m7",
+              "beat": 1.0
+            },
+            {
+              "raw": "/5",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 5,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            },
+            {
+              "raw": "1/3",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0
+            },
+            {
+              "raw": "5sus7",
+              "beat": 3.0
+            },
+            {
+              "raw": "57",
+              "beat": 4.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "7b(6.9)",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 6,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "4/6",
+              "beat": 1.0
+            },
+            {
+              "raw": "2m7",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4m/6b",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5sus7",
+              "beat": 1.0
+            },
+            {
+              "raw": "57",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 7,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "5/7",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m7",
+              "beat": 1.0
+            },
+            {
+              "raw": "1/5",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            },
+            {
+              "raw": "1/3",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0
+            },
+            {
+              "raw": "/5",
+              "beat": 3.0
+            },
+            {
+              "raw": "5/7",
+              "beat": 4.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 8,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "5/7",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m7",
+              "beat": 1.0
+            },
+            {
+              "raw": "5m7",
+              "beat": 3.0
+            },
+            {
+              "raw": "1/3",
+              "beat": 4.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            },
+            {
+              "raw": "1/3",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0
+            },
+            {
+              "raw": "4/5",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 9,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "1/3",
+              "beat": 4.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m7",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 10,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1(2)",
+              "beat": 1.0
+            },
+            {
+              "raw": "5/7",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4/6",
+              "beat": 1.0
+            },
+            {
+              "raw": "1/5",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            },
+            {
+              "raw": "1/3",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
