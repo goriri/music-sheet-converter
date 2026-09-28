@@ -85,6 +85,11 @@ class SongHeader(BaseModel):
     male_key: Optional[str] = None
     female_key: Optional[str] = None
     raw: str = Field("", description="Verbatim header line")
+    chord_notation: Literal["number", "letter"] = Field(
+        "number",
+        description="'number' = Taiwanese degree chords (1, 5/7, 2m7); 'letter' = C, G/B, Am7 written in the "
+        "printed key (original_key / '1=X'), transposed by the arranger to the chosen key",
+    )
 
 
 class PageInfo(BaseModel):
@@ -99,6 +104,7 @@ class ParsedSheet(BaseModel):
     key_changes: list[KeyChange] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     issues: list[QualityIssue] = Field(default_factory=list)
+    layout_confidence: float = Field(1.0, ge=0.0, le=1.0, description="From CV layout; low => refuse to render")
 
     def measures(self) -> list[Measure]:
         return [m for s in self.systems for m in s.measures]
