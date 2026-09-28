@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>台湾谱伴奏生成器 — 钢琴伴奏智能谱</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="container">
+      <h1>🎹 台湾谱伴奏生成器</h1>
+      <p>智能识别简谱旋律与级数和弦，自动生成带指法与织体的钢琴即兴伴奏谱</p>
+
+      <nav class="steps-nav">
+        <div class="step-item active" id="step-nav-1">
+          <span class="step-num">1</span> 上传乐谱
+        </div>
+        <div class="step-item" id="step-nav-2">
+          <span class="step-num">2</span> 智能解析
+        </div>
+        <div class="step-item" id="step-nav-3">
+          <span class="step-num">3</span> 确认与修改
+        </div>
+        <div class="step-item" id="step-nav-4">
+          <span class="step-num">4</span> 伴奏生成
+        </div>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Step 1: Upload -->
+    <section id="step-1" class="card">
+      <div class="card-title">第一步：上传台湾乐谱</div>
+      <div id="dropzone" class="dropzone">
+        <div class="dropzone-icon">📁</div>
+        <div class="dropzone-text">点击选择文件，或将图片/PDF拖拽至此处</div>
+        <div class="dropzone-hint">支持 JPG、PNG、WEBP 及多页 PDF，最多 12 个文件，单个文件不超过 20MB</div>
+        <input type="file" id="file-input" multiple accept=".jpg,.jpeg,.png,.webp,.pdf" class="hidden">
+      </div>
+
+      <div id="thumb-container" class="hidden">
+        <div class="flex-between" style="margin-top: 20px;">
+          <h3 style="font-size: 1rem; color: var(--text-muted);">已选文件列表（可调整页面顺序）：</h3>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-add-more">+ 添加更多</button>
+        </div>
+        <div id="thumb-grid" class="thumb-grid"></div>
+      </div>
+
+      <div style="margin-top: 24px; text-align: right;">
+        <button type="button" id="btn-start-upload" class="btn btn-primary" disabled>
+          开始识别解析 →
+        </button>
+      </div>
+    </section>
+
+    <!-- Step 2: Parsing -->
+    <section id="step-2" class="card hidden">
+      <div class="card-title">第二步：乐谱智能解析中</div>
+      <div class="progress-box">
+        <div class="spinner"></div>
+        <h3 id="parsing-status-title" style="margin-bottom: 8px;">正在解析乐谱...</h3>
+        <p id="parsing-status-desc" class="progress-text">已调用视觉模型分析小节线、旋律简谱与级数和弦，请稍候</p>
+        <div class="progress-bar-bg">
+          <div id="progress-bar-fill" class="progress-bar-fill"></div>
+        </div>
+        <div id="parsing-error-box" class="hidden" style="margin-top: 20px;">
+          <p id="parsing-error-msg" style="color: var(--danger); font-weight: 500;"></p>
+          <button type="button" id="btn-retry-upload" class="btn btn-secondary" style="margin-top: 12px;">重新上传</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 3: Review & Edit -->
+    <section id="step-3" class="card hidden">
+      <div class="card-title flex-between">
+        <span>第三步：核对乐谱与设置伴奏</span>
+        <div class="flex-between gap-12">
+          <button type="button" id="btn-save-parsed" class="btn btn-secondary btn-sm">💾 保存修改</button>
+          <button type="button" id="btn-trigger-render" class="btn btn-success">生成伴奏谱 🎶</button>
+        </div>
+      </div>
+
+      <!-- Detected Song Header -->
+      <div class="song-header-grid">
+        <div class="field-group">
+          <label>曲名</label>
+          <input type="text" id="hdr-title" class="form-control" placeholder="未检测到曲名">
+        </div>
+        <div class="field-group">
+          <label>曲风 (Style)</label>
+          <input type="text" id="hdr-style" class="form-control" placeholder="例如 Slow Soul">
+        </div>
+        <div class="field-group">
+          <label>速度 (BPM)</label>
+          <input type="number" id="hdr-tempo" class="form-control" placeholder="80">
+        </div>
+        <div class="field-group">
+          <label>拍号</label>
+          <input type="text" id="hdr-timesig" class="form-control" placeholder="4/4">
+        </div>
+      </div>
+
+      <!-- Settings: Key, Difficulty, Instrument -->
+      <div class="card" style="background: #fdfdfd; margin-bottom: 20px;">
+        <h3 style="font-size: 1.05rem; margin-bottom: 12px;">伴奏生成参数</h3>
+        <div class="song-header-grid" style="background: none; padding: 0;">
+          <!-- Key Selection -->
+          <div class="field-group">
+            <label>目标调号 (Start Key)</label>
+            <div id="printed-keys-wrapper" class="printed-key-badges" style="margin-bottom: 8px;">
+              <!-- Quick key buttons like 原调 F#, 男调 Bb, 女调 F -->
+            </div>
+            <select id="select-start-key" class="form-control">
+              <option value="C">C</option>
+              <option value="Db">Db</option>
+              <option value="D">D</option>
+              <option value="Eb">Eb</option>
+              <option value="E">E</option>
+              <option value="F">F</option>
+              <option value="F#">F#</option>
+              <option value="G">G</option>
+              <option value="Ab">Ab</option>
+              <option value="A">A</option>
+              <option value="Bb">Bb</option>
+              <option value="B">B</option>
+            </select>
+          </div>
+
+          <!-- Difficulty -->
+          <div class="field-group">
+            <label>伴奏难度 (Difficulty)</label>
+            <div class="radio-group" style="margin-top: 8px;">
+              <label class="radio-label">
+                <input type="radio" name="difficulty" value="beginner"> 初级
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="difficulty" value="intermediate" checked> 中级 (推荐)
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="difficulty" value="advanced"> 高级
+              </label>
+            </div>
+          </div>
+
+          <!-- Instrument -->
+          <div class="field-group">
+            <label>伴奏乐器 (Instrument)</label>
+            <select id="select-instrument" class="form-control">
+              <option value="piano" selected>钢琴 (Piano)</option>
+              <option value="guitar" disabled>吉他 (即将推出)</option>
+              <option value="ukulele" disabled>尤克里里 (即将推出)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Measures Editor -->
+      <div style="margin-top: 24px;">
+        <h3 style="font-size: 1.05rem; margin-bottom: 8px;">识别小节与和弦编辑</h3>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">
+          按乐谱行划分。您可以直接修改和弦级数（如 1(2)、2m7/5、57sus）和起始拍数。如有转调标记也可在此编辑。
+        </p>
+        <div id="systems-container" class="systems-container"></div>
+      </div>
+
+      <div style="margin-top: 24px; text-align: right;">
+        <button type="button" id="btn-trigger-render-bottom" class="btn btn-success btn-lg">
+          生成伴奏谱 🎶
+        </button>
+      </div>
+    </section>
+
+    <!-- Step 4: Result -->
+    <section id="step-4" class="card hidden">
+      <div class="card-title flex-between">
+        <span>第四步：伴奏谱生成结果</span>
+        <div class="flex-between gap-12">
+          <button type="button" id="btn-back-to-edit" class="btn btn-secondary">← 返回修改乐谱</button>
+          <a id="btn-download-pdf" href="#" target="_blank" download class="btn btn-primary">
+            ⬇️ 下载伴奏 PDF
+          </a>
+        </div>
+      </div>
+
+      <!-- Quick Re-Render Bar -->
+      <div class="card" style="background: #f8fafc; border-color: #cbd5e1; margin-bottom: 20px;">
+        <div class="flex-between" style="flex-wrap: wrap; gap: 16px;">
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <span style="font-weight: 600; font-size: 0.9rem;">更换调号/难度重新生成：</span>
+            <select id="re-select-key" class="form-control" style="width: 100px;">
+              <option value="C">C</option>
+              <option value="Db">Db</option>
+              <option value="D">D</option>
+              <option value="Eb">Eb</option>
+              <option value="E">E</option>
+              <option value="F">F</option>
+              <option value="F#">F#</option>
+              <option value="G">G</option>
+              <option value="Ab">Ab</option>
+              <option value="A">A</option>
+              <option value="Bb">Bb</option>
+              <option value="B">B</option>
+            </select>
+            <select id="re-select-difficulty" class="form-control" style="width: 110px;">
+              <option value="beginner">初级</option>
+              <option value="intermediate" selected>中级</option>
+              <option value="advanced">高级</option>
+            </select>
+          </div>
+          <button type="button" id="btn-re-render" class="btn btn-primary btn-sm">重新生成</button>
+        </div>
+      </div>
+
+      <!-- Preview Images -->
+      <div id="render-previews" class="preview-container"></div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

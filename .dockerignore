@@ -1,0 +1,15 @@
+.venv
+out
+fixtures
+tests
+.git
+.gitignore
+deploy.sh
+README.md
+docs
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.jpg
+*.png
