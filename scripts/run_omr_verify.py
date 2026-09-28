@@ -14,6 +14,7 @@ Measures:
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 import sys
@@ -32,10 +33,11 @@ def load_images() -> list[bytes]:
     return [p1, p2]
 
 
-def run_evaluation() -> dict[str, Any]:
+def run_evaluation(corrupted_dir: str | Path = "fixtures/corrupted") -> dict[str, Any]:
     images = load_images()
     clean_path = Path("fixtures/omr_sample.json")
-    manifest_path = Path("fixtures/corrupted/manifest.json")
+    corrupted_base = Path(corrupted_dir)
+    manifest_path = corrupted_base / "manifest.json"
 
     with open(clean_path, encoding="utf-8") as f:
         clean_sheet = ParsedSheet.model_validate_json(f.read())
@@ -72,7 +74,7 @@ def run_evaluation() -> dict[str, Any]:
         print(f"    [{iss.severity}] m{iss.measure_index}: {iss.message}")
 
     print("\n" + "=" * 80)
-    print("STEP 2: EVALUATING CORRUPTED FIXTURES")
+    print(f"STEP 2: EVALUATING CORRUPTED FIXTURES ({corrupted_base})")
     print("=" * 80)
 
     total_injected_all = 0
@@ -85,7 +87,7 @@ def run_evaluation() -> dict[str, Any]:
     corrupted_results: dict[str, Any] = {}
 
     for fname, err_list in manifest.items():
-        fpath = Path("fixtures/corrupted") / fname
+        fpath = corrupted_base / fname
         if not fpath.exists():
             continue
 
@@ -97,7 +99,6 @@ def run_evaluation() -> dict[str, Any]:
         dur = time.time() - t_start
         lat_per_page = dur / len(images)
 
-        # Lookup measures in verified sheet
         meas_lookup = {m.index: m for m in verified_corrupted.measures()}
 
         detected = 0
@@ -106,20 +107,16 @@ def run_evaluation() -> dict[str, Any]:
         flagged = 0
         missed = 0
 
-        # Check each injected error
         for err in err_list:
             m_idx = err["measure_index"]
             c_idx = err["chord_index"]
             field = err["field"]
             exp_val = err["expected_value"]
             bad_val = err["corrupted_value"]
-            err_type = err["error_type"]
 
-            # Findings on this measure
             m_issues = [i for i in verified_corrupted.issues if i.measure_index == m_idx]
             v_meas = meas_lookup.get(m_idx)
 
-            is_detected = False
             is_fixed_correct = False
             is_fixed_wrong = False
             is_flagged = False
@@ -128,74 +125,59 @@ def run_evaluation() -> dict[str, Any]:
                 actual_chord = v_meas.chords[c_idx].raw
                 if exp_val is not None:
                     if actual_chord == exp_val:
-                        is_detected = True
                         is_fixed_correct = True
                     elif actual_chord != bad_val:
-                        is_detected = True
                         is_fixed_wrong = True
                     elif any(i.severity == "needs_review" for i in m_issues):
-                        is_detected = True
                         is_flagged = True
-                    else:
-                        is_detected = False
                 else:
-                    # Garbage chord injected: correctly flagged if needs_review
                     if any(i.severity == "needs_review" for i in m_issues):
-                        is_detected = True
                         is_flagged = True
                     elif actual_chord != bad_val:
-                        is_detected = True
                         is_fixed_wrong = True
-                    else:
-                        is_detected = False
             elif field == "chord.beat" and v_meas and c_idx is not None and c_idx < len(v_meas.chords):
                 actual_beat = v_meas.chords[c_idx].beat
                 if actual_beat == exp_val:
-                    is_detected = True
                     is_fixed_correct = True
                 elif actual_beat != bad_val:
-                    is_detected = True
                     is_fixed_wrong = True
                 elif any(i.severity == "needs_review" for i in m_issues):
-                    is_detected = True
                     is_flagged = True
             elif field == "key_changes":
                 if len(verified_corrupted.key_changes) > 0:
-                    is_detected = True
                     is_fixed_correct = True
-                elif any(i.severity == "needs_review" for i in m_issues):
-                    is_detected = True
+                elif any(i.severity == "needs_review" for i in verified_corrupted.issues):
                     is_flagged = True
             elif field == "measure.melody":
                 if any(i.code == "melody_beat_sum_mismatch" for i in m_issues):
-                    is_detected = True
-                    is_flagged = True  # Melody corruption flagged for review
-            elif field == "measure.chords":
-                # Missing / deleted chord in measure: check if restored or flagged
-                if v_meas and c_idx is not None and c_idx < len(v_meas.chords):
-                    if v_meas.chords[c_idx].raw == exp_val:
-                        is_detected = True
-                        is_fixed_correct = True
-                    elif any(i.severity == "needs_review" for i in m_issues):
-                        is_detected = True
-                        is_flagged = True
-                elif any(i.severity == "needs_review" for i in m_issues):
-                    is_detected = True
                     is_flagged = True
-                else:
-                    is_detected = False
+            elif field == "measure.chords":
+                restored = False
+                if v_meas and exp_val:
+                    for c in v_meas.chords:
+                        if c.raw == exp_val:
+                            restored = True
+                            break
+                if restored:
+                    is_fixed_correct = True
+                elif any(i.severity == "needs_review" for i in m_issues):
+                    is_flagged = True
 
             if is_fixed_correct:
                 fixed_correct += 1
                 detected += 1
+                print(f"    [FIXED_OK] m{m_idx} field={field}: {bad_val} -> {exp_val}")
             elif is_fixed_wrong:
                 fixed_wrong += 1
                 detected += 1
+                print(f"    [FIXED_WR] m{m_idx} field={field}: {bad_val} (expected {exp_val})")
             elif is_flagged:
                 flagged += 1
                 detected += 1
+                print(f"    [FLAGGED]  m{m_idx} field={field}: {bad_val} (expected {exp_val})")
             else:
                 missed += 1
+                print(f"    [MISSED]   m{m_idx} field={field}: {bad_val} (expected {exp_val})")
 
         total_injected = len(err_list)
         total_injected_all += total_injected
@@ -232,6 +214,7 @@ def run_evaluation() -> dict[str, Any]:
 
     overall_fix_rate = (total_fixed_correct_all / total_injected_all * 100.0) if total_injected_all > 0 else 0.0
     overall_covered_rate = ((total_fixed_correct_all + total_flagged_all) / total_injected_all * 100.0) if total_injected_all > 0 else 0.0
+    overall_lat = clean_lat_per_page
 
     print("\n" + "=" * 80)
     print("OVERALL SUMMARY TABLE")
@@ -262,8 +245,9 @@ def run_evaluation() -> dict[str, Any]:
     )
     print("=" * 80)
 
-    results["corrupted"] = corrupted_results
-    results["overall"] = {
+    summary_data = {
+        "clean_needs_review": len(clean_needs_review),
+        "clean_auto_fixed": len(clean_auto_fixed),
         "total_injected": total_injected_all,
         "total_detected": total_detected_all,
         "total_fixed_correct": total_fixed_correct_all,
@@ -272,10 +256,17 @@ def run_evaluation() -> dict[str, Any]:
         "total_missed": total_missed_all,
         "fix_rate_pct": round(overall_fix_rate, 1),
         "covered_rate_pct": round(overall_covered_rate, 1),
+        "lat_per_page_s": round(overall_lat, 2),
     }
+    print(f"SUMMARY_JSON:{json.dumps(summary_data)}")
 
+    results["corrupted"] = corrupted_results
+    results["overall"] = summary_data
     return results
 
 
 if __name__ == "__main__":
-    run_evaluation()
+    parser = argparse.ArgumentParser(description="Evaluate OMR verification layer")
+    parser.add_argument("--corrupted-dir", default="fixtures/corrupted", help="Directory with corrupted fixtures and manifest.json")
+    args = parser.parse_args()
+    run_evaluation(corrupted_dir=args.corrupted_dir)

@@ -70,8 +70,10 @@ def _ask_gemini(
     client = _get_gemini_client(location="global")
     contents: list[Any] = []
     if images:
-        for img_bytes in images:
+        for idx, img_bytes in enumerate(images, 1):
             mime = "image/png" if img_bytes.startswith(b"\x89PNG") else "image/jpeg"
+            if len(images) > 1:
+                contents.append(f"Image #{idx}:")
             contents.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
     contents.append(prompt)
 
@@ -114,9 +116,11 @@ def _ask_opus(
     client = _get_anthropic_client(region=region)
     content: list[dict[str, Any]] = []
     if images:
-        for img_bytes in images:
+        for idx, img_bytes in enumerate(images, 1):
             mime = "image/png" if img_bytes.startswith(b"\x89PNG") else "image/jpeg"
             b64_str = base64.b64encode(img_bytes).decode("ascii")
+            if len(images) > 1:
+                content.append({"type": "text", "text": f"Image #{idx}:"})
             content.append({
                 "type": "image",
                 "source": {

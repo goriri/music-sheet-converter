@@ -1,60 +1,76 @@
 """Generate corrupted OMR fixtures with realistic OCR errors for verification testing.
 
-Creates:
-- fixtures/corrupted/corrupted_accidentals.json: dropped/moved accidentals ('5m/7', '6', '7', etc.)
-- fixtures/corrupted/corrupted_qualities.json: m/M7 confusions and lost (2) ('27', '47', '1', '5sus')
-- fixtures/corrupted/corrupted_structural.json: beat corruptions, key change removed, chord deleted, garbage
-- fixtures/corrupted/manifest.json: Ground-truth list of all injected errors.
+Usage:
+    python scripts/make_corrupted.py --seed 1 --out fixtures/corrupted
+    python scripts/make_corrupted.py --seed 2 --out fixtures/corrupted_seed2
 """
 
 from __future__ import annotations
 
+import argparse
+import copy
 import json
 from pathlib import Path
+import random
 import sys
 from typing import Any
 
 sys.path.insert(0, ".")
-from app.models import ParsedSheet
 
 FIXTURES_DIR = Path("fixtures")
 SAMPLE_PATH = FIXTURES_DIR / "omr_sample.json"
-CORRUPTED_DIR = FIXTURES_DIR / "corrupted"
 
 
-def make_corrupted_fixtures() -> None:
-    CORRUPTED_DIR.mkdir(parents=True, exist_ok=True)
+def make_corrupted_fixtures(seed: int = 1, out_dir: str | Path = "fixtures/corrupted") -> None:
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
 
     with open(SAMPLE_PATH, encoding="utf-8") as f:
         clean_data = json.load(f)
 
+    rng = random.Random(seed)
     manifest: dict[str, list[dict[str, Any]]] = {}
 
-    # ---------------------------------------------------------------------------
-    # 1. Corrupted Accidentals (dropped flat/sharp, slash bass accidentals)
-    # ---------------------------------------------------------------------------
-    acc_data = json.loads(json.dumps(clean_data))
-    acc_errors = [
-        # (measure_idx, chord_idx, corrupted_val, orig_val, desc)
-        (10, 0, "5m/7", "5m/7b", "Dropped flat in slash bass 5m/7b -> 5m/7"),
-        (11, 1, "67/1", "67/1#", "Dropped sharp in slash bass 67/1# -> 67/1"),
-        (14, 0, "6", "6b", "Dropped flat in borrowed bVI degree 6b -> 6"),
-        (18, 0, "5m/7", "5m/7b", "Dropped flat in slash bass 5m/7b -> 5m/7"),
-        (22, 0, "6", "6b", "Dropped flat in borrowed bVI degree 6b -> 6"),
-        (42, 0, "7", "7b", "Dropped flat in borrowed bVII degree 7b -> 7"),
-        (45, 0, "17/7", "17/7b", "Dropped flat in slash bass 17/7b -> 17/7"),
-        (46, 0, "7", "7b", "Dropped flat in borrowed bVII degree 7b -> 7"),
-    ]
+    all_measures = [m for s in clean_data["systems"] for m in s["measures"]]
 
+    # ---------------------------------------------------------------------------
+    # 1. Corrupted Accidentals (dropped flat/sharp, slash bass accidentals, etc.)
+    # ---------------------------------------------------------------------------
+    acc_candidates: list[tuple[int, int, str, str, str]] = []
+    for m in all_measures:
+        for c_idx, c in enumerate(m["chords"]):
+            raw = c["raw"]
+            if "/" in raw and ("b" in raw.split("/")[1] or "#" in raw.split("/")[1]):
+                root, bass = raw.split("/", 1)
+                corrupted = f"{root}/{bass.replace('b', '').replace('#', '')}"
+                acc_candidates.append(
+                    (m["index"], c_idx, corrupted, raw, f"Dropped accidental in slash bass {raw} -> {corrupted}")
+                )
+            elif raw in ("6b", "7b", "1#", "6m7-5"):
+                corrupted = raw.replace("b", "").replace("#", "").replace("-5", "")
+                acc_candidates.append(
+                    (m["index"], c_idx, corrupted, raw, f"Dropped accidental {raw} -> {corrupted}")
+                )
+            elif raw in ("6", "7"):
+                corrupted = f"{raw}b"
+                acc_candidates.append(
+                    (m["index"], c_idx, corrupted, raw, f"Added flat {raw} -> {corrupted}")
+                )
+            elif raw == "5/7":
+                acc_candidates.append(
+                    (m["index"], c_idx, "5/7b", raw, f"Added flat in slash bass {raw} -> 5/7b")
+                )
+
+    k_acc = min(8, len(acc_candidates))
+    chosen_acc = rng.sample(acc_candidates, k_acc)
+    chosen_acc.sort(key=lambda x: (x[0], x[1]))
+
+    acc_data = copy.deepcopy(clean_data)
+    acc_meas_lookup = {m["index"]: m for s in acc_data["systems"] for m in s["measures"]}
     manifest["corrupted_accidentals.json"] = []
-    # Find measure by global index
-    meas_lookup = {
-        m["index"]: m for s in acc_data["systems"] for m in s["measures"]
-    }
-    for m_idx, c_idx, bad_val, orig_val, desc in acc_errors:
-        m = meas_lookup[m_idx]
-        actual_orig = m["chords"][c_idx]["raw"]
-        assert actual_orig == orig_val, f"Mismatch at m{m_idx} c{c_idx}: expected {orig_val}, got {actual_orig}"
+    for m_idx, c_idx, bad_val, orig_val, desc in chosen_acc:
+        m = acc_meas_lookup[m_idx]
+        assert m["chords"][c_idx]["raw"] == orig_val
         m["chords"][c_idx]["raw"] = bad_val
         manifest["corrupted_accidentals.json"].append({
             "measure_index": m_idx,
@@ -66,154 +82,150 @@ def make_corrupted_fixtures() -> None:
             "description": desc,
         })
 
-    with open(CORRUPTED_DIR / "corrupted_accidentals.json", "w", encoding="utf-8") as f:
+    with open(out_path / "corrupted_accidentals.json", "w", encoding="utf-8") as f:
         json.dump(acc_data, f, indent=2, ensure_ascii=False)
 
     # ---------------------------------------------------------------------------
-    # 2. Corrupted Qualities (m/M7 swaps, lost '(2)', sus variations)
+    # 2. Corrupted Qualities (m/M7 swaps, sus variations, lost (2))
     # ---------------------------------------------------------------------------
-    qual_data = json.loads(json.dumps(clean_data))
-    qual_errors = [
-        (0, 0, "1", "1(2)", "Lost (2) extension: 1(2) -> 1"),
-        (2, 0, "27", "2m7", "Lost minor 'm': 2m7 -> 27"),
-        (4, 0, "1", "1(2)", "Lost (2) extension: 1(2) -> 1"),
-        (12, 0, "27", "2m7", "Lost minor 'm': 2m7 -> 27"),
-        (20, 0, "27", "2m7", "Lost minor 'm': 2m7 -> 27"),
-        (23, 0, "5sus", "57sus", "57sus misread as 5sus"),
-        (45, 1, "47", "4M7", "M7 misread as dominant 7: 4M7 -> 47"),
-        (62, 0, "47", "4M7", "M7 misread as dominant 7: 4M7 -> 47"),
-        (64, 0, "47", "4M7", "M7 misread as dominant 7: 4M7 -> 47"),
-    ]
+    qual_candidates: list[tuple[int, int, str, str, str]] = []
+    for m in all_measures:
+        for c_idx, c in enumerate(m["chords"]):
+            raw = c["raw"]
+            if "m7" in raw and not raw.endswith("-5"):
+                corrupted = raw.replace("m7", "7")
+                qual_candidates.append(
+                    (m["index"], c_idx, corrupted, raw, f"Lost minor 'm': {raw} -> {corrupted}")
+                )
+            elif "M7" in raw:
+                corrupted = raw.replace("M7", "7")
+                qual_candidates.append(
+                    (m["index"], c_idx, corrupted, raw, f"M7 misread as dominant 7: {raw} -> {corrupted}")
+                )
+            elif "57sus" in raw:
+                corrupted = raw.replace("57sus", "5sus")
+                qual_candidates.append(
+                    (m["index"], c_idx, corrupted, raw, f"57sus misread as 5sus: {raw} -> {corrupted}")
+                )
+            elif "5sus" in raw:
+                corrupted = raw.replace("5sus", "57sus")
+                qual_candidates.append(
+                    (m["index"], c_idx, corrupted, raw, f"5sus misread as 57sus: {raw} -> {corrupted}")
+                )
+            elif "m" in raw and "/" not in raw and not raw.startswith("5m"):
+                corrupted = raw.replace("m", "")
+                qual_candidates.append(
+                    (m["index"], c_idx, corrupted, raw, f"Lost minor 'm': {raw} -> {corrupted}")
+                )
 
+    add9_candidates: list[tuple[int, int, str, str, str]] = []
+    for m in all_measures:
+        for c_idx, c in enumerate(m["chords"]):
+            raw = c["raw"]
+            if "(2)" in raw:
+                corrupted = raw.replace("(2)", "")
+                add9_candidates.append(
+                    (m["index"], c_idx, corrupted, raw, f"Lost (2) extension: {raw} -> {corrupted}")
+                )
+
+    k_qual = min(6, len(qual_candidates))
+    k_add9 = min(5, len(add9_candidates))
+    chosen_qual = rng.sample(qual_candidates, k_qual)
+    chosen_add9 = rng.sample(add9_candidates, k_add9)
+
+    qual_data = copy.deepcopy(clean_data)
+    qual_meas_lookup = {m["index"]: m for s in qual_data["systems"] for m in s["measures"]}
     manifest["corrupted_qualities.json"] = []
-    qual_lookup = {
-        m["index"]: m for s in qual_data["systems"] for m in s["measures"]
-    }
-    for m_idx, c_idx, bad_val, orig_val, desc in qual_errors:
-        m = qual_lookup[m_idx]
-        actual_orig = m["chords"][c_idx]["raw"]
-        assert actual_orig == orig_val, f"Mismatch at m{m_idx} c{c_idx}: expected {orig_val}, got {actual_orig}"
+
+    combined_qual = chosen_qual + chosen_add9
+    combined_qual.sort(key=lambda x: (x[0], x[1]))
+    for m_idx, c_idx, bad_val, orig_val, desc in combined_qual:
+        m = qual_meas_lookup[m_idx]
+        assert m["chords"][c_idx]["raw"] == orig_val
         m["chords"][c_idx]["raw"] = bad_val
         manifest["corrupted_qualities.json"].append({
             "measure_index": m_idx,
             "chord_index": c_idx,
             "field": "chord.raw",
-            "error_type": "quality_confusion",
+            "error_type": "quality_confusion" if "(2)" not in orig_val else "lost_add9",
             "corrupted_value": bad_val,
             "expected_value": orig_val,
             "description": desc,
         })
 
-    with open(CORRUPTED_DIR / "corrupted_qualities.json", "w", encoding="utf-8") as f:
+    with open(out_path / "corrupted_qualities.json", "w", encoding="utf-8") as f:
         json.dump(qual_data, f, indent=2, ensure_ascii=False)
 
     # ---------------------------------------------------------------------------
-    # 3. Corrupted Structural (beat corruptions, key change removed, chord deleted, garbage)
+    # 3. Corrupted Structural (wrong beat, deleted chord, deleted key change)
     # ---------------------------------------------------------------------------
-    struct_data = json.loads(json.dumps(clean_data))
+    struct_data = copy.deepcopy(clean_data)
+    struct_meas_lookup = {m["index"]: m for s in struct_data["systems"] for m in s["measures"]}
     manifest["corrupted_structural.json"] = []
-    struct_lookup = {
-        m["index"]: m for s in struct_data["systems"] for m in s["measures"]
-    }
 
-    # Error 3a: 2nd chord wrong beat in m11 (beat 1.0 instead of 3.0)
-    m11 = struct_lookup[11]
-    m11["chords"][1]["beat"] = 1.0
-    manifest["corrupted_structural.json"].append({
-        "measure_index": 11,
-        "chord_index": 1,
-        "field": "chord.beat",
-        "error_type": "wrong_chord_beat",
-        "corrupted_value": 1.0,
-        "expected_value": 3.0,
-        "description": "Second chord starting beat corrupted to 1.0 instead of 3.0",
-    })
+    two_chord_meas_indices = [
+        m["index"] for m in all_measures
+        if len(m["chords"]) >= 2 and m["chords"][1]["beat"] > 1.0
+    ]
+    rng.shuffle(two_chord_meas_indices)
+    beat_meas_indices = two_chord_meas_indices[:4]
+    delete_meas_indices = two_chord_meas_indices[4:8]
 
-    # Error 3b: Melody beat sum mismatch in m23 ('2 - 0 0' truncated to '2')
-    m23 = struct_lookup[23]
-    orig_melody = m23["melody"]
-    m23["melody"] = "2"
-    manifest["corrupted_structural.json"].append({
-        "measure_index": 23,
-        "chord_index": None,
-        "field": "measure.melody",
-        "error_type": "melody_beat_sum_mismatch",
-        "corrupted_value": "2",
-        "expected_value": orig_melody,
-        "description": "Melody beats truncated to 1.0 beat in 4-beat measure",
-    })
+    for m_idx in beat_meas_indices:
+        m = struct_meas_lookup[m_idx]
+        orig_beat = m["chords"][1]["beat"]
+        bad_beat = 1.0
+        m["chords"][1]["beat"] = bad_beat
+        manifest["corrupted_structural.json"].append({
+            "measure_index": m_idx,
+            "chord_index": 1,
+            "field": "chord.beat",
+            "error_type": "wrong_chord_beat",
+            "corrupted_value": bad_beat,
+            "expected_value": orig_beat,
+            "description": f"Second chord starting beat corrupted to {bad_beat} instead of {orig_beat}",
+        })
 
-    # Error 3c: Key change removed
+    for m_idx in delete_meas_indices:
+        m = struct_meas_lookup[m_idx]
+        del_c = m["chords"][1]["raw"]
+        del m["chords"][1]
+        manifest["corrupted_structural.json"].append({
+            "measure_index": m_idx,
+            "chord_index": 1,
+            "field": "measure.chords",
+            "error_type": "chord_deleted",
+            "corrupted_value": None,
+            "expected_value": del_c,
+            "description": f"Second chord '{del_c}' deleted in measure {m_idx}",
+        })
+
     orig_kc = struct_data.get("key_changes", [])
-    struct_data["key_changes"] = []
-    manifest["corrupted_structural.json"].append({
-        "measure_index": 50,
-        "chord_index": None,
-        "field": "key_changes",
-        "error_type": "key_change_removed",
-        "corrupted_value": [],
-        "expected_value": orig_kc,
-        "description": "Modulation key change marking removed from measure 50",
-    })
+    if orig_kc:
+        struct_data["key_changes"] = []
+        manifest["corrupted_structural.json"].append({
+            "measure_index": orig_kc[0].get("at_measure", 0),
+            "chord_index": None,
+            "field": "key_changes",
+            "error_type": "key_change_removed",
+            "corrupted_value": [],
+            "expected_value": orig_kc,
+            "description": "Modulation key change marking removed from sheet",
+        })
 
-    # Error 3d: Deleted second chord in m31
-    m31 = struct_lookup[31]
-    orig_m31_c = list(m31["chords"])
-    del m31["chords"][1]  # delete '5' chord
-    manifest["corrupted_structural.json"].append({
-        "measure_index": 31,
-        "chord_index": 1,
-        "field": "measure.chords",
-        "error_type": "chord_deleted",
-        "corrupted_value": None,
-        "expected_value": "5",
-        "description": "Second chord '5' deleted in measure 31",
-    })
-
-    # Error 3e: Unparseable chord OCR garbage in m3
-    m3 = struct_lookup[3]
-    m3["chords"].append({
-        "raw": "XYZ",
-        "beat": 1.0,
-        "bbox": [0.72, 0.123, 0.78, 0.146],
-        "confidence": 1.0,
-        "alternatives": [],
-    })
-    manifest["corrupted_structural.json"].append({
-        "measure_index": 3,
-        "chord_index": 0,
-        "field": "chord.raw",
-        "error_type": "invalid_grammar",
-        "corrupted_value": "XYZ",
-        "expected_value": None,
-        "description": "Inserted unparseable OCR garbage 'XYZ'",
-    })
-
-    # Error 3f: Out of bounds beat in m39
-    m39 = struct_lookup[39]
-    m39["chords"][1]["beat"] = 5.0
-    manifest["corrupted_structural.json"].append({
-        "measure_index": 39,
-        "chord_index": 1,
-        "field": "chord.beat",
-        "error_type": "wrong_chord_beat",
-        "corrupted_value": 5.0,
-        "expected_value": 3.0,
-        "description": "Chord beat out of bounds (beat 5.0 in 4/4 bar)",
-    })
-
-    with open(CORRUPTED_DIR / "corrupted_structural.json", "w", encoding="utf-8") as f:
+    with open(out_path / "corrupted_structural.json", "w", encoding="utf-8") as f:
         json.dump(struct_data, f, indent=2, ensure_ascii=False)
 
-    # ---------------------------------------------------------------------------
-    # 4. Write manifest
-    # ---------------------------------------------------------------------------
-    with open(CORRUPTED_DIR / "manifest.json", "w", encoding="utf-8") as f:
+    with open(out_path / "manifest.json", "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
     total_injected = sum(len(errs) for errs in manifest.values())
-    print(f"Generated {len(manifest)} corrupted files with {total_injected} total injected errors.")
+    print(f"Seed {seed}: Generated {len(manifest)} corrupted files with {total_injected} total injected errors in {out_path}.")
 
 
 if __name__ == "__main__":
-    make_corrupted_fixtures()
+    parser = argparse.ArgumentParser(description="Generate randomized corrupted OMR fixtures")
+    parser.add_argument("--seed", type=int, default=1, help="Random seed")
+    parser.add_argument("--out", type=str, default="fixtures/corrupted", help="Output directory")
+    args = parser.parse_args()
+    make_corrupted_fixtures(seed=args.seed, out_dir=args.out)

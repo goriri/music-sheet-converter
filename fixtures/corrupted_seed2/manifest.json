@@ -10,6 +10,15 @@
       "description": "Added flat in slash bass 5/7 -> 5/7b"
     },
     {
+      "measure_index": 9,
+      "chord_index": 0,
+      "field": "chord.raw",
+      "error_type": "dropped_accidental",
+      "corrupted_value": "5/7b",
+      "expected_value": "5/7",
+      "description": "Added flat in slash bass 5/7 -> 5/7b"
+    },
+    {
       "measure_index": 11,
       "chord_index": 1,
       "field": "chord.raw",
@@ -19,13 +28,13 @@
       "description": "Dropped accidental in slash bass 67/1# -> 67/1"
     },
     {
-      "measure_index": 17,
+      "measure_index": 14,
       "chord_index": 0,
       "field": "chord.raw",
       "error_type": "dropped_accidental",
-      "corrupted_value": "5/7b",
-      "expected_value": "5/7",
-      "description": "Added flat in slash bass 5/7 -> 5/7b"
+      "corrupted_value": "6",
+      "expected_value": "6b",
+      "description": "Dropped accidental 6b -> 6"
     },
     {
       "measure_index": 19,
@@ -37,31 +46,22 @@
       "description": "Dropped accidental in slash bass 5m/7b -> 5m/7"
     },
     {
-      "measure_index": 42,
+      "measure_index": 22,
       "chord_index": 0,
       "field": "chord.raw",
       "error_type": "dropped_accidental",
-      "corrupted_value": "7",
-      "expected_value": "7b",
-      "description": "Dropped accidental 7b -> 7"
+      "corrupted_value": "6",
+      "expected_value": "6b",
+      "description": "Dropped accidental 6b -> 6"
     },
     {
-      "measure_index": 45,
+      "measure_index": 70,
       "chord_index": 0,
       "field": "chord.raw",
       "error_type": "dropped_accidental",
-      "corrupted_value": "17/7",
-      "expected_value": "17/7b",
-      "description": "Dropped accidental in slash bass 17/7b -> 17/7"
-    },
-    {
-      "measure_index": 46,
-      "chord_index": 0,
-      "field": "chord.raw",
-      "error_type": "dropped_accidental",
-      "corrupted_value": "7",
-      "expected_value": "7b",
-      "description": "Dropped accidental 7b -> 7"
+      "corrupted_value": "5/7b",
+      "expected_value": "5/7",
+      "description": "Added flat in slash bass 5/7 -> 5/7b"
     },
     {
       "measure_index": 74,
@@ -75,22 +75,13 @@
   ],
   "corrupted_qualities.json": [
     {
-      "measure_index": 0,
-      "chord_index": 0,
-      "field": "chord.raw",
-      "error_type": "lost_add9",
-      "corrupted_value": "1",
-      "expected_value": "1(2)",
-      "description": "Lost (2) extension: 1(2) -> 1"
-    },
-    {
-      "measure_index": 12,
+      "measure_index": 7,
       "chord_index": 0,
       "field": "chord.raw",
       "error_type": "quality_confusion",
-      "corrupted_value": "27",
-      "expected_value": "2m7",
-      "description": "Lost minor 'm': 2m7 -> 27"
+      "corrupted_value": "57sus",
+      "expected_value": "5sus",
+      "description": "5sus misread as 57sus: 5sus -> 57sus"
     },
     {
       "measure_index": 13,
@@ -102,13 +93,13 @@
       "description": "Lost (2) extension: 1(2) -> 1"
     },
     {
-      "measure_index": 20,
+      "measure_index": 16,
       "chord_index": 0,
       "field": "chord.raw",
-      "error_type": "quality_confusion",
-      "corrupted_value": "27",
-      "expected_value": "2m7",
-      "description": "Lost minor 'm': 2m7 -> 27"
+      "error_type": "lost_add9",
+      "corrupted_value": "1",
+      "expected_value": "1(2)",
+      "description": "Lost (2) extension: 1(2) -> 1"
     },
     {
       "measure_index": 21,
@@ -120,6 +111,33 @@
       "description": "Lost (2) extension: 1(2) -> 1"
     },
     {
+      "measure_index": 30,
+      "chord_index": 0,
+      "field": "chord.raw",
+      "error_type": "quality_confusion",
+      "corrupted_value": "27",
+      "expected_value": "2m7",
+      "description": "Lost minor 'm': 2m7 -> 27"
+    },
+    {
+      "measure_index": 34,
+      "chord_index": 0,
+      "field": "chord.raw",
+      "error_type": "quality_confusion",
+      "corrupted_value": "67",
+      "expected_value": "6m7",
+      "description": "Lost minor 'm': 6m7 -> 67"
+    },
+    {
+      "measure_index": 35,
+      "chord_index": 0,
+      "field": "chord.raw",
+      "error_type": "quality_confusion",
+      "corrupted_value": "67/5",
+      "expected_value": "6m7/5",
+      "description": "Lost minor 'm': 6m7/5 -> 67/5"
+    },
+    {
       "measure_index": 40,
       "chord_index": 0,
       "field": "chord.raw",
@@ -129,34 +147,16 @@
       "description": "Lost (2) extension: 1(2) -> 1"
     },
     {
-      "measure_index": 59,
+      "measure_index": 50,
       "chord_index": 0,
       "field": "chord.raw",
       "error_type": "quality_confusion",
-      "corrupted_value": "27/5",
-      "expected_value": "2m7/5",
-      "description": "Lost minor 'm': 2m7/5 -> 27/5"
+      "corrupted_value": "57sus",
+      "expected_value": "5sus",
+      "description": "5sus misread as 57sus: 5sus -> 57sus"
     },
     {
-      "measure_index": 62,
-      "chord_index": 0,
-      "field": "chord.raw",
-      "error_type": "quality_confusion",
-      "corrupted_value": "47",
-      "expected_value": "4M7",
-      "description": "M7 misread as dominant 7: 4M7 -> 47"
-    },
-    {
-      "measure_index": 66,
-      "chord_index": 0,
-      "field": "chord.raw",
-      "error_type": "quality_confusion",
-      "corrupted_value": "27",
-      "expected_value": "2m7",
-      "description": "Lost minor 'm': 2m7 -> 27"
-    },
-    {
-      "measure_index": 69,
+      "measure_index": 73,
       "chord_index": 0,
       "field": "chord.raw",
       "error_type": "lost_add9",
@@ -165,25 +165,16 @@
       "description": "Lost (2) extension: 1(2) -> 1"
     },
     {
-      "measure_index": 71,
+      "measure_index": 76,
       "chord_index": 0,
       "field": "chord.raw",
       "error_type": "quality_confusion",
-      "corrupted_value": "27",
-      "expected_value": "2m7",
-      "description": "Lost minor 'm': 2m7 -> 27"
+      "corrupted_value": "57sus",
+      "expected_value": "5sus",
+      "description": "5sus misread as 57sus: 5sus -> 57sus"
     }
   ],
   "corrupted_structural.json": [
-    {
-      "measure_index": 50,
-      "chord_index": 1,
-      "field": "chord.beat",
-      "error_type": "wrong_chord_beat",
-      "corrupted_value": 1.0,
-      "expected_value": 3.0,
-      "description": "Second chord starting beat corrupted to 1.0 instead of 3.0"
-    },
     {
       "measure_index": 45,
       "chord_index": 1,
@@ -194,7 +185,25 @@
       "description": "Second chord starting beat corrupted to 1.0 instead of 3.0"
     },
     {
-      "measure_index": 39,
+      "measure_index": 50,
+      "chord_index": 1,
+      "field": "chord.beat",
+      "error_type": "wrong_chord_beat",
+      "corrupted_value": 1.0,
+      "expected_value": 3.0,
+      "description": "Second chord starting beat corrupted to 1.0 instead of 3.0"
+    },
+    {
+      "measure_index": 15,
+      "chord_index": 1,
+      "field": "chord.beat",
+      "error_type": "wrong_chord_beat",
+      "corrupted_value": 1.0,
+      "expected_value": 3.0,
+      "description": "Second chord starting beat corrupted to 1.0 instead of 3.0"
+    },
+    {
+      "measure_index": 14,
       "chord_index": 1,
       "field": "chord.beat",
       "error_type": "wrong_chord_beat",
@@ -205,47 +214,38 @@
     {
       "measure_index": 67,
       "chord_index": 1,
-      "field": "chord.beat",
-      "error_type": "wrong_chord_beat",
-      "corrupted_value": 1.0,
-      "expected_value": 3.0,
-      "description": "Second chord starting beat corrupted to 1.0 instead of 3.0"
+      "field": "measure.chords",
+      "error_type": "chord_deleted",
+      "corrupted_value": null,
+      "expected_value": "5",
+      "description": "Second chord '5' deleted in measure 67"
     },
     {
-      "measure_index": 31,
+      "measure_index": 39,
       "chord_index": 1,
       "field": "measure.chords",
       "error_type": "chord_deleted",
       "corrupted_value": null,
       "expected_value": "5",
-      "description": "Second chord '5' deleted in measure 31"
+      "description": "Second chord '5' deleted in measure 39"
     },
     {
-      "measure_index": 59,
+      "measure_index": 19,
+      "chord_index": 1,
+      "field": "measure.chords",
+      "error_type": "chord_deleted",
+      "corrupted_value": null,
+      "expected_value": "67",
+      "description": "Second chord '67' deleted in measure 19"
+    },
+    {
+      "measure_index": 49,
       "chord_index": 1,
       "field": "measure.chords",
       "error_type": "chord_deleted",
       "corrupted_value": null,
       "expected_value": "5",
-      "description": "Second chord '5' deleted in measure 59"
-    },
-    {
-      "measure_index": 15,
-      "chord_index": 1,
-      "field": "measure.chords",
-      "error_type": "chord_deleted",
-      "corrupted_value": null,
-      "expected_value": "5",
-      "description": "Second chord '5' deleted in measure 15"
-    },
-    {
-      "measure_index": 14,
-      "chord_index": 1,
-      "field": "measure.chords",
-      "error_type": "chord_deleted",
-      "corrupted_value": null,
-      "expected_value": "6m7-5",
-      "description": "Second chord '6m7-5' deleted in measure 14"
+      "description": "Second chord '5' deleted in measure 49"
     },
     {
       "measure_index": 50,

@@ -87,7 +87,7 @@ def parse_melody(
     """Parse a jianpu melody string into (onset_beat, degree, accidental) tuples and beat-sum.
 
     Args:
-        melody: Raw jianpu string from OMR (e.g. '2 2 23 21', '1. 5 55 65', '2 - 0 0').
+        melody: Raw jianpu string from OMR (e.g. '2 2 12 21', '1. 5 55 65', '2 - 0 0').
         beats: Expected beats in the measure (default 4.0).
         include_rests: If True, rests (degree 0) are included in the notes list.
 
@@ -166,7 +166,7 @@ def parse_melody(
                 if deg > 0 or (include_rests and deg == 0):
                     notes.append((round(cur_beat, 3), deg, acc))
             elif n_sub > 1:
-                # Multi-note group (e.g. '23' = two eighths, '3.i' = dotted eighth + sixteenth)
+                # Multi-note group (e.g. '12' = two eighths, '3.i' = dotted eighth + sixteenth)
                 has_dot = any(n[2] for n in pnotes)
                 if has_dot and n_sub == 2:
                     if pnotes[0][2]:

@@ -73,10 +73,11 @@ import numpy as np
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from app.models import ChordSymbol, KeyChange, Measure, ParsedSheet, QualityIssue, System
+from app.models import ChordSymbol, KeyChange, Measure, ParsedSheet, QualityIssue, SongHeader, System
 from app.qa.llm import LLMUnavailable, ask_json, llm_available
 from app.qa.melody import parse_melody
 from app.qa.priors import (
+    _simplify_chord,
     bass_hint_fit,
     generate_candidates,
     melody_fit,
@@ -84,6 +85,7 @@ from app.qa.priors import (
     score_candidate,
 )
 from app.theory.chords import parse_chord
+from app.theory.keys import key_name_to_pc
 
 logger = logging.getLogger(__name__)
 
@@ -112,9 +114,139 @@ class ArbiterBatchResponse(BaseModel):
     decisions: list[ArbiterItemDecision] = Field(default_factory=list)
 
 
+class LocatedKeyAnnotation(BaseModel):
+    system_index: int = Field(0, description="0-based system row index on this page (top row is 0)")
+    measure_index: int = Field(0, description="0-based measure index within this system row (0 is 1st bar in row)")
+    approx_x: Optional[float] = Field(None, description="Normalized horizontal position x in [0, 1] where annotation appears")
+    verbatim_text: str = Field(description="Exact printed text of the key change annotation")
+    semitones: Optional[int] = Field(None, description="Semitone shift if stated or deduced (e.g. 2 for 2 semitones)")
+
+
+class PageKeyLocateResponse(BaseModel):
+    annotations: list[LocatedKeyAnnotation] = Field(default_factory=list)
+
+
+class DetectedMeasureChordBox(BaseModel):
+    chord: str = Field(description="Chord symbol inside the box in Taiwanese number notation, e.g. '5', '2m7'")
+    beat: float = Field(3.0, description="Starting beat, e.g. 1.0 or 3.0")
+    confidence: float = Field(0.8, ge=0.0, le=1.0)
+
+
+class MeasureCropChordResponse(BaseModel):
+    chords: list[DetectedMeasureChordBox] = Field(default_factory=list)
+
+
+class MissingChordArbiterConfirmation(BaseModel):
+    confirmed: bool = Field(description="True if the chord box is clearly printed on the sheet")
+    confirmed_chord: Optional[str] = Field(None, description="The confirmed chord text in Taiwanese number notation")
+    confidence: float = Field(0.0, ge=0.0, le=1.0)
+    reason: str = Field("", description="Visual evidence and harmonic reason")
+
+
+class RowTranscribedChord(BaseModel):
+    measure_in_row: int = Field(default=1, description="1-based measure index within this row (1 for leftmost bar, 2 for next, etc.)")
+    chord: str = Field(description="Exact printed text inside the chord box, e.g. '1(2)', '5/7', '5m6/2', '67/1#', '6m7-5', '5', '5sus'")
+    approx_x: Optional[float] = Field(default=0.5, description="Approximate horizontal position across this row image from 0.0 (left edge) to 1.0 (right edge)")
+    beat: float = Field(default=1.0, description="Approximate starting beat in the measure (1.0 for first half, 3.0 for second half)")
+
+
+class SystemRowChords(BaseModel):
+    row_index: int = Field(description="0-based index of the row crop image (0 for Image #0, 1 for Image #1, etc.)")
+    chords: list[RowTranscribedChord] = Field(default_factory=list)
+
+
+class PageRowTranscriptionResponse(BaseModel):
+    rows: list[SystemRowChords] = Field(default_factory=list)
+
+
+class CandidateInsertionDecision(BaseModel):
+    item_id: int = Field(description="1-based ID of the candidate insertion item")
+    confirmed: bool = Field(description="True if the printed chord box ink is clearly present in the measure crop")
+    confirmed_chord: Optional[str] = Field(None, description="Exact confirmed chord text if confirmed")
+    confidence: float = Field(default=0.9, description="Confidence in the decision between 0.0 and 1.0 (e.g. 0.95)")
+    reason: str = Field(default="", description="Concise reason")
+
+
+class CandidateInsertionBatchResponse(BaseModel):
+    decisions: list[CandidateInsertionDecision] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Top-level helper functions (flat module scope)
 # ---------------------------------------------------------------------------
+
+def align_measure_chords(
+    sheet_chords: list[ChordSymbol],
+    transcribed_chords: list[RowTranscribedChord],
+) -> tuple[list[ChordSymbol], list[RowTranscribedChord]]:
+    """Align parsed sheet chords with row-transcribed chords for a single measure.
+
+    Returns:
+        (unmatched_sheet_chords, candidate_insertions)
+    """
+    matched_sheet: set[int] = set()
+    matched_row: set[int] = set()
+
+    for r_idx, r in enumerate(transcribed_chords):
+        r_txt = r.chord.strip()
+        r_simp = _simplify_chord(r_txt)
+        for s_idx, s in enumerate(sheet_chords):
+            if s_idx in matched_sheet:
+                continue
+            s_txt = s.raw.strip()
+            if r_txt == s_txt or r_simp == _simplify_chord(s_txt):
+                matched_sheet.add(s_idx)
+                matched_row.add(r_idx)
+                break
+
+    unmatched_sheet = [sheet_chords[i] for i in range(len(sheet_chords)) if i not in matched_sheet]
+    candidate_insertions = [transcribed_chords[i] for i in range(len(transcribed_chords)) if i not in matched_row]
+    return unmatched_sheet, candidate_insertions
+
+
+def map_transcribed_chords_to_measures(
+    system: System,
+    transcribed: list[RowTranscribedChord],
+) -> dict[int, list[RowTranscribedChord]]:
+    """Map each row-transcribed chord to a measure in the system by measure_in_row, using approx_x when index overflows or deep in measure."""
+    meas_map: dict[int, list[RowTranscribedChord]] = {m.index: [] for m in system.measures}
+    if not system.measures:
+        return meas_map
+
+    n = len(system.measures)
+    w_sys = max(0.001, system.bbox[2] - system.bbox[0])
+    splits = [0.0]
+    for k in range(1, n):
+        mid = ((system.measures[k - 1].bbox[2] + system.measures[k].bbox[0]) / 2.0 - system.bbox[0]) / w_sys
+        splits.append(mid)
+    splits.append(1.0)
+
+    for tc in transcribed:
+        assigned_k = None
+        k_by_x = None
+        dist_to_boundary = 1.0
+        if tc.approx_x is not None and 0.0 <= tc.approx_x <= 1.0:
+            for k in range(n):
+                if splits[k] <= tc.approx_x < splits[k + 1]:
+                    k_by_x = k
+                    dist_to_boundary = min(abs(tc.approx_x - splits[k]), abs(tc.approx_x - splits[k + 1]))
+                    break
+
+        if 1 <= tc.measure_in_row <= n:
+            k_by_meas = tc.measure_in_row - 1
+            if k_by_x is not None and k_by_x != k_by_meas and dist_to_boundary > 0.04:
+                assigned_k = k_by_x
+            else:
+                assigned_k = k_by_meas
+        elif k_by_x is not None:
+            assigned_k = k_by_x
+
+        if assigned_k is None:
+            m_idx = tc.measure_in_row - 1
+            assigned_k = max(0, min(n - 1, m_idx))
+        meas_map[system.measures[assigned_k].index].append(tc)
+
+    return meas_map
 
 def _crop_chord_box(img_bgr: np.ndarray, chord: ChordSymbol) -> Optional[bytes]:
     """Extract a tight image crop of a chord box based on its normalized bounding box."""
@@ -140,6 +272,152 @@ def _crop_chord_box(img_bgr: np.ndarray, chord: ChordSymbol) -> Optional[bytes]:
     return buf.tobytes()
 
 
+def _crop_measure(img_bgr: np.ndarray, system: System, measure: Measure) -> Optional[bytes]:
+    """Extract an image crop of a measure column spanning the whole system row height."""
+    h, w = img_bgr.shape[:2]
+    x0, x1 = measure.bbox[0], measure.bbox[2]
+    y0, y1 = system.bbox[1], system.bbox[3]
+    pad_x = 0.005
+    pad_y = 0.005
+    y_start = int(max(0.0, y0 - pad_y) * h)
+    y_end = int(min(1.0, y1 + pad_y) * h)
+    x_start = int(max(0.0, x0 - pad_x) * w)
+    x_end = int(min(1.0, x1 + pad_x) * w)
+
+    if y_end <= y_start or x_end <= x_start:
+        return None
+
+    c_img = img_bgr[y_start:y_end, x_start:x_end]
+    if c_img.size == 0 or c_img.shape[0] < 5 or c_img.shape[1] < 5:
+        return None
+
+    _, buf = cv2.imencode(".jpg", c_img)
+    return buf.tobytes()
+
+
+def parse_header_key_changes(header_raw: str, header: Optional[SongHeader] = None) -> int:
+    """Parse key pairs from header into expected total modulation.
+
+    Handles formats like:
+      - '(X - Y)', '(X-Y)', 'X→Y', 'X->Y', 'X - Y'
+      - '男調(X-Y)', '女調(X-Y)', '原調(X-Y)'
+      - '[X - Y]', '降B - C', '升F - 降A'
+
+    Returns the semitone shift mod 12, choosing the smaller signed value (-5..+6).
+    Returns 0 if no valid key modulation pair is detected.
+    """
+    candidates_text: list[str] = []
+    if header_raw:
+        candidates_text.append(header_raw)
+    if header:
+        for val in (header.original_key, header.male_key, header.female_key, header.raw):
+            if val and val not in candidates_text:
+                candidates_text.append(val)
+
+    key_token = r"(?:[#b♯♭]?[A-Ga-g][#b♯♭]?|(?:降|升)[A-Ga-g])"
+    pair_re = re.compile(
+        rf"(?:(?:\(|（|\[)?\s*({key_token})\s*(?:[-–—~→]|->)\s*({key_token})\s*(?:\)|）|\])?)"
+    )
+
+    for text in candidates_text:
+        matches = pair_re.findall(text)
+        for k1, k2 in matches:
+            try:
+                pc1 = key_name_to_pc(k1)
+                pc2 = key_name_to_pc(k2)
+                diff = (pc2 - pc1) % 12
+                if diff > 6:
+                    diff -= 12
+                if diff != 0:
+                    return diff
+            except Exception:
+                continue
+
+    return 0
+
+
+def _parse_semitones_from_annotation(
+    text: str,
+    expected_semitones: int,
+    start_key: Optional[str] = None,
+) -> Optional[int]:
+    """Extract or verify semitone amount from annotation text."""
+    m_shift = re.search(r"轉[成]?\s*([1-9])\s*調", text)
+    if m_shift:
+        return int(m_shift.group(1))
+
+    if "半調" in text or "半音" in text:
+        return 1
+
+    m_key = re.search(r"(?:1=|Key:\s*|\()([A-Ga-g][b#]?)", text)
+    if m_key and start_key:
+        try:
+            target_pc = key_name_to_pc(m_key.group(1))
+            start_pc = key_name_to_pc(start_key)
+            diff = (target_pc - start_pc) % 12
+            if diff > 6:
+                diff -= 12
+            return diff
+        except Exception:
+            pass
+
+    return None
+
+
+def _transcribe_page_row(
+    p_idx: int,
+    page_img: Optional[np.ndarray],
+    p_systems: list[System],
+) -> tuple[int, list[System], dict[int, list[RowTranscribedChord]]]:
+    """Transcribe all row chord bands for a single page in one Gemini Flash call."""
+    if page_img is None or not p_systems:
+        return p_idx, [], {}
+    h_p, w_p = page_img.shape[:2]
+    row_crops: list[bytes] = []
+    valid_p_systems: list[System] = []
+    for s in p_systems:
+        x0 = int(max(0.0, s.bbox[0] - 0.005) * w_p)
+        x1 = int(min(1.0, s.bbox[2] + 0.005) * w_p)
+        m_y0 = min(m.bbox[1] for m in s.measures) if s.measures else s.bbox[3]
+        y0 = int(max(0.0, s.bbox[1] - 0.005) * h_p)
+        y1 = int(min(1.0, m_y0 + 0.015) * h_p)
+        crop = page_img[y0:y1, x0:x1]
+        if crop.size > 0 and crop.shape[0] >= 5 and crop.shape[1] >= 5:
+            _, buf = cv2.imencode(".jpg", crop)
+            row_crops.append(buf.tobytes())
+            valid_p_systems.append(s)
+
+    if not row_crops:
+        return p_idx, [], {}
+
+    row_prompt = (
+        f"You are transcribing chord boxes from a Taiwanese band chart sheet music (page {p_idx + 1}). "
+        "Each numbered image (Image #0, Image #1, ...) is a horizontal system row crop covering the chord band above the melody for that row. "
+        "Each row image contains measures separated by vertical barlines. "
+        "Note: Some measures contain TWO chord boxes (one at beat 1.0, one at beat 3.0). "
+        "Both chord boxes in the same measure MUST have the SAME measure_in_row (between 1 and the number of measures in that row)! "
+        "Do NOT increment measure_in_row unless crossing a vertical barline into the next measure. "
+        "IMPORTANT: Ignore volta repeat ending brackets (e.g. [1. 2.], [2. 3.], 1., 2.) and section names; transcribe ONLY harmonic chord boxes! "
+        "For each chord box from left to right, report: "
+        "1. measure_in_row: 1-based measure index within this row (count barlines from left to right: 1 for leftmost measure, 2 for second, etc.) "
+        "2. beat: 1.0 for the first chord in the measure, 3.0 for the second chord in the measure "
+        "3. chord: exact printed chord text (e.g. '1(2)', '5/7', '5m6/2', '67/1#', '6m7-5', '5', '5sus', '2m7/5') "
+        "4. approx_x: horizontal position from 0.0 (left edge) to 1.0 (right edge)"
+    )
+    try:
+        row_resp = ask_json(
+            prompt=row_prompt,
+            schema=PageRowTranscriptionResponse,
+            images=row_crops,
+            role="reader",
+            timeout_s=45.0,
+        )
+        return p_idx, valid_p_systems, {r.row_index: r.chords for r in row_resp.rows}
+    except Exception as exc:
+        logger.warning("Row chord transcription failed on page %d: %s", p_idx + 1, exc)
+        return p_idx, valid_p_systems, {}
+
+
 def _read_page_crops(page_num: int, items: list[dict[str, Any]]) -> dict[tuple[int, int], str]:
     """Read all chord box crops for a single page in one Gemini Flash call."""
     if not items:
@@ -162,10 +440,18 @@ def _read_page_crops(page_num: int, items: list[dict[str, Any]]) -> dict[tuple[i
             timeout_s=60.0,
         )
         res: dict[tuple[int, int], str] = {}
-        for it, reading in zip(items, batch_resp.readings):
-            clean_c = reading.chord.strip()
-            if clean_c:
-                res[it["key"]] = clean_c
+        idx_to_reading = {
+            r.crop_index: r.chord.strip() for r in batch_resp.readings if r.crop_index
+        }
+        for i, it in enumerate(items, 1):
+            chord_str = idx_to_reading.get(i)
+            if chord_str:
+                res[it["key"]] = chord_str
+            elif not idx_to_reading and i <= len(batch_resp.readings):
+                # Fallback to positional index only if model omitted crop_index entirely
+                clean_c = batch_resp.readings[i - 1].chord.strip()
+                if clean_c:
+                    res[it["key"]] = clean_c
         return res
     except Exception as exc:
         logger.warning("Crop re-read failed on page %d: %s", page_num + 1, exc)
@@ -349,21 +635,125 @@ def verify_sheet(
 
     new_issues: list[QualityIssue] = list(verified.issues)
 
+    can_use_llm = use_llm and llm_available()
+    if not can_use_llm:
+        new_issues.append(
+            QualityIssue(
+                stage="omr",
+                severity="info",
+                code="llm_unavailable",
+                message="LLM验证服务不可用或未启用，降级为先验规则验证",
+            )
+        )
+
+    # Decode page images with OpenCV for cropping
+    cv2_pages: list[Optional[np.ndarray]] = []
+    for p_bytes in pages:
+        arr = np.frombuffer(p_bytes, np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        cv2_pages.append(img)
+
     # 1. Structural Checks: Key Change Detection from Header
     header_raw = verified.header.raw or ""
-    if "(F# - Ab)" in header_raw or "2調" in header_raw:
-        if not verified.key_changes:
-            verified.key_changes.append(
-                KeyChange(at_measure=50, raw="(轉成2調)(Ab)", semitones=2)
+    expected_shift = parse_header_key_changes(header_raw, verified.header)
+    detected_shift = sum(kc.semitones for kc in verified.key_changes)
+
+    if expected_shift != 0 and expected_shift != detected_shift:
+        key_change_restored = False
+        if can_use_llm and pages:
+            locate_prompt = (
+                "You are analyzing a page of a Taiwanese band chart sheet music. "
+                f"Find any mid-page key-change annotations (such as '轉 N 調', '轉{'成'} N 調', '轉調', 'Key:', '1=X'). "
+                "Do NOT include initial song header key signatures at the top of page 1. "
+                "For each annotation found: "
+                "1. system_index: 0-based index of the system row on this page (0 is top row, 1 is 2nd row, etc.) "
+                "2. measure_index: 0-based measure index within that row (0 for 1st bar, 1 for 2nd bar, 2 for 3rd bar, etc.) "
+                "3. approx_x: horizontal position from 0.0 (left edge) to 1.0 (right edge) where annotation appears "
+                "4. verbatim_text: exact printed text "
+                "5. semitones: signed integer semitones modulated (e.g. 2 for 2 semitones)."
             )
+            for p_idx, p_bytes in enumerate(pages):
+                try:
+                    resp = ask_json(
+                        prompt=locate_prompt,
+                        schema=PageKeyLocateResponse,
+                        images=[p_bytes],
+                        role="reader",
+                        timeout_s=45.0,
+                    )
+                    page_systems = [s for s in verified.systems if s.page == p_idx]
+                    for ann in resp.annotations:
+                        s_idx = ann.system_index
+                        target_sys = None
+                        if 0 <= s_idx < len(page_systems):
+                            target_sys = page_systems[s_idx]
+                        elif 1 <= s_idx <= len(page_systems):
+                            target_sys = page_systems[s_idx - 1]
+                        if target_sys is None:
+                            continue
+
+                        target_meas = None
+                        if ann.approx_x is not None:
+                            target_meas = next(
+                                (m for m in target_sys.measures if m.bbox[0] - 0.05 <= ann.approx_x <= m.bbox[2] + 0.05),
+                                None,
+                            )
+                        if target_meas is None:
+                            m_idx = ann.measure_index
+                            if 0 <= m_idx < len(target_sys.measures):
+                                target_meas = target_sys.measures[m_idx]
+                            elif 1 <= m_idx <= len(target_sys.measures):
+                                target_meas = target_sys.measures[m_idx - 1]
+                        if target_meas is None:
+                            continue
+
+                        ann_semi = ann.semitones
+                        parsed_semi = _parse_semitones_from_annotation(
+                            ann.verbatim_text,
+                            expected_shift,
+                            verified.header.original_key,
+                        )
+                        match_semi = (
+                            ann_semi == expected_shift
+                            or parsed_semi == expected_shift
+                            or ("轉" in ann.verbatim_text and str(abs(expected_shift)) in ann.verbatim_text)
+                        )
+
+                        if match_semi:
+                            global_m = target_meas.index
+                            verified.key_changes.append(
+                                KeyChange(
+                                    at_measure=global_m,
+                                    raw=ann.verbatim_text,
+                                    semitones=expected_shift,
+                                )
+                            )
+                            new_issues.append(
+                                QualityIssue(
+                                    stage="omr",
+                                    measure_index=global_m,
+                                    severity="auto_fixed",
+                                    code="key_change_restored",
+                                    message=f"根据曲谱标题及画面定位恢复第{global_m + 1}小节转调标记：{ann.verbatim_text} ({expected_shift:+d}半音)",
+                                    detail={"at_measure": global_m, "raw": ann.verbatim_text, "semitones": expected_shift},
+                                )
+                            )
+                            key_change_restored = True
+                            break
+                    if key_change_restored:
+                        break
+                except Exception as exc:
+                    logger.warning("Key change locate failed on page %d: %s", p_idx + 1, exc)
+
+        if not key_change_restored:
             new_issues.append(
                 QualityIssue(
                     stage="omr",
-                    measure_index=50,
-                    severity="auto_fixed",
-                    code="key_change_restored",
-                    message="根据曲谱标题 '(F# - Ab)' 恢复第51小节转调标记：(轉成2調)(Ab) +2半音",
-                    detail={"at_measure": 50, "semitones": 2},
+                    measure_index=None,
+                    severity="needs_review",
+                    code="key_change_unlocated",
+                    message="谱头显示有转调但未能定位，请在核对表中设置转调小节",
+                    detail={"expected_semitones": expected_shift, "detected_semitones": detected_shift},
                 )
             )
 
@@ -389,13 +779,6 @@ def verify_sheet(
                 )
             )
 
-    # Decode page images with OpenCV for cropping
-    cv2_pages: list[Optional[np.ndarray]] = []
-    for p_bytes in pages:
-        arr = np.frombuffer(p_bytes, np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        cv2_pages.append(img)
-
     # Collect all measures and pre-parse melodies
     all_measures = verified.measures()
     measure_map: dict[int, Measure] = {m.index: m for m in all_measures}
@@ -416,44 +799,410 @@ def verify_sheet(
                 )
             )
 
-    # 2b. Structural Checks: Missing Dominant in ii-V Cadences
-    for m in all_measures:
-        if m.beats == 4.0 and len(m.chords) == 1:
-            c0 = m.chords[0]
-            if c0.beat == 1.0 and c0.raw in ("2m7/5", "2m/5", "5m6/2"):
-                m.chords.append(
-                    ChordSymbol(
-                        raw="5",
-                        beat=3.0,
-                        confidence=0.85,
-                        alternatives=["57", "5sus"],
-                    )
+    # 2a. Visual Row-Level Chord Transcription & Sequence Alignment
+    row_aligned_restored_measures: set[int] = set()
+    if can_use_llm and cv2_pages:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(cv2_pages))) as executor:
+            p_futs = [
+                executor.submit(
+                    _transcribe_page_row,
+                    p_idx,
+                    cv2_pages[p_idx],
+                    [s for s in verified.systems if s.page == p_idx],
                 )
+                for p_idx in range(len(cv2_pages))
+            ]
+            page_transcription_results = [f.result() for f in p_futs]
+
+        candidate_insertions: list[dict[str, Any]] = []
+        for p_idx, valid_p_systems, row_dict in page_transcription_results:
+            page_img = cv2_pages[p_idx]
+            if page_img is None or not valid_p_systems:
+                continue
+            for r_idx, s in enumerate(valid_p_systems):
+                tc_list = row_dict.get(r_idx, [])
+                m_tc_map = map_transcribed_chords_to_measures(s, tc_list)
+                for m in s.measures:
+                    m_tcs = m_tc_map.get(m.index, [])
+                    unmatched_sheet, cands = align_measure_chords(m.chords, m_tcs)
+                    for us in unmatched_sheet:
+                        us.confidence = min(us.confidence, 0.70)
+                    for cand in cands:
+                        candidate_insertions.append({
+                            "system": s,
+                            "measure": m,
+                            "candidate_chord": cand.chord.strip(),
+                            "candidate_beat": cand.beat,
+                            "page_img": page_img,
+                            "page_idx": p_idx,
+                        })
+
+        if candidate_insertions:
+            arb_images: list[bytes] = []
+            arb_items: list[dict[str, Any]] = []
+            for item in candidate_insertions:
+                m = item["measure"]
+                s = item["system"]
+                p_img = item["page_img"]
+                c_crop = _crop_measure(p_img, s, m)
+                if c_crop:
+                    arb_images.append(c_crop)
+                    item["img_idx"] = len(arb_images) - 1
+                    item["item_id"] = len(arb_items) + 1
+                    arb_items.append(item)
+
+            if arb_items:
+                prompt_lines = [
+                    "You are an expert chord arbiter for Taiwanese band charts. "
+                    "Review each measure crop image below to evaluate a candidate missing chord box.\n"
+                ]
+                for item in arb_items:
+                    m = item["measure"]
+                    prompt_lines.append(
+                        f"Item {item['item_id']} (Image #{item['img_idx']}, Measure {m.index + 1} in song):\n"
+                        f"- Reading 1 (parsed sheet): {[c.raw for c in m.chords] if m.chords else 'No chords'}\n"
+                        f"- Reading 2 (row transcription): suggests missing chord box '{item['candidate_chord']}' around beat {item['candidate_beat']:.1f}\n"
+                    )
+                prompt_lines.append(
+                    "For each item, inspect the corresponding measure image: is there an actual printed chord box "
+                    "matching Reading 2 printed in this measure? "
+                    "Confirm only if the chord box ink is clearly visible. Provide confidence score (0.0 to 1.0)."
+                )
+                arbiter_prompt = "\n".join(prompt_lines)
+                try:
+                    arbiter_resp = ask_json(
+                        prompt=arbiter_prompt,
+                        schema=CandidateInsertionBatchResponse,
+                        images=arb_images,
+                        role="arbiter",
+                        timeout_s=60.0,
+                    )
+                    dec_map = {d.item_id: d for d in arbiter_resp.decisions}
+                    for item in arb_items:
+                        m = item["measure"]
+                        cand_c = item["candidate_chord"]
+                        cand_b = item["candidate_beat"]
+                        dec = dec_map.get(item["item_id"])
+                        is_confirmed = dec and dec.confirmed and dec.confidence >= 0.8
+                        confirmed_c = (dec.confirmed_chord.strip() if dec and dec.confirmed_chord else cand_c) if is_confirmed else None
+
+                        row_aligned_restored_measures.add(m.index)
+                        if dec and not dec.confirmed:
+                            # Candidate was rejected by arbiter upon inspecting the measure crop.
+                            # Discard false candidate without flagging needs_review.
+                            continue
+
+                        if is_confirmed and confirmed_c:
+                            try:
+                                parse_chord(confirmed_c)
+                                matching_existing = next(
+                                    (
+                                        c
+                                        for c in m.chords
+                                        if abs(c.beat - cand_b) < 0.5
+                                        and (
+                                            c.raw in generate_candidates(confirmed_c)
+                                            or confirmed_c in generate_candidates(c.raw)
+                                            or _simplify_chord(c.raw) == _simplify_chord(confirmed_c)
+                                        )
+                                    ),
+                                    None,
+                                )
+                                if matching_existing is not None:
+                                    orig_raw = matching_existing.raw
+                                    if orig_raw != confirmed_c:
+                                        matching_existing.raw = confirmed_c
+                                        matching_existing.confidence = dec.confidence
+                                        new_issues.append(
+                                            QualityIssue(
+                                                stage="omr",
+                                                measure_index=m.index,
+                                                severity="auto_fixed",
+                                                code="chord_corrected",
+                                                message=f"第{m.index + 1}小节和弦由 {orig_raw} 更正为 {confirmed_c}（行级转录与仲裁确认）",
+                                                detail={
+                                                    "measure": m.index,
+                                                    "original": orig_raw,
+                                                    "corrected": confirmed_c,
+                                                    "confidence": dec.confidence,
+                                                },
+                                            )
+                                        )
+                                else:
+                                    assigned_beat = cand_b
+                                    existing_beats = [c.beat for c in m.chords]
+                                    if any(abs(b - assigned_beat) < 0.5 for b in existing_beats):
+                                        if not any(abs(b - 3.0) < 0.5 for b in existing_beats):
+                                            assigned_beat = 3.0
+                                        elif not any(abs(b - 1.0) < 0.5 for b in existing_beats):
+                                            assigned_beat = 1.0
+                                    if not any(abs(c.beat - assigned_beat) < 0.5 for c in m.chords):
+                                        m.chords.append(
+                                            ChordSymbol(
+                                                raw=confirmed_c,
+                                                beat=assigned_beat,
+                                                confidence=dec.confidence,
+                                            )
+                                        )
+                                        m.chords.sort(key=lambda c: c.beat)
+                                        new_issues.append(
+                                            QualityIssue(
+                                                stage="omr",
+                                                measure_index=m.index,
+                                                severity="auto_fixed",
+                                                code="chord_restored",
+                                                message=f"第{m.index + 1}小节行级转录识别并经仲裁确认恢复和弦 '{confirmed_c}'（置信度 {dec.confidence:.2f}）",
+                                                detail={"measure": m.index, "restored": confirmed_c, "beat": assigned_beat, "confidence": dec.confidence},
+                                            )
+                                        )
+                            except Exception:
+                                new_issues.append(
+                                    QualityIssue(
+                                        stage="omr",
+                                        measure_index=m.index,
+                                        severity="needs_review",
+                                        code="missing_chord_suspected",
+                                        message=f"第{m.index + 1}小节行级转录疑似存在和弦 '{cand_c}'，但格式无法识别",
+                                        detail={"measure": m.index, "candidate": cand_c, "beat": cand_b},
+                                    )
+                                )
+                        else:
+                            conf_val = dec.confidence if dec else 0.0
+                            new_issues.append(
+                                QualityIssue(
+                                    stage="omr",
+                                    measure_index=m.index,
+                                    severity="needs_review",
+                                    code="missing_chord_suspected",
+                                    message=f"第{m.index + 1}小节行级转录疑似存在和弦 '{cand_c}'（拍数 {cand_b:.1f}），请核对",
+                                    detail={"measure": m.index, "candidate": cand_c, "beat": cand_b, "arbiter_confidence": conf_val},
+                                )
+                            )
+                except Exception as exc:
+                    logger.warning("Candidate insertion arbiter call failed: %s", exc)
+                    for item in arb_items:
+                        m = item["measure"]
+                        cand_c = item["candidate_chord"]
+                        cand_b = item["candidate_beat"]
+                        row_aligned_restored_measures.add(m.index)
+                        new_issues.append(
+                            QualityIssue(
+                                stage="omr",
+                                measure_index=m.index,
+                                severity="needs_review",
+                                code="missing_chord_suspected",
+                                message=f"第{m.index + 1}小节行级转录疑似存在和弦 '{cand_c}'（拍数 {cand_b:.1f}），请核对",
+                                detail={"measure": m.index, "candidate": cand_c, "beat": cand_b},
+                            )
+                        )
+
+    # 2b. Structural Checks: Missing Chord Inspection (Crop Re-Read + Arbiter Confirmation)
+    suspected_missing_measures: list[dict[str, Any]] = []
+    for m in all_measures:
+        if m.index in row_aligned_restored_measures:
+            continue
+        pm = parsed_melodies.get(m.index)
+        m_notes = pm.notes if pm else []
+
+        prev_c = None
+        if m.index > 0 and measure_map[m.index - 1].chords:
+            prev_c = measure_map[m.index - 1].chords[-1].raw
+
+        next_c = None
+        if m.index + 1 < len(all_measures) and measure_map[m.index + 1].chords:
+            next_c = measure_map[m.index + 1].chords[0].raw
+
+        if len(m.chords) == 0:
+            carried_fit = melody_fit(prev_c, m_notes, 1.0, m.beats) if prev_c else 0.0
+            if m.fill or carried_fit < 0.35:
+                suspected_missing_measures.append({
+                    "measure": m,
+                    "beat": 1.0,
+                    "reason": "empty_measure_melody_clash",
+                })
+        elif len(m.chords) == 1 and m.beats >= 4.0:
+            c0 = m.chords[0]
+            if c0.beat >= 2.5:
+                suspected_missing_measures.append({
+                    "measure": m,
+                    "beat": 1.0,
+                    "reason": "starts_late",
+                })
+            elif c0.beat <= 2.0:
+                h2_notes = [n for n in m_notes if n[0] >= 2.8]
+                fit_h2 = melody_fit(c0.raw, h2_notes, chord_beat=3.0, chord_duration=2.0)
+                is_cadence = False
+                if next_c:
+                    try:
+                        s0 = parse_chord(c0.raw)
+                        s1 = parse_chord(next_c)
+                        if s0.degree in (2, 4) and s1.degree in (1, 6):
+                            is_cadence = True
+                    except Exception:
+                        pass
+                if m.fill:
+                    suspected_missing_measures.append({
+                        "measure": m,
+                        "beat": 3.0,
+                        "reason": "fill_measure",
+                    })
+                elif is_cadence and fit_h2 < 0.30 and len(h2_notes) >= 2:
+                    suspected_missing_measures.append({
+                        "measure": m,
+                        "beat": 3.0,
+                        "reason": "cadence_measure",
+                    })
+
+    for it in suspected_missing_measures:
+        m = it["measure"]
+        sus_beat = it["beat"]
+        m_sys = next((s for s in verified.systems if any(meas.index == m.index for meas in s.measures)), None)
+        p_idx = m_sys.page if m_sys else 0
+        img_bgr = cv2_pages[p_idx] if p_idx < len(cv2_pages) else None
+
+        if not can_use_llm or img_bgr is None or m_sys is None:
+            new_issues.append(
+                QualityIssue(
+                    stage="omr",
+                    measure_index=m.index,
+                    severity="needs_review",
+                    code="missing_chord_suspected",
+                    message=f"第{m.index + 1}小节疑似遗漏和弦，请核对",
+                    detail={"measure": m.index, "beat": sus_beat},
+                )
+            )
+            continue
+
+        crop_bytes = _crop_measure(img_bgr, m_sys, m)
+        if not crop_bytes:
+            new_issues.append(
+                QualityIssue(
+                    stage="omr",
+                    measure_index=m.index,
+                    severity="needs_review",
+                    code="missing_chord_suspected",
+                    message=f"第{m.index + 1}小节疑似遗漏和弦，请核对",
+                    detail={"measure": m.index, "beat": sus_beat},
+                )
+            )
+            continue
+
+        reader_prompt = (
+            f"Examine this measure crop from a Taiwanese band chart sheet music (measure {m.index + 1}). "
+            f"Are there any printed chord boxes (e.g. '1(2)', '5', '5/7', '2m7/5', etc.) around beat {sus_beat}? "
+            "Return any chord box printed in this measure with its raw text and beat."
+        )
+        try:
+            reader_resp = ask_json(
+                prompt=reader_prompt,
+                schema=MeasureCropChordResponse,
+                images=[crop_bytes],
+                role="reader",
+                timeout_s=30.0,
+            )
+            valid_cands: list[DetectedMeasureChordBox] = []
+            for b in reader_resp.chords:
+                try:
+                    parse_chord(b.chord.strip())
+                    if not any(abs(c.beat - b.beat) < 0.5 for c in m.chords):
+                        valid_cands.append(b)
+                except Exception:
+                    continue
+
+            if valid_cands:
+                top_cand = valid_cands[0]
+                cand_chord = top_cand.chord.strip()
+                cand_beat = top_cand.beat
+
+                arbiter_prompt = (
+                    f"You are an expert chord arbiter for Taiwanese band charts. "
+                    f"Review this measure crop image (measure {m.index + 1}). "
+                    f"The reader detected a possible chord box '{cand_chord}' around beat {cand_beat}. "
+                    f"Inspect the image: is there an actual printed chord box with text '{cand_chord}' in this measure? "
+                    "Confirm only if you clearly see the chord box ink printed in the image."
+                )
+                arbiter_resp = ask_json(
+                    prompt=arbiter_prompt,
+                    schema=MissingChordArbiterConfirmation,
+                    images=[crop_bytes],
+                    role="arbiter",
+                    timeout_s=45.0,
+                )
+                if (
+                    arbiter_resp.confirmed
+                    and arbiter_resp.confidence >= 0.8
+                    and arbiter_resp.confirmed_chord
+                ):
+                    clean_c = arbiter_resp.confirmed_chord.strip()
+                    try:
+                        parse_chord(clean_c)
+                        m.chords.append(
+                            ChordSymbol(
+                                raw=clean_c,
+                                beat=cand_beat,
+                                confidence=arbiter_resp.confidence,
+                            )
+                        )
+                        m.chords.sort(key=lambda c: c.beat)
+                        new_issues.append(
+                            QualityIssue(
+                                stage="omr",
+                                measure_index=m.index,
+                                severity="auto_fixed",
+                                code="chord_restored",
+                                message=f"第{m.index + 1}小节在图像中识别并经仲裁确认恢复和弦 '{clean_c}'（置信度 {arbiter_resp.confidence:.2f}）",
+                                detail={"measure": m.index, "restored": clean_c, "beat": cand_beat, "confidence": arbiter_resp.confidence},
+                            )
+                        )
+                    except Exception:
+                        new_issues.append(
+                            QualityIssue(
+                                stage="omr",
+                                measure_index=m.index,
+                                severity="needs_review",
+                                code="missing_chord_suspected",
+                                message=f"第{m.index + 1}小节疑似遗漏和弦（候选：'{cand_chord}'），请核对",
+                                detail={"measure": m.index, "candidate": cand_chord, "beat": cand_beat},
+                            )
+                        )
+                else:
+                    new_issues.append(
+                        QualityIssue(
+                            stage="omr",
+                            measure_index=m.index,
+                            severity="needs_review",
+                            code="missing_chord_suspected",
+                            message=f"第{m.index + 1}小节疑似遗漏和弦（候选：'{cand_chord}'），请核对",
+                            detail={"measure": m.index, "candidate": cand_chord, "beat": cand_beat, "arbiter_confidence": arbiter_resp.confidence},
+                        )
+                    )
+            else:
                 new_issues.append(
                     QualityIssue(
                         stage="omr",
                         measure_index=m.index,
-                        severity="auto_fixed",
-                        code="chord_restored",
-                        message=f"第{m.index + 1}小节在{c0.raw}后第3拍恢复遗漏的属和弦 '5'",
-                        detail={"measure": m.index, "restored": "5", "beat": 3.0},
+                        severity="needs_review",
+                        code="missing_chord_suspected",
+                        message=f"第{m.index + 1}小节疑似遗漏和弦，请核对",
+                        detail={"measure": m.index, "beat": sus_beat},
                     )
                 )
+        except Exception as exc:
+            logger.warning("Missing chord check failed on m%d: %s", m.index, exc)
+            new_issues.append(
+                QualityIssue(
+                    stage="omr",
+                    measure_index=m.index,
+                    severity="needs_review",
+                    code="missing_chord_suspected",
+                    message=f"第{m.index + 1}小节疑似遗漏和弦，请核对",
+                    detail={"measure": m.index, "beat": sus_beat},
+                )
+            )
 
     # 3. Crop Re-Read per Page using role='reader'
     crop_readings_map: dict[tuple[int, int], str] = {}
     crop_images_map: dict[tuple[int, int], bytes] = {}
-
-    can_use_llm = use_llm and llm_available()
-    if not can_use_llm:
-        new_issues.append(
-            QualityIssue(
-                stage="omr",
-                severity="info",
-                code="llm_unavailable",
-                message="LLM验证服务不可用或未启用，降级为先验规则验证",
-            )
-        )
 
     chords_to_read: list[dict[str, Any]] = []
     for s in verified.systems:
@@ -661,7 +1410,12 @@ def verify_sheet(
                     continue
 
                 # 4e. Check for decisive prior superiority
-                if is_crop_valid and top_cand == raw_crop and (top_score - second_score >= 0.15):
+                if (
+                    is_crop_valid
+                    and top_cand == raw_crop
+                    and raw_crop in generate_candidates(raw_full)
+                    and (top_score - second_score >= 0.10)
+                ):
                     orig_raw = raw_full
                     c.raw = top_cand
                     c.confidence = 0.92

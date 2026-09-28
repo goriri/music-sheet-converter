@@ -4,9 +4,12 @@ Tests:
 1. Melody parsing: tokens, onsets, accidentals, beat-sum, robustness, no exceptions.
 2. Music theory priors: melody_fit, bass_hint_fit, progression_plausibility.
 3. Candidate generation: OCR confusions (accidentals, m/M7, 6/b, slash 1/7, sus).
-4. Decision rule & issue generation: concordance, auto-fixes, needs_review.
-5. Structural checks: key changes restored from header, 2nd chord beats, melody mismatches.
-6. Graceful degradation: offline mode (QA_OFFLINE=1) degrades cleanly with info issue.
+4. Header key pair parsing: various formats, semitones mod 12 smaller signed value.
+5. Located key-change -> auto_fixed with image confirmation.
+6. Unlocated key-change -> needs_review, never invent a location.
+7. Missing chord inspection: no chord insertion without arbiter confirmation (confidence >= 0.8).
+8. Decision rule & issue generation: concordance, beat corrections, melody mismatches.
+9. Graceful degradation: offline mode (QA_OFFLINE=1) degrades cleanly with info issue.
 """
 
 from __future__ import annotations
@@ -14,12 +17,30 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 import pytest
 
-from app.models import ChordSymbol, Measure, PageInfo, ParsedSheet, SongHeader, System
+from app.models import ChordSymbol, Measure, PageInfo, ParsedSheet, QualityIssue, SongHeader, System
 from app.qa.llm import LLMUnavailable, ask_json, llm_available
 from app.qa.melody import ParsedMelody, parse_melody
-from app.qa.omr_verify import verify_sheet
+from app.qa.omr_verify import (
+    ArbiterBatchResponse,
+    CandidateInsertionBatchResponse,
+    CandidateInsertionDecision,
+    DetectedMeasureChordBox,
+    LocatedKeyAnnotation,
+    MeasureCropChordResponse,
+    MissingChordArbiterConfirmation,
+    PageCropReadings,
+    PageKeyLocateResponse,
+    PageRowTranscriptionResponse,
+    RowTranscribedChord,
+    SystemRowChords,
+    align_measure_chords,
+    map_transcribed_chords_to_measures,
+    parse_header_key_changes,
+    verify_sheet,
+)
 from app.qa.priors import (
     bass_hint_fit,
     generate_candidates,
@@ -34,15 +55,14 @@ from app.qa.priors import (
 # ---------------------------------------------------------------------------
 
 def test_melody_parsing_standard_beat_groups():
-    res = parse_melody("2 2 23 21", beats=4.0)
+    res = parse_melody("2 2 12 21", beats=4.0)
     assert res is not None
     assert res.beat_sum == 4.0
     assert len(res.notes) == 6
-    # Check onsets and degrees
     assert res.notes[0] == (1.0, 2, 0)
     assert res.notes[1] == (2.0, 2, 0)
-    assert res.notes[2] == (3.0, 2, 0)
-    assert res.notes[3] == (3.5, 3, 0)
+    assert res.notes[2] == (3.0, 1, 0)
+    assert res.notes[3] == (3.5, 2, 0)
     assert res.notes[4] == (4.0, 2, 0)
     assert res.notes[5] == (4.5, 1, 0)
 
@@ -61,7 +81,6 @@ def test_melody_parsing_dashes_and_rests():
     res = parse_melody("2 - 0 0", beats=4.0)
     assert res is not None
     assert res.beat_sum == 4.0
-    # Rest 0 excluded by default from pitched notes
     assert len(res.notes) == 1
     assert res.notes[0] == (1.0, 2, 0)
 
@@ -72,13 +91,12 @@ def test_melody_parsing_high_and_low_octave():
     assert res.beat_sum == 4.0
     degrees = [n[1] for n in res.notes]
     assert 7 in degrees
-    assert 1 in degrees  # 'i' parsed as degree 1
+    assert 1 in degrees
 
 
 def test_melody_parsing_accidentals():
     res = parse_melody("0 b76 b77 11", beats=4.0)
     assert res is not None
-    # b7 should have accidental -1
     b7_notes = [n for n in res.notes if n[1] == 7 and n[2] == -1]
     assert len(b7_notes) >= 2
 
@@ -86,7 +104,7 @@ def test_melody_parsing_accidentals():
 def test_melody_parsing_missing_beats():
     res = parse_melody("2 2", beats=4.0)
     assert res is not None
-    assert res.beat_sum == 2.0  # Detects missing 2 beats!
+    assert res.beat_sum == 2.0
 
 
 def test_melody_parsing_never_raises_on_garbage():
@@ -101,13 +119,11 @@ def test_melody_parsing_never_raises_on_garbage():
 # ---------------------------------------------------------------------------
 
 def test_priors_melody_fit_high():
-    # 1(2) in key C: notes C(0), D(2), E(4), G(7). Melody notes D(degree 2)
     score = melody_fit("1(2)", [(1.0, 2, 0), (2.0, 2, 0)], chord_beat=1.0, chord_duration=2.0)
     assert score == 1.0
 
 
 def test_priors_melody_fit_clash():
-    # 1(2) in key C: notes C, D, E, G. Melody note F#(degree 4, acc 1) or Bb(deg 7, acc -1)
     score = melody_fit("1(2)", [(1.0, 4, 1), (2.0, 4, 1)], chord_beat=1.0, chord_duration=2.0)
     assert score == 0.0
 
@@ -126,39 +142,50 @@ def test_priors_progression_plausibility():
     assert progression_plausibility("5m/7b", prev_chord="5/7", next_chord="5m6/2") == 1.0
     assert progression_plausibility("2m7", prev_chord="67/1#") == 1.0
     assert progression_plausibility("6m7-5", prev_chord="6b") == 1.0
-    # Implausible transition: tritone jump 1 -> 4#
     score_weird = progression_plausibility("4#", prev_chord="1")
-    assert score_weird <= 0.50
+    assert score_weird <= 0.5
 
 
 def test_candidate_generation_rules():
-    # 1. Accidental dropped in slash bass
     cands_5m7 = generate_candidates("5m/7")
     assert "5m/7b" in cands_5m7
 
-    # 2. Accidental dropped in borrowed chord
     cands_6 = generate_candidates("6")
     assert "6b" in cands_6
 
-    # 3. M7 <-> 7
     cands_47 = generate_candidates("47")
     assert "4M7" in cands_47
 
-    # 4. Lost (2)
     cands_1 = generate_candidates("1")
     assert "1(2)" in cands_1
 
-    # 5. 5sus <-> 57sus
     cands_5sus = generate_candidates("5sus")
     assert "57sus" in cands_5sus
 
-    # 6. Lost 'm'
     cands_27 = generate_candidates("27")
     assert "2m7" in cands_27
 
 
 # ---------------------------------------------------------------------------
-# 3. OMR Verification Layer Tests (Offline / QA_OFFLINE=1)
+# 3. Header Key Pair Parsing Tests
+# ---------------------------------------------------------------------------
+
+def test_parse_header_key_changes_various_formats():
+    assert parse_header_key_changes("(F# - Ab)") == 2
+    assert parse_header_key_changes("(F#-Ab)") == 2
+    assert parse_header_key_changes("F#→Ab") == 2
+    assert parse_header_key_changes("F#->Ab") == 2
+    assert parse_header_key_changes("男調(Bb-C) 女調(F-G)") == 2
+    assert parse_header_key_changes("(C - D)") == 2
+    assert parse_header_key_changes("(G - E)") == -3
+    assert parse_header_key_changes("(A - F#)") == -3
+    assert parse_header_key_changes("[降B - C]") == 2
+    assert parse_header_key_changes("Slow Soul 4/4") == 0
+    assert parse_header_key_changes("") == 0
+
+
+# ---------------------------------------------------------------------------
+# 4. OMR Verification Layer Tests
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -170,7 +197,6 @@ def clean_sheet() -> ParsedSheet:
 
 @pytest.fixture
 def dummy_images() -> list[bytes]:
-    # 1x1 dummy JPEGs
     import cv2
     import numpy as np
     img = np.ones((100, 100, 3), dtype=np.uint8) * 255
@@ -185,74 +211,403 @@ def test_verify_sheet_offline_clean(monkeypatch, clean_sheet, dummy_images):
     needs_review = [i for i in verified.issues if i.severity == "needs_review"]
     auto_fixed = [i for i in verified.issues if i.severity == "auto_fixed"]
 
-    # Target: clean fixture <= 2 needs_review and 0 wrong auto-fixes
     assert len(needs_review) <= 2
     assert len(auto_fixed) == 0
 
-    # Ensure valid chords were preserved
-    m0_chord = verified.systems[0].measures[0].chords[0].raw
-    assert m0_chord == "1(2)"
+    first_chord = verified.systems[0].measures[0].chords[0].raw
+    assert first_chord == "1(2)"
 
 
-def test_verify_sheet_restores_missing_key_change(monkeypatch, clean_sheet, dummy_images):
-    monkeypatch.setenv("QA_OFFLINE", "1")
-    # Simulate corrupted sheet where key_changes was stripped
+def _mock_ask_json_located(prompt: str, schema: Any, images=None, role: str = "reader", timeout_s: float = 60.0):
+    if schema == PageKeyLocateResponse:
+        return PageKeyLocateResponse(
+            annotations=[
+                LocatedKeyAnnotation(
+                    system_index=0,
+                    measure_index=0,
+                    approx_x=0.15,
+                    verbatim_text="轉2調",
+                    semitones=2,
+                )
+            ]
+        )
+    elif schema == PageRowTranscriptionResponse:
+        return PageRowTranscriptionResponse(rows=[])
+    elif schema == CandidateInsertionBatchResponse:
+        return CandidateInsertionBatchResponse(decisions=[])
+    elif schema == PageCropReadings:
+        return PageCropReadings(crops=[])
+    elif schema == ArbiterBatchResponse:
+        return ArbiterBatchResponse(decisions=[])
+    raise RuntimeError(f"Unexpected schema: {schema}")
+
+
+def _mock_ask_json_unlocated(prompt: str, schema: Any, images=None, role: str = "reader", timeout_s: float = 60.0):
+    if schema == PageKeyLocateResponse:
+        return PageKeyLocateResponse(annotations=[])
+    elif schema == PageRowTranscriptionResponse:
+        return PageRowTranscriptionResponse(rows=[])
+    elif schema == CandidateInsertionBatchResponse:
+        return CandidateInsertionBatchResponse(decisions=[])
+    elif schema == PageCropReadings:
+        return PageCropReadings(crops=[])
+    elif schema == ArbiterBatchResponse:
+        return ArbiterBatchResponse(decisions=[])
+    raise RuntimeError(f"Unexpected schema: {schema}")
+
+
+def _mock_ask_json_missing_unconfirmed(prompt: str, schema: Any, images=None, role: str = "reader", timeout_s: float = 60.0):
+    if schema == MeasureCropChordResponse:
+        return MeasureCropChordResponse(chords=[DetectedMeasureChordBox(chord="5", beat=3.0, confidence=0.8)])
+    elif schema == MissingChordArbiterConfirmation:
+        return MissingChordArbiterConfirmation(confirmed=False, confidence=0.4, reason="Ink not visible")
+    elif schema == PageRowTranscriptionResponse:
+        return PageRowTranscriptionResponse(rows=[])
+    elif schema == CandidateInsertionBatchResponse:
+        return CandidateInsertionBatchResponse(decisions=[])
+    elif schema == PageCropReadings:
+        return PageCropReadings(crops=[])
+    elif schema == ArbiterBatchResponse:
+        return ArbiterBatchResponse(decisions=[])
+    raise RuntimeError(f"Unexpected schema {schema}")
+
+
+def _mock_ask_json_missing_confirmed(prompt: str, schema: Any, images=None, role: str = "reader", timeout_s: float = 60.0):
+    if schema == MeasureCropChordResponse:
+        return MeasureCropChordResponse(chords=[DetectedMeasureChordBox(chord="5", beat=3.0, confidence=0.8)])
+    elif schema == MissingChordArbiterConfirmation:
+        return MissingChordArbiterConfirmation(confirmed=True, confirmed_chord="5", confidence=0.9, reason="Box clearly visible")
+    elif schema == PageRowTranscriptionResponse:
+        return PageRowTranscriptionResponse(rows=[])
+    elif schema == CandidateInsertionBatchResponse:
+        return CandidateInsertionBatchResponse(decisions=[])
+    elif schema == PageCropReadings:
+        return PageCropReadings(crops=[])
+    elif schema == ArbiterBatchResponse:
+        return ArbiterBatchResponse(decisions=[])
+    raise RuntimeError(f"Unexpected schema {schema}")
+
+
+def _mock_ask_json_row_candidate_confirmed(prompt: str, schema: Any, images=None, role: str = "reader", timeout_s: float = 60.0):
+    if schema == PageRowTranscriptionResponse:
+        return PageRowTranscriptionResponse(
+            rows=[
+                SystemRowChords(
+                    row_index=0,
+                    chords=[
+                        RowTranscribedChord(measure_in_row=1, chord="1(2)", approx_x=0.15, beat=1.0),
+                        RowTranscribedChord(measure_in_row=2, chord="5/7", approx_x=0.35, beat=1.0),
+                        RowTranscribedChord(measure_in_row=3, chord="2m7", approx_x=0.60, beat=1.0),
+                        RowTranscribedChord(measure_in_row=3, chord="5", approx_x=0.75, beat=3.0),
+                    ],
+                )
+            ]
+        )
+    elif schema == CandidateInsertionBatchResponse:
+        return CandidateInsertionBatchResponse(
+            decisions=[
+                CandidateInsertionDecision(
+                    item_id=1,
+                    confirmed=True,
+                    confirmed_chord="5",
+                    confidence=0.92,
+                    reason="Clear 5 chord box visible in measure 3",
+                )
+            ]
+        )
+    elif schema == PageCropReadings:
+        return PageCropReadings(crops=[])
+    elif schema == ArbiterBatchResponse:
+        return ArbiterBatchResponse(decisions=[])
+    raise RuntimeError(f"Unexpected schema: {schema}")
+
+
+def _mock_ask_json_row_candidate_unconfirmed(prompt: str, schema: Any, images=None, role: str = "reader", timeout_s: float = 60.0):
+    if schema == PageRowTranscriptionResponse:
+        return PageRowTranscriptionResponse(
+            rows=[
+                SystemRowChords(
+                    row_index=0,
+                    chords=[
+                        RowTranscribedChord(measure_in_row=1, chord="1(2)", approx_x=0.15, beat=1.0),
+                        RowTranscribedChord(measure_in_row=2, chord="5/7", approx_x=0.35, beat=1.0),
+                        RowTranscribedChord(measure_in_row=3, chord="2m7", approx_x=0.60, beat=1.0),
+                        RowTranscribedChord(measure_in_row=3, chord="5", approx_x=0.75, beat=3.0),
+                    ],
+                )
+            ]
+        )
+    elif schema == CandidateInsertionBatchResponse:
+        return CandidateInsertionBatchResponse(
+            decisions=[
+                CandidateInsertionDecision(
+                    item_id=1,
+                    confirmed=True,
+                    confirmed_chord=None,
+                    confidence=0.35,
+                    reason="Low confidence possible chord box",
+                )
+            ]
+        )
+    elif schema == PageCropReadings:
+        return PageCropReadings(crops=[])
+    elif schema == ArbiterBatchResponse:
+        return ArbiterBatchResponse(decisions=[])
+    raise RuntimeError(f"Unexpected schema: {schema}")
+
+
+def _mock_ask_json_row_candidate_rejected(prompt: str, schema: Any, images=None, role: str = "reader", timeout_s: float = 60.0):
+    if schema == PageRowTranscriptionResponse:
+        return PageRowTranscriptionResponse(
+            rows=[
+                SystemRowChords(
+                    row_index=0,
+                    chords=[
+                        RowTranscribedChord(measure_in_row=1, chord="1(2)", approx_x=0.15, beat=1.0),
+                        RowTranscribedChord(measure_in_row=2, chord="5/7", approx_x=0.35, beat=1.0),
+                        RowTranscribedChord(measure_in_row=3, chord="2m7", approx_x=0.60, beat=1.0),
+                        RowTranscribedChord(measure_in_row=3, chord="5", approx_x=0.75, beat=3.0),
+                    ],
+                )
+            ]
+        )
+    elif schema == CandidateInsertionBatchResponse:
+        return CandidateInsertionBatchResponse(
+            decisions=[
+                CandidateInsertionDecision(
+                    item_id=1,
+                    confirmed=False,
+                    confirmed_chord=None,
+                    confidence=0.10,
+                    reason="No box printed at beat 3; ink is a volta ending bracket",
+                )
+            ]
+        )
+    elif schema == PageCropReadings:
+        return PageCropReadings(crops=[])
+    elif schema == ArbiterBatchResponse:
+        return ArbiterBatchResponse(decisions=[])
+    raise RuntimeError(f"Unexpected schema: {schema}")
+
+
+def test_verify_sheet_located_key_change_auto_fixed(monkeypatch, clean_sheet, dummy_images):
     clean_sheet.key_changes = []
+    clean_sheet.header.raw = "4/4 (C - D)"
+    clean_sheet.header.original_key = "C"
 
-    verified = verify_sheet(dummy_images, clean_sheet, use_llm=False)
-    assert len(verified.key_changes) > 0
+    first_meas = clean_sheet.systems[0].measures[0]
+    expected_m_idx = first_meas.index
+
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_json_located)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(dummy_images, clean_sheet, use_llm=True)
+    assert len(verified.key_changes) == 1
     assert verified.key_changes[0].semitones == 2
+    assert verified.key_changes[0].at_measure == expected_m_idx
 
-    # Verify auto_fixed issue was emitted
     fix_issue = next((i for i in verified.issues if i.code == "key_change_restored"), None)
     assert fix_issue is not None
     assert fix_issue.severity == "auto_fixed"
 
 
+def test_verify_sheet_unlocated_key_change_needs_review(monkeypatch, clean_sheet, dummy_images):
+    clean_sheet.key_changes = []
+    clean_sheet.header.raw = "4/4 (C - D)"
+    clean_sheet.header.original_key = "C"
+
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_json_unlocated)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(dummy_images, clean_sheet, use_llm=True)
+    assert len(verified.key_changes) == 0
+
+    unloc_issue = next((i for i in verified.issues if i.code == "key_change_unlocated"), None)
+    assert unloc_issue is not None
+    assert unloc_issue.severity == "needs_review"
+    assert "谱头显示有转调但未能定位，请在核对表中设置转调小节" in unloc_issue.message
+
+
+def test_no_chord_insertion_without_arbiter_confirmation(monkeypatch, clean_sheet, dummy_images):
+    two_chord_meas = next(
+        m for s in clean_sheet.systems for m in s.measures if m.fill and len(m.chords) >= 2 and m.chords[1].beat == 3.0
+    )
+    del two_chord_meas.chords[1]
+    assert len(two_chord_meas.chords) == 1
+    target_idx = two_chord_meas.index
+
+    # Case A: Arbiter does NOT confirm (confidence < 0.8) -> NO insertion, needs_review
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_json_missing_unconfirmed)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(dummy_images, clean_sheet, use_llm=True)
+    v_meas = next(m for s in verified.systems for m in s.measures if m.index == target_idx)
+    assert len(v_meas.chords) == 1  # Not inserted!
+
+    review_issue = next(
+        (i for i in verified.issues if i.code == "missing_chord_suspected" and i.measure_index == target_idx),
+        None,
+    )
+    assert review_issue is not None
+    assert review_issue.severity == "needs_review"
+
+    # Case B: Arbiter DOES confirm (confidence >= 0.8) -> Auto-fixed and inserted!
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_json_missing_confirmed)
+
+    verified2 = verify_sheet(dummy_images, clean_sheet, use_llm=True)
+    v_meas2 = next(m for s in verified2.systems for m in s.measures if m.index == target_idx)
+    assert len(v_meas2.chords) == 2
+    assert v_meas2.chords[1].raw == "5"
+
+    restored_issue = next(
+        (i for i in verified2.issues if i.code == "chord_restored" and i.measure_index == target_idx),
+        None,
+    )
+    assert restored_issue is not None
+    assert restored_issue.severity == "auto_fixed"
+
+
 def test_verify_sheet_auto_fixes_2nd_chord_beat(monkeypatch, clean_sheet, dummy_images):
     monkeypatch.setenv("QA_OFFLINE", "1")
-    # Corrupt 2nd chord in m11 to beat 1.0
-    meas = [m for s in clean_sheet.systems for m in s.measures if m.index == 11][0]
-    assert len(meas.chords) == 2
-    meas.chords[1].beat = 1.0
+    target_meas = next(
+        m for s in clean_sheet.systems for m in s.measures if len(m.chords) >= 2 and m.chords[1].beat == 3.0
+    )
+    target_idx = target_meas.index
+    target_meas.chords[1].beat = 1.0
 
     verified = verify_sheet(dummy_images, clean_sheet, use_llm=False)
-    v_meas = [m for s in verified.systems for m in s.measures if m.index == 11][0]
+    v_meas = next(m for s in verified.systems for m in s.measures if m.index == target_idx)
     assert v_meas.chords[1].beat == 3.0
 
-    beat_issue = next((i for i in verified.issues if i.code == "chord_beat_corrected"), None)
+    beat_issue = next(
+        (i for i in verified.issues if i.code == "chord_beat_corrected" and i.measure_index == target_idx),
+        None,
+    )
     assert beat_issue is not None
     assert beat_issue.severity == "auto_fixed"
 
 
 def test_verify_sheet_flags_melody_beat_mismatch(monkeypatch, clean_sheet, dummy_images):
     monkeypatch.setenv("QA_OFFLINE", "1")
-    # Truncate melody in m23 to 1 beat
-    meas = [m for s in clean_sheet.systems for m in s.measures if m.index == 23][0]
-    meas.melody = "2"
+    target_meas = clean_sheet.systems[0].measures[0]
+    target_idx = target_meas.index
+    target_meas.melody = "2"
 
     verified = verify_sheet(dummy_images, clean_sheet, use_llm=False)
-    mel_issue = next((i for i in verified.issues if i.code == "melody_beat_sum_mismatch" and i.measure_index == 23), None)
+    mel_issue = next(
+        (i for i in verified.issues if i.code == "melody_beat_sum_mismatch" and i.measure_index == target_idx),
+        None,
+    )
     assert mel_issue is not None
     assert mel_issue.severity == "needs_review"
 
 
 def test_verify_sheet_flags_unparseable_chord(monkeypatch, clean_sheet, dummy_images):
     monkeypatch.setenv("QA_OFFLINE", "1")
-    # Add an unparseable chord 'XYZ'
-    meas = [m for s in clean_sheet.systems for m in s.measures if m.index == 3][0]
-    meas.chords.append(ChordSymbol(raw="XYZ", beat=1.0, bbox=(0.7, 0.1, 0.8, 0.2)))
+    target_meas = clean_sheet.systems[0].measures[0]
+    target_idx = target_meas.index
+    target_meas.chords.append(ChordSymbol(raw="XYZ", beat=1.0, bbox=(0.7, 0.1, 0.8, 0.2)))
 
     verified = verify_sheet(dummy_images, clean_sheet, use_llm=False)
-    bad_issue = next((i for i in verified.issues if i.code == "invalid_chord_grammar" and i.measure_index == 3), None)
+    bad_issue = next(
+        (i for i in verified.issues if i.code == "invalid_chord_grammar" and i.measure_index == target_idx),
+        None,
+    )
     assert bad_issue is not None
     assert bad_issue.severity == "needs_review"
 
 
 def test_verify_sheet_graceful_degradation_on_exception(monkeypatch, clean_sheet, dummy_images):
     monkeypatch.setenv("QA_OFFLINE", "1")
-    # Should never raise even if images are invalid or empty
     result = verify_sheet([], clean_sheet, use_llm=True)
     assert isinstance(result, ParsedSheet)
     info_issues = [i for i in result.issues if i.severity == "info"]
     assert len(info_issues) >= 1
+
+
+def test_align_measure_chords_exact_match():
+    sheet_chords = [ChordSymbol(raw="1(2)", beat=1.0), ChordSymbol(raw="5", beat=3.0)]
+    row_chords = [RowTranscribedChord(chord="1(2)", beat=1.0), RowTranscribedChord(chord="5", beat=3.0)]
+    unmatched_sheet, candidates = align_measure_chords(sheet_chords, row_chords)
+    assert len(unmatched_sheet) == 0
+    assert len(candidates) == 0
+
+
+def test_align_measure_chords_detects_candidate_insertion():
+    sheet_chords = [ChordSymbol(raw="1(2)", beat=1.0)]
+    row_chords = [RowTranscribedChord(chord="1(2)", beat=1.0), RowTranscribedChord(chord="5", beat=3.0)]
+    unmatched_sheet, candidates = align_measure_chords(sheet_chords, row_chords)
+    assert len(unmatched_sheet) == 0
+    assert len(candidates) == 1
+    assert candidates[0].chord == "5"
+    assert candidates[0].beat == 3.0
+
+
+def test_align_measure_chords_detects_unmatched_sheet_chord():
+    sheet_chords = [ChordSymbol(raw="1(2)", beat=1.0), ChordSymbol(raw="4", beat=3.0)]
+    row_chords = [RowTranscribedChord(chord="1(2)", beat=1.0)]
+    unmatched_sheet, candidates = align_measure_chords(sheet_chords, row_chords)
+    assert len(unmatched_sheet) == 1
+    assert unmatched_sheet[0].raw == "4"
+    assert len(candidates) == 0
+
+
+def test_verify_sheet_candidate_insertion_auto_fixed_with_arbiter(monkeypatch, clean_sheet, dummy_images):
+    m2 = clean_sheet.systems[0].measures[2]
+    target_idx = m2.index
+    orig_count = len(m2.chords)
+
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_json_row_candidate_confirmed)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(dummy_images, clean_sheet, use_llm=True)
+    v_m2 = next(m for s in verified.systems for m in s.measures if m.index == target_idx)
+    assert len(v_m2.chords) == orig_count + 1
+    assert any(c.raw == "5" and c.beat == 3.0 for c in v_m2.chords)
+
+    restored_issue = next(
+        (i for i in verified.issues if i.code == "chord_restored" and i.measure_index == target_idx),
+        None,
+    )
+    assert restored_issue is not None
+    assert restored_issue.severity == "auto_fixed"
+
+
+def test_verify_sheet_candidate_insertion_unconfirmed_needs_review(monkeypatch, clean_sheet, dummy_images):
+    m2 = clean_sheet.systems[0].measures[2]
+    target_idx = m2.index
+    orig_count = len(m2.chords)
+
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_json_row_candidate_unconfirmed)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(dummy_images, clean_sheet, use_llm=True)
+    v_m2 = next(m for s in verified.systems for m in s.measures if m.index == target_idx)
+    assert len(v_m2.chords) == orig_count
+
+    review_issue = next(
+        (i for i in verified.issues if i.code == "missing_chord_suspected" and i.measure_index == target_idx),
+        None,
+    )
+    assert review_issue is not None
+    assert review_issue.severity == "needs_review"
+
+
+def test_verify_sheet_candidate_insertion_rejected_discarded(monkeypatch, clean_sheet, dummy_images):
+    m2 = clean_sheet.systems[0].measures[2]
+    target_idx = m2.index
+    orig_count = len(m2.chords)
+
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_json_row_candidate_rejected)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(dummy_images, clean_sheet, use_llm=True)
+    v_m2 = next(m for s in verified.systems for m in s.measures if m.index == target_idx)
+    assert len(v_m2.chords) == orig_count
+
+    # The rejected candidate must NOT produce a missing_chord_suspected issue
+    review_issue = next(
+        (i for i in verified.issues if i.code == "missing_chord_suspected" and i.measure_index == target_idx),
+        None,
+    )
+    assert review_issue is None
