@@ -219,6 +219,8 @@ class TestLetterChords:
             ("C7(b9)", 0, "C7b9", [0, 4, 7, 10, 1]),
             ("E7(#9)", 4, "E7#9", [4, 8, 11, 2, 7]),
             ("Dm7/G", 2, "Dm7/G", [2, 5, 9, 0]),
+            ("C6/9", 0, "C6/9", [0, 4, 7, 9, 2]),
+            ("C6/9/G", 0, "C6/9/G", [0, 4, 7, 9, 2]),
         ]
         for raw, tonic, exp_name, exp_pcs in cases:
             rc = resolve_chord(raw, tonic, notation="letter")
@@ -269,6 +271,8 @@ class TestNumberChordSpellings:
             ("1(13)", "C13"),
             ("1add9", "Cadd9"),
             ("169", "C6/9"),
+            ("16/9", "C6/9"),
+            ("16/9/5", "C6/9/G"),
             ("1m(maj7)", "CmM7"),
             ("1+", "Caug"),
             ("1aug", "Caug"),

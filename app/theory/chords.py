@@ -40,9 +40,10 @@ QUALITY_INTERVALS: dict[str, list[int]] = {
     "13": [0, 4, 7, 10, 2, 5, 9],
     "mM7": [0, 3, 7, 11],
     "sus2": [0, 2, 7],
+    "69": [0, 4, 7, 9, 2],
 }
 
-# Non-standard or music21-incompatible qualities (e.g. 6/9 where slash collides with slash bass)
+# Non-standard or auxiliary quality interval aliases
 EXTRA_QUALITY_INTERVALS: dict[str, list[int]] = {
     "69": [0, 4, 7, 9, 2],
 }
@@ -136,6 +137,9 @@ def clean_raw_chord(raw: str) -> str:
 
     # Remove all internal whitespace around symbols and within chord
     s = re.sub(r"\s+", "", s)
+
+    # Normalize 6/9 to 69 so it does not collide with slash bass (e.g. 16/9, 16/9/5, C6/9, C6/9/G)
+    s = re.sub(r"6/9(?![0-9])", "69", s)
 
     return s
 
@@ -240,7 +244,7 @@ def normalize_quality(q_str: str, raw: str) -> str:
         return "11"
     if q in ("(2)", "2", "add2", "(9)", "add9", "9add", "(add9)", "add(9)", "add(2)"):
         return "add9"
-    if q in ("69", "6/9", "6.9", "(6.9)", "(6/9)", "(69)"):
+    if q in ("69", "6/9", "6.9", "(6.9)", "(6/9)", "(69)", "6(9)", "6add9", "6(add9)"):
         return "69"
     if q in ("dim", "dim7", "o", "o7"):
         return "dim"

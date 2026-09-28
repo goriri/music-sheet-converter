@@ -125,6 +125,10 @@ class TestMusic21Reference:
         assert normalize_to_music21_syntax("Bbmaj7/D") == ("B-maj7", "B-maj7/D")
         assert normalize_to_music21_syntax("F/Bb") == ("F", "F/B-")
         assert normalize_to_music21_syntax("Cmaj9") == ("CM9", "CM9")
+        assert normalize_to_music21_syntax("C6/9") == ("C6add9", "C6add9")
+        assert normalize_to_music21_syntax("Bb6/9") == ("B-6add9", "B-6add9")
+        assert normalize_to_music21_syntax("C6/9/G") == ("C6add9", "C6add9/G")
+        assert normalize_to_music21_syntax("Fm/Db") == ("Fm", "Fm/D-")
 
     def test_defining_tones(self) -> None:
         """Test defining tone extraction across various qualities."""
@@ -155,6 +159,10 @@ class TestMusic21Reference:
         assert def_c6 == [4, 9]  # E, A
         _, _, _, def_cm6 = get_chord_reference("Cm6")
         assert def_cm6 == [3, 9]  # Eb, A
+
+        # 6/9 chords
+        _, _, _, def_c69 = get_chord_reference("C6/9")
+        assert def_c69 == [4, 2, 9]  # E, D, A
 
         # b5 for m7b5 and dim
         _, _, _, def_m7b5 = get_chord_reference("Am7b5")
@@ -387,6 +395,75 @@ class TestFallbackAndRepair:
         info_issues = [iss for iss in repaired.issues if iss.code == "llm_review_error"]
         assert len(info_issues) == 1
         assert "API quota exceeded" in info_issues[0].detail["error"]
+
+    def test_letter_notation_sheet_cross_check_and_validation(self) -> None:
+        """Letter-notation sheets with 6/9 and slash chords validate and cross-check cleanly."""
+        measures = [
+            Measure(
+                index=0,
+                bbox=(0.0, 0.0, 1.0, 1.0),
+                beats=4.0,
+                chords=[ChordSymbol(raw="C", beat=1.0), ChordSymbol(raw="Am7", beat=3.0)],
+            ),
+            Measure(
+                index=1,
+                bbox=(0.0, 0.0, 1.0, 1.0),
+                beats=4.0,
+                chords=[ChordSymbol(raw="Dm7", beat=1.0), ChordSymbol(raw="G7", beat=3.0)],
+            ),
+            Measure(
+                index=2,
+                bbox=(0.0, 0.0, 1.0, 1.0),
+                beats=4.0,
+                chords=[ChordSymbol(raw="C6/9", beat=1.0)],
+            ),
+            Measure(
+                index=3,
+                bbox=(0.0, 0.0, 1.0, 1.0),
+                beats=4.0,
+                chords=[ChordSymbol(raw="Fm/Db", beat=1.0), ChordSymbol(raw="G/B", beat=3.0)],
+            ),
+        ]
+        header = SongHeader(
+            title="Letter Test",
+            style="Ballad",
+            original_key="C",
+            chord_notation="letter",
+        )
+        sheet = ParsedSheet(
+            header=header,
+            pages=[],
+            systems=[System(page=0, bbox=(0, 0, 1, 1), measures=measures)],
+        )
+
+        # 1. Arrange in original key C and verify
+        arr = arrange(sheet, "C", "intermediate")
+        repaired = check_and_repair(sheet, arr)
+
+        cross_check_mismatches = [
+            iss for iss in repaired.issues if iss.code == "chord_theory_cross_check_mismatch"
+        ]
+        assert cross_check_mismatches == []
+
+        m_by_idx = {m.index: m for m in sheet.measures()}
+        for m_arr in repaired.measures:
+            m_spec = m_by_idx[m_arr.measure_index]
+            violations = validate_measure(m_arr, m_spec, expected_tonic_pc=0, difficulty="intermediate")
+            assert violations == []
+
+        # 2. Arrange transposed to key G and verify cross-check and validation
+        arr_g = arrange(sheet, "G", "intermediate")
+        repaired_g = check_and_repair(sheet, arr_g)
+
+        cross_check_mismatches_g = [
+            iss for iss in repaired_g.issues if iss.code == "chord_theory_cross_check_mismatch"
+        ]
+        assert cross_check_mismatches_g == []
+
+        for m_arr in repaired_g.measures:
+            m_spec = m_by_idx[m_arr.measure_index]
+            violations = validate_measure(m_arr, m_spec, expected_tonic_pc=7, difficulty="intermediate")
+            assert violations == []
 
 
 # --------------------------------------------------------------------------- Golden regression tests

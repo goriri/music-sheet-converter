@@ -15,13 +15,15 @@ def normalize_to_music21_syntax(name: str) -> tuple[str, str]:
       - flats: 'Bb' -> 'B-', 'Eb' -> 'E-', 'Ab' -> 'A-', etc.
       - sharps: 'F#' -> 'F#'
       - slash chords: 'G/B' -> 'G/B', 'F/Bb' -> 'F/B-', 'Cm6/G' -> 'Cm6/G'
+      - 6/9 chords: 'C6/9' -> 'C6add9', 'C6/9/G' -> 'C6add9/G'
       - chord types: 'maj9' -> 'M9', 'm7b5' -> 'm7b5', '7sus4' -> '7sus4',
                      'Cadd9' -> 'Cadd9', 'Fmaj7' -> 'Fmaj7'
 
     Returns:
       (m21_root_chord, m21_full_name)
     """
-    parts = name.split("/")
+    clean_name = re.sub(r"6/9(?![0-9])", "6add9", name)
+    parts = clean_name.split("/")
     root_part = parts[0].strip()
     bass_part = parts[1].strip() if len(parts) > 1 else None
 
