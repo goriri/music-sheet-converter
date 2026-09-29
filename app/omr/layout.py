@@ -30,9 +30,9 @@ def estimate_skew_angle(gray: np.ndarray) -> float:
     best_angle = 0.0
     best_score = -1.0
     for angle in np.arange(-5.0, 5.25, 0.5):
-        M = cv2.getRotationMatrix2D(center, float(angle), 1.0)
+        m_rot = cv2.getRotationMatrix2D(center, float(angle), 1.0)
         rotated = cv2.warpAffine(
-            s_bin, M, (sw, sh), flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT, borderValue=0
+            s_bin, m_rot, (sw, sh), flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT, borderValue=0
         )
         score = float(np.var(np.sum(rotated, axis=1, dtype=np.float64)))
         if score > best_score:
@@ -41,9 +41,9 @@ def estimate_skew_angle(gray: np.ndarray) -> float:
 
     fine_angle = best_angle
     for angle in np.arange(best_angle - 0.4, best_angle + 0.45, 0.1):
-        M = cv2.getRotationMatrix2D(center, float(angle), 1.0)
+        m_rot = cv2.getRotationMatrix2D(center, float(angle), 1.0)
         rotated = cv2.warpAffine(
-            s_bin, M, (sw, sh), flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT, borderValue=0
+            s_bin, m_rot, (sw, sh), flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT, borderValue=0
         )
         score = float(np.var(np.sum(rotated, axis=1, dtype=np.float64)))
         if score > best_score:
@@ -59,9 +59,9 @@ def deskew_image(gray: np.ndarray) -> tuple[np.ndarray, float]:
     if abs(angle) >= 0.3:
         h, w = gray.shape
         center = (w // 2, h // 2)
-        M = cv2.getRotationMatrix2D(center, angle, 1.0)
+        m_rot = cv2.getRotationMatrix2D(center, angle, 1.0)
         rotated = cv2.warpAffine(
-            gray, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=255
+            gray, m_rot, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=255
         )
         return rotated, angle
     return gray, 0.0
@@ -81,6 +81,44 @@ def binarize_sheet(gray: np.ndarray) -> np.ndarray:
     return binary
 
 
+def find_dashed_barlines(
+    bin_img: np.ndarray,
+    ym: float,
+    y_radius: int = 24,
+) -> list[tuple[float, float, int, int, float, float]]:
+    """Detect dashed vertical barlines (e.g. pickup barlines or repeat barlines)."""
+    h, w = bin_img.shape
+    y0 = max(0, int(ym - y_radius))
+    y1 = min(h, int(ym + y_radius))
+    crop = bin_img[y0:y1, :]
+    num, _, stats, centroids = cv2.connectedComponentsWithStats(crop)
+    dash_candidates: list[tuple[float, float, int]] = []
+    for i in range(1, num):
+        x, y, sw, sh, area = stats[i]
+        cx, cy = centroids[i]
+        if sw <= 4 and 1 <= sh <= 14 and area <= 45:
+            dash_candidates.append((float(cx), float(cy + y0), int(sh)))
+
+    dash_candidates.sort(key=lambda d: d[0])
+    groups: list[list[tuple[float, float, int]]] = []
+    for d in dash_candidates:
+        if not groups or abs(d[0] - np.mean([x[0] for x in groups[-1]])) > 2.0:
+            groups.append([d])
+        else:
+            groups[-1].append(d)
+
+    dashed_bars: list[tuple[float, float, int, int, float, float]] = []
+    for g in groups:
+        if len(g) >= 3:
+            ys = [d[1] for d in g]
+            span_y = max(ys) - min(ys)
+            if span_y >= 18:
+                avg_x = float(np.mean([d[0] for d in g]))
+                avg_y = float(np.mean([d[1] for d in g]))
+                dashed_bars.append((avg_x, avg_y, 2, int(span_y), float(min(ys)), float(max(ys))))
+    return dashed_bars
+
+
 def detect_chord_boxes(
     bin_img: np.ndarray,
     y0_px: int,
@@ -88,8 +126,9 @@ def detect_chord_boxes(
     measures: list[GMeasure],
     img_w: int,
     img_h: int,
+    chords_below: bool = False,
 ) -> list[GChordBox]:
-    """Detect printed chord boxes or chord text tokens in the chord band above melody."""
+    """Detect printed chord boxes or chord text tokens in the chord band."""
     if y1_px <= y0_px or not measures:
         return []
 
@@ -99,43 +138,64 @@ def detect_chord_boxes(
         return []
 
     contours, _ = cv2.findContours(crop, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    candidates: list[tuple[int, int, int, int, bool]] = []
+    candidates: list[list] = []
 
     for cnt in contours:
         bx, by, bw, bh = cv2.boundingRect(cnt)
         area = cv2.contourArea(cnt)
-        if bw < 14 or bh < 8 or bw > 0.40 * img_w or bh > 0.06 * img_h:
+        if bw < 8 or bh < 8 or bw > 0.40 * img_w or bh > 0.08 * img_h:
             continue
 
         rect_ratio = area / float(bw * bh)
-        # Printed chord boxes have high rectangularity and aspect ratio between 1.0 and 4.8
-        is_boxed = (bw >= 24 and bh >= 12 and rect_ratio >= 0.50 and (bw / float(bh)) <= 4.8)
-        # Unboxed chord text tokens or circled numbers
-        is_unboxed = (bw >= 14 and bh >= 8 and (rect_ratio >= 0.20 or area >= 35))
+        # Printed chord boxes (Taiwanese charts)
+        is_boxed = (
+            bw >= 24 and bh >= 12 and rect_ratio >= 0.50 and (bw / float(bh)) <= 4.8 and not chords_below
+        )
+        # Unboxed chord text tokens or circled numbers (Mainland charts)
+        is_unboxed = (bw >= 10 and bh >= 8 and (rect_ratio >= 0.20 or area >= 25))
 
         if is_boxed or is_unboxed:
-            candidates.append((bx, by + y0_px, bw, bh, is_boxed))
+            candidates.append([bx, by + y0_px, bw, bh, is_boxed])
 
-    # Deduplicate overlapping boxes
-    candidates.sort(key=lambda b: b[0])
-    deduped: list[tuple[int, int, int, int, bool]] = []
-    for c in candidates:
-        if not deduped:
-            deduped.append(c)
-        else:
-            prev = deduped[-1]
-            overlap_x = max(0, min(prev[0] + prev[2], c[0] + c[2]) - max(prev[0], c[0]))
-            if overlap_x > 0.60 * min(prev[2], c[2]):
-                # Keep the larger / boxed one
-                if c[4] and not prev[4]:
-                    deduped[-1] = c
-                elif c[2] * c[3] > prev[2] * prev[3]:
-                    deduped[-1] = c
+    if chords_below:
+        # Merge horizontally close components (<= 15px) for circled numbers, slashes, extensions
+        candidates.sort(key=lambda b: b[0])
+        merged: list[list] = []
+        for c in candidates:
+            if not merged:
+                merged.append(c)
             else:
+                prev = merged[-1]
+                if c[0] - (prev[0] + prev[2]) <= 15:
+                    x0 = min(prev[0], c[0])
+                    y0 = min(prev[1], c[1])
+                    x1 = max(prev[0] + prev[2], c[0] + c[2])
+                    y1 = max(prev[1] + prev[3], c[1] + c[3])
+                    merged[-1] = [x0, y0, x1 - x0, y1 - y0, False]
+                else:
+                    merged.append(c)
+        candidates = merged
+    else:
+        # Deduplicate overlapping boxes
+        candidates.sort(key=lambda b: b[0])
+        deduped: list[list] = []
+        for c in candidates:
+            if not deduped:
                 deduped.append(c)
+            else:
+                prev = deduped[-1]
+                overlap_x = max(0, min(prev[0] + prev[2], c[0] + c[2]) - max(prev[0], c[0]))
+                if overlap_x > 0.60 * min(prev[2], c[2]):
+                    if c[4] and not prev[4]:
+                        deduped[-1] = c
+                    elif c[2] * c[3] > prev[2] * prev[3]:
+                        deduped[-1] = c
+                else:
+                    deduped.append(c)
+        candidates = deduped
 
     results: list[GChordBox] = []
-    for bx, by, bw, bh, boxed in deduped:
+    for bx, by, bw, bh, boxed in candidates:
         x_mid_norm = (bx + bw / 2.0) / float(img_w)
         # Find which measure contains x_mid
         target_m_idx = 0
@@ -222,7 +282,7 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
         vert = cv2.morphologyEx(bin_img, cv2.MORPH_OPEN, k)
 
         num, _, stats, centroids = cv2.connectedComponentsWithStats(vert)
-        bars = []
+        bars: list[tuple] = []
         max_w = max(10, int(0.008 * w))
         for i in range(1, num):
             x, y, sw, sh, _ = stats[i]
@@ -250,7 +310,8 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                     merged.append(x)
             span = (merged[-1] - merged[0]) / float(w) if len(merged) > 1 else 0.0
             y_mean = float(np.mean([b[1] for b in c]))
-            if span >= 0.35 or (is_tall_bar and span >= 0.15 and len(merged) >= 2):
+            # Allow short systems (1-2 measures) if span >= 0.16 and len(merged) >= 2
+            if span >= 0.35 or (span >= 0.16 and len(merged) >= 2):
                 processed_cands.append({
                     "y_mean": y_mean,
                     "bars": c,
@@ -258,9 +319,9 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                     "span": span,
                 })
 
-        # Inter-system vertical suppression (>= 45 px separation)
+        # Inter-system vertical suppression (>= 40 px separation)
         suppressed_cands: list[dict] = []
-        min_dist = max(45, int(0.045 * h))
+        min_dist = max(40, int(0.035 * h))
         for cand in processed_cands:
             if not suppressed_cands:
                 suppressed_cands.append(cand)
@@ -280,14 +341,66 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
             if c0["y_mean"] < 0.12 * h and (c0["merged_xs"][0] > med_left + 0.05 * w or c0["span"] < 0.70):
                 suppressed_cands.pop(0)
 
-        # Filter out footer cluster in portrait lead sheets
+        # Common printable margins from full systems
+        full_lefts = [
+            c["merged_xs"][0] for c in suppressed_cands if len(c["merged_xs"]) >= 2 and c["span"] >= 0.60
+        ]
+        full_rights = [
+            c["merged_xs"][-1] for c in suppressed_cands if len(c["merged_xs"]) >= 2 and c["span"] >= 0.60
+        ]
+        sheet_left = float(np.median(full_lefts)) if full_lefts else 0.05 * w
+        sheet_right = float(np.median(full_rights)) if full_rights else 0.95 * w
+
+        if sheet_left > 0.12 * w:
+            left_proj = np.sum(bin_img[:, : int(sheet_left - 0.04 * w)] > 0, axis=0)
+            ink_cols = np.where(left_proj > 20)[0]
+            if len(ink_cols) > 0 and len(ink_cols) >= int(0.05 * w):
+                sheet_left = max(0.035 * w, float(ink_cols[0]))
+
+        # Filter out footer cluster: keep if aligned with sheet_left and has measure barlines
         if len(suppressed_cands) > 1:
             c_last = suppressed_cands[-1]
             if not is_tall_bar and c_last["y_mean"] > 0.90 * h and c_last["span"] < 0.55:
-                suppressed_cands.pop(-1)
+                starts_at_margin = abs(c_last["merged_xs"][0] - sheet_left) < 0.08 * w
+                if not (starts_at_margin and len(c_last["merged_xs"]) >= 2):
+                    suppressed_cands.pop(-1)
 
-        # Recover missed systems in large gaps between systems
-        if len(suppressed_cands) >= 2:
+        if not suppressed_cands:
+            return PageGeometry(
+                page=page,
+                width=w,
+                height=h,
+                confidence=0.0,
+                notes=["No musical systems detected on page"],
+            )
+
+        # Decide chords_below vs chords_above from evidence
+        boxed_above_count = 0
+        tokens_below_count = 0
+        for cand in suppressed_cands[:8]:
+            ym = int(cand["y_mean"])
+            crop_above = bin_img[max(0, ym - int(0.025 * h)):ym - int(0.006 * h), int(0.1 * w):int(0.9 * w)]
+            crop_below = bin_img[ym + int(0.006 * h):min(h, ym + int(0.025 * h)), int(0.1 * w):int(0.9 * w)]
+
+            cnts_above, _ = cv2.findContours(crop_above, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for cnt in cnts_above:
+                bx, by, bw, bh = cv2.boundingRect(cnt)
+                rect = cv2.contourArea(cnt) / float(bw * bh) if bw * bh > 0 else 0
+                if bw >= 20 and bh >= 10 and rect >= 0.50:
+                    boxed_above_count += 1
+
+            cnts_below, _ = cv2.findContours(crop_below, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for cnt in cnts_below:
+                bx, by, bw, bh = cv2.boundingRect(cnt)
+                if 12 <= bw <= 55 and 12 <= bh <= 35 and 0.5 <= (bw / float(bh)) <= 2.8:
+                    tokens_below_count += 1
+
+        chords_below = (tokens_below_count >= 15 and boxed_above_count < 5)
+        if chords_below:
+            notes.append("chords_below")
+
+        # Recover missed systems in large gaps between systems (only on traditional chords_above sheets)
+        if not chords_below and len(suppressed_cands) >= 2:
             diffs = [
                 suppressed_cands[i + 1]["y_mean"] - suppressed_cands[i]["y_mean"]
                 for i in range(len(suppressed_cands) - 1)
@@ -312,33 +425,6 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
             recovered.append(suppressed_cands[-1])
             suppressed_cands = recovered
 
-        if not suppressed_cands:
-            return PageGeometry(
-                page=page,
-                width=w,
-                height=h,
-                confidence=0.0,
-                notes=["No musical systems detected on page"],
-            )
-
-        # Common printable margins from full systems
-        full_lefts = [
-            c["merged_xs"][0] for c in suppressed_cands if len(c["merged_xs"]) >= 2 and c["span"] >= 0.60
-        ]
-        full_rights = [
-            c["merged_xs"][-1] for c in suppressed_cands if len(c["merged_xs"]) >= 2 and c["span"] >= 0.60
-        ]
-        sheet_left = float(np.median(full_lefts)) if full_lefts else 0.05 * w
-        sheet_right = float(np.median(full_rights)) if full_rights else 0.95 * w
-
-        # If barlines only exist inside the page (unbordered left margin, common in letter-chord sheets):
-        if sheet_left > 0.12 * w:
-            left_proj = np.sum(bin_img[:, : int(sheet_left - 0.04 * w)] > 0, axis=0)
-            ink_cols = np.where(left_proj > 20)[0]
-            if len(ink_cols) > 0 and len(ink_cols) >= int(0.05 * w):
-                sheet_left = max(0.035 * w, float(ink_cols[0]))
-
-        # Build GSystem objects with non-overlapping bounding boxes
         systems: list[GSystem] = []
         num_sys = len(suppressed_cands)
 
@@ -347,12 +433,16 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
         for i in range(num_sys - 1):
             y_curr = int(suppressed_cands[i]["y_mean"])
             y_next = int(suppressed_cands[i + 1]["y_mean"])
-            sub_proj = np.sum(bin_img[y_curr:y_next, int(0.1 * w):int(0.9 * w)] > 0, axis=1)
-            if len(sub_proj) > 0:
-                min_idx = int(np.argmin(sub_proj))
-                split_ys.append(y_curr + min_idx)
+            if chords_below:
+                # System i+1 starts just above its own melody line (preventing absorbing chords)
+                split_ys.append(max(int(y_curr + 55), int(y_next - (35 if is_tall_bar else 22))))
             else:
-                split_ys.append((y_curr + y_next) // 2)
+                sub_proj = np.sum(bin_img[y_curr:y_next, int(0.1 * w):int(0.9 * w)] > 0, axis=1)
+                if len(sub_proj) > 0:
+                    min_idx = int(np.argmin(sub_proj))
+                    split_ys.append(y_curr + min_idx)
+                else:
+                    split_ys.append((y_curr + y_next) // 2)
         split_ys.append(h)
 
         # Global header band
@@ -367,10 +457,8 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
             y_top = split_ys[s_idx]
             y_bot = split_ys[s_idx + 1]
 
-            # In the first system, clip y_top to just above the chord/label band
             if s_idx == 0:
                 y_top = max(y_top, int(ym - (90 if is_tall_bar else 55)))
-            # In the last system, clip y_bot to below lyric/bass lines
             if s_idx == num_sys - 1:
                 y_bot = min(y_bot, int(ym + (90 if is_tall_bar else 65)))
 
@@ -384,14 +472,26 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
 
             melody_band_norm = (round(mel_y0 / float(h), 4), round(mel_y1 / float(h), 4))
 
-            # Barlines and measures
+            # Candidate barlines: combine solid bars and dashed barlines
+            candidate_bars: list[tuple] = list(sys_cand["bars"])
+            dashed_bars = find_dashed_barlines(bin_img, ym, y_radius=int(0.015 * h))
+            for db in dashed_bars:
+                # If db is on the left (pickup candidate)
+                if db[0] < sheet_left + 0.05 * w:
+                    if is_tall_bar and s_idx > 0:
+                        continue
+                    if not is_tall_bar:
+                        left_ink = np.sum(bin_img[mel_y0:mel_y1, int(db[0]):int(sheet_left + 0.02 * w)] > 0)
+                        if left_ink < 450:
+                            continue
+                candidate_bars.append(db)
+
             m_bars: list[float] = []
-            if sys_cand["bars"]:
-                # Sub-cluster bars within the system by Y to isolate the melody barline line from lyrics
-                sb_bars = sorted(sys_cand["bars"], key=lambda b: b[1])
+            if candidate_bars:
+                sb_bars = sorted(candidate_bars, key=lambda b: b[1])
                 sub_groups: list[list[tuple]] = []
                 for b in sb_bars:
-                    if not sub_groups or abs(b[1] - np.mean([x[1] for x in sub_groups[-1]])) > (15 if is_tall_bar else 10):
+                    if not sub_groups or abs(b[1] - np.mean([x[1] for x in sub_groups[-1]])) > (20 if is_tall_bar else 15):
                         sub_groups.append([b])
                     else:
                         sub_groups[-1].append(b)
@@ -399,38 +499,38 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                 best_group = max(sub_groups, key=_bar_group_key)
                 raw_xs = sorted([b[0] for b in best_group])
 
-                # Merge double bars within 0.04 * w
+                # Merge double bars within 16px (0.02 * w)
                 for bx in raw_xs:
-                    if not m_bars or bx - m_bars[-1] > (0.04 * w):
+                    if not m_bars or bx - m_bars[-1] > max(16.0, 0.02 * w):
                         m_bars.append(bx)
 
                 # Filter spurious elements outside printable region
-                m_bars = [bx for bx in m_bars if sheet_left - 0.04 * w <= bx <= sheet_right + 0.04 * w]
+                m_bars = [bx for bx in m_bars if sheet_left - 0.08 * w <= bx <= sheet_right + 0.04 * w]
 
-                # Filter out bars closer than 0.165 * w to enforce minimum measure width
+                # Evidence-based minimum measure spacing: 0.042 * w
                 m_bars_spaced: list[float] = []
                 for bx in m_bars:
-                    if not m_bars_spaced or bx - m_bars_spaced[-1] >= (0.165 * w):
+                    if not m_bars_spaced or bx - m_bars_spaced[-1] >= (0.042 * w):
                         m_bars_spaced.append(bx)
                 m_bars = m_bars_spaced
 
-                # Check if system starts at sheet_left
-                if m_bars and m_bars[0] > sheet_left + 0.12 * w:
-                    m_bars.insert(0, sheet_left)
+                # Check if system starts with a pickup before m_bars[0]
+                if m_bars and m_bars[0] > sheet_left + 0.08 * w:
+                    pickup_crop = bin_img[mel_y0:mel_y1, int(sheet_left - 0.02 * w):int(m_bars[0] - 10)]
+                    if np.sum(pickup_crop > 0) > 450:
+                        m_bars.insert(0, sheet_left)
+
                 # Check if system continues to sheet_right
                 if m_bars and m_bars[-1] < sheet_right - 0.12 * w:
-                    # In portrait lead sheets, every line goes to sheet_right
-                    if not is_tall_bar:
+                    if not is_tall_bar and sys_cand["span"] >= 0.55:
                         m_bars.append(sheet_right)
-                    else:
-                        # In landscape sheets, check ink presence
+                    elif is_tall_bar:
                         rem_ink = np.sum(
                             bin_img[int(ym - 25):int(ym + 25), int(m_bars[-1] + 25):int(sheet_right + 10)] > 0
                         )
                         if rem_ink > 80:
                             m_bars.append(sheet_right)
             else:
-                # Fallback for gap-recovered systems: 4 measures
                 m_bars = list(np.linspace(sheet_left, sheet_right, 5))
 
             if len(m_bars) < 2:
@@ -442,12 +542,8 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                 mx0 = m_bars[m_i]
                 mx1 = m_bars[m_i + 1]
 
-                # Double bar check at boundaries
-                left_double = False
-                right_double = False
-                if sys_cand["bars"]:
-                    left_double = any(0 < abs(b[0] - mx0) <= 15 for b in sys_cand["bars"])
-                    right_double = any(0 < abs(b[0] - mx1) <= 15 for b in sys_cand["bars"])
+                left_double = any(0 < abs(b[0] - mx0) <= 16 for b in candidate_bars)
+                right_double = any(0 < abs(b[0] - mx1) <= 16 for b in candidate_bars)
 
                 measures.append(
                     GMeasure(
@@ -459,14 +555,18 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                     )
                 )
 
-            # Chord band
-            chord_y0_px = max(y_top, int(mel_y0 - (60 if is_tall_bar else 35)))
-            chord_y1_px = mel_y0
+            # Chord band definition based on chords_below
+            if chords_below:
+                chord_y0_px = mel_y1
+                chord_y1_px = min(y_bot, mel_y1 + (55 if is_tall_bar else 45))
+            else:
+                chord_y0_px = max(y_top, int(mel_y0 - (60 if is_tall_bar else 35)))
+                chord_y1_px = mel_y0
+
             chord_band_norm: Optional[tuple[float, float]] = None
             if chord_y1_px > chord_y0_px:
                 chord_band_norm = (round(chord_y0_px / float(h), 4), round(chord_y1_px / float(h), 4))
 
-            # Detect chord boxes
             chord_boxes = detect_chord_boxes(
                 bin_img,
                 y0_px=chord_y0_px,
@@ -474,12 +574,13 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                 measures=measures,
                 img_w=w,
                 img_h=h,
+                chords_below=chords_below,
             )
 
-            # Lyric bands below melody
-            lyric_y0_px = mel_y1
-            lyric_y1_px = y_bot
+            # Lyric bands
             lyric_bands: list[tuple[float, float]] = []
+            lyric_y0_px = chord_y1_px if chords_below else mel_y1
+            lyric_y1_px = y_bot
             if lyric_y1_px > lyric_y0_px:
                 lyric_proj = np.sum(bin_img[lyric_y0_px:lyric_y1_px, int(sheet_left):int(sheet_right)] > 0, axis=1)
                 if len(lyric_proj) > 0 and np.max(lyric_proj) > 30:
@@ -499,11 +600,11 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                 round(y_bot / float(h), 4),
             )
 
-            # Confidence evaluation
             diffs = [m.x1 - m.x0 for m in measures]
             regularity = float(np.std(diffs)) if len(diffs) > 1 else 0.0
             sys_conf = float(max(0.60, min(1.0, 1.0 - regularity * 2.0)))
 
+            sys_notes = ["chords_below"] if chords_below else []
             systems.append(
                 GSystem(
                     page=page,
@@ -517,11 +618,10 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                     measures=measures,
                     chord_boxes=chord_boxes,
                     confidence=sys_conf,
-                    notes=[],
+                    notes=sys_notes,
                 )
             )
 
-        # Global page confidence
         global_conf = float(min(s.confidence for s in systems)) if systems else 0.0
 
         return PageGeometry(

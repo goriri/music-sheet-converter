@@ -84,6 +84,7 @@ def test_ground_truth_pages(layout_truth):
             "fixtures/external/xiaobaichuan/page1.jpg",
             "fixtures/external/xiaobaichuan/page2.jpg",
             "fixtures/external/phone_photo_skewed/page1.jpg",
+            "fixtures/external/liusha/page1.jpg",
             "fixtures/external/liusha/page2.jpg",
         ]:
             assert det_measures == exp_measures, (
@@ -149,3 +150,35 @@ def test_chord_box_containment_and_beats():
             assert sy0 <= cy0 <= cy1 <= sy1, f"Chord box y out of system bounds: {cb.bbox}"
             assert 0 <= cb.measure_index_in_system < len(s.measures)
             assert 1.0 <= cb.beat_geo <= 4.0
+
+
+def test_chords_below_layout():
+    """Verify chords_below sheets (tinghai, diandao, liusha) have chord band below melody band,
+    unboxed chord boxes, and chords_below note."""
+    chords_below_paths = [
+        "fixtures/external/tinghai/page1.jpg",
+        "fixtures/external/diandao/page1.jpg",
+        "fixtures/external/liusha/page1.jpg",
+    ]
+    for rel_path in chords_below_paths:
+        img_path = REPO_ROOT / rel_path
+        if not img_path.exists():
+            continue
+        geom = analyze_page(img_path.read_bytes(), page=0)
+        assert "chords_below" in geom.notes, f"{rel_path}: expected chords_below in geom.notes"
+
+        # Total chord count should be substantial (> 30)
+        total_chords = sum(len(s.chord_boxes) for s in geom.systems)
+        assert total_chords >= 30, f"{rel_path}: expected >= 30 chords, got {total_chords}"
+
+        # Verify chord bands and unboxed chord boxes
+        for i, s in enumerate(geom.systems):
+            if s.chord_band is not None:
+                assert "chords_below" in s.notes
+                # Chord band must be below melody band
+                assert s.chord_band[0] >= s.melody_band[1] - 0.005, (
+                    f"{rel_path} system {i}: chord band {s.chord_band} not below melody band {s.melody_band}"
+                )
+            for cb in s.chord_boxes:
+                assert not cb.boxed, f"{rel_path} chord box {cb} should be unboxed (boxed=False)"
+
