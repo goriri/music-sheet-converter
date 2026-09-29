@@ -15,7 +15,7 @@ from app.models import (
     ResolvedChord,
     System,
 )
-from app.theory.chords import resolve_chord
+from app.theory.chords import clean_raw_chord, resolve_chord
 from app.theory.keys import canonical_key_for_pc, key_name_to_pc
 from app.theory.stacked import infer_stacked_orientation
 from app.arrange.fingering import assign_fingering_for_measure
@@ -242,6 +242,7 @@ def arrange(
         f"Arrangement in {difficulty} style ({norm_style})",
         f"Start key: {start_key} (tonic pc {start_pc})",
     ]
+    arr_issues: list[QualityIssue] = []
 
     stacked_res = infer_stacked_orientation(sheet)
     stacked_orientation = stacked_res.orientation
@@ -290,6 +291,7 @@ def arrange(
             style=norm_style,
             measures=[],
             notes=arr_notes + ["Empty sheet"],
+            issues=arr_issues,
         )
 
     # 1. Resolve chords and track tonic per measure
@@ -312,8 +314,6 @@ def arrange(
             resolved = []
             for cs in m.chords:
                 prev_c = resolved[-1] if resolved else (last_chords[-1] if last_chords else None)
-                if cs.raw.strip().startswith("/") and prev_c is None:
-                    raise ValueError(f"Leading slash chord {cs.raw!r} cannot be the first chord of the sheet")
                 try:
                     rc = resolve_chord(
                         cs.raw,
@@ -328,6 +328,40 @@ def arrange(
                     )
                     resolved.append(rc)
                 except ValueError:
+                    cleaned = clean_raw_chord(cs.raw)
+                    if cleaned.startswith("/") and prev_c is None:
+                        tonic_prior = resolve_chord("1", current_tonic_pc, cs.beat, current_key_name)
+                        try:
+                            degraded_rc = resolve_chord(
+                                cs.raw,
+                                current_tonic_pc,
+                                cs.beat,
+                                current_key_name,
+                                notation=notation,
+                                printed_tonic_pc=printed_tonic_pc,
+                                prev_chord=tonic_prior,
+                                stacked=cs.stacked,
+                                stacked_orientation=stacked_orientation,
+                            )
+                        except ValueError:
+                            degraded_rc = tonic_prior
+
+                        resolved.append(degraded_rc)
+                        arr_issues.append(
+                            QualityIssue.model_construct(
+                                stage="arrange",
+                                severity="warning",
+                                code="bass_only_without_context",
+                                message=f"第 {m.index + 1} 小节开头的低音和弦 {cs.raw!r} 缺少前置和弦，已降级为主和弦 {degraded_rc.name}",
+                                measure_index=m.index,
+                                detail={"raw": cs.raw, "degraded_to": degraded_rc.name},
+                            )
+                        )
+                        arr_notes.append(
+                            f"Measure {m.index}: Leading slash chord {cs.raw!r} without context degraded to tonic chord {degraded_rc.name}"
+                        )
+                        continue
+
                     # Fallback on alternatives or carried chord
                     alt_resolved = None
                     for alt in cs.alternatives:
@@ -392,7 +426,6 @@ def arrange(
             else:
                 # Default to tonic chord '1'
                 resolved = [resolve_chord("1", current_tonic_pc, 1.0, current_key_name)]
-                last_chords = resolved
 
         measure_resolved_chords.append(resolved)
 
@@ -497,6 +530,7 @@ def arrange(
         style=norm_style,
         measures=measure_arrangements,
         notes=arr_notes,
+        issues=arr_issues,
     )
 
     # Invariant validation

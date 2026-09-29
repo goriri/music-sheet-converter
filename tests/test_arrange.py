@@ -755,13 +755,53 @@ class TestLetterChordArrangement:
             if slash_beat_onset in lh_onsets:
                 assert lh_onsets[slash_beat_onset] % 12 == 9
 
-    def test_arrange_first_chord_leading_slash_raises_value_error(self):
-        """If the very first chord of the song is '/5', arrange() raises ValueError."""
-        header = SongHeader(title="Bad Start", original_key="C", chord_notation="number")
+    def test_arrange_first_chord_leading_slash_degrades_to_tonic_with_warning(self):
+        """If the very first chord of the song is '/5', arrange() degrades to tonic over that bass with warning."""
+        header = SongHeader(title="Leading Slash Start", original_key="C", chord_notation="number")
         m0 = Measure(index=0, bbox=(0, 0, 1, 1), beats=4.0, chords=[ChordSymbol(raw="/5", beat=1.0)])
         sheet = ParsedSheet(header=header, pages=[], systems=[System(page=0, bbox=(0, 0, 1, 1), measures=[m0])])
-        with pytest.raises(ValueError):
-            arrange(sheet, start_key="C")
+
+        # Test in key C (tonic I is C -> C/G)
+        arr_c = arrange(sheet, start_key="C")
+        assert arr_c.measures[0].chords[0].name == "C/G"
+        assert arr_c.measures[0].chords[0].bass_pc == 7
+        assert any(
+            i.code == "bass_only_without_context"
+            and i.severity == "warning"
+            and i.measure_index == 0
+            for i in arr_c.issues
+        )
+
+        # Test in key D (tonic I is D -> D/A)
+        arr_d = arrange(sheet, start_key="D")
+        assert arr_d.measures[0].chords[0].name == "D/A"
+        assert arr_d.measures[0].chords[0].bass_pc == 9
+        assert any(
+            i.code == "bass_only_without_context"
+            and i.severity == "warning"
+            and i.measure_index == 0
+            for i in arr_d.issues
+        )
+
+    def test_arrange_leading_slash_after_empty_measure_degrades_with_warning(self):
+        """If '/5' appears after an initial measure with no chords, arrange() degrades to tonic over that bass with warning."""
+        header = SongHeader(title="Empty Measure Before Slash", original_key="C", chord_notation="number")
+        m0 = Measure(index=0, bbox=(0, 0, 1, 1), beats=4.0, chords=[])
+        m1 = Measure(index=1, bbox=(0, 0, 1, 1), beats=4.0, chords=[ChordSymbol(raw="/5", beat=1.0)])
+        sheet = ParsedSheet(
+            header=header,
+            pages=[],
+            systems=[System(page=0, bbox=(0, 0, 1, 1), measures=[m0, m1])],
+        )
+        arr = arrange(sheet, start_key="C")
+        assert arr.measures[1].chords[0].name == "C/G"
+        assert any(
+            i.code == "bass_only_without_context"
+            and i.severity == "warning"
+            and i.measure_index == 1
+            for i in arr.issues
+        )
+
 
 
 
