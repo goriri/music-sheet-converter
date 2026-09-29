@@ -1,0 +1,92 @@
+[
+  {
+    "slug": "tianshi",
+    "title": "天使",
+    "source_url": "https://www.poppiano.org/sheet/?id=54500",
+    "format": "boxed",
+    "time_signature": "4/4",
+    "pages": 1,
+    "notes": "五月天 - 天使, 1=D 4/4 Slow Soul. Taiwanese boxed number chords with drum fills and bass patterns."
+  },
+  {
+    "slug": "tingmamadehua",
+    "title": "听妈妈的话",
+    "source_url": "https://www.poppiano.org/sheet/?id=54504",
+    "format": "boxed",
+    "time_signature": "4/4",
+    "pages": 1,
+    "notes": "周杰伦 - 听妈妈的话, 1=Bb 4/4 Slow Soul. Taiwanese boxed number chords with slash bass (37/5#, /5, 2m/1)."
+  },
+  {
+    "slug": "qinghuaci",
+    "title": "青花瓷",
+    "source_url": "https://www.poppiano.org/sheet/?id=54512",
+    "format": "boxed",
+    "time_signature": "4/4",
+    "pages": 1,
+    "notes": "周杰伦 - 青花瓷, 1=A-Bb 4/4 Slow Soul. Taiwanese boxed chords with 3bdim, 4m6, and slash chords 1/3, 3m/7, 4/5, 5/4."
+  },
+  {
+    "slug": "qilixiang",
+    "title": "七里香",
+    "source_url": "https://www.poppiano.org/sheet/?id=54513",
+    "format": "boxed",
+    "time_signature": "4/4",
+    "pages": 1,
+    "notes": "周杰伦 - 七里香, 1=Cm 4/4 Slow Soul. Taiwanese boxed chords with 4#m7-5, 4M7, 37/5#."
+  },
+  {
+    "slug": "kexibushini_lowres",
+    "title": "可惜不是你",
+    "source_url": "https://www.poppiano.org/sheet/?id=54507",
+    "format": "boxed",
+    "time_signature": "4/4",
+    "pages": 1,
+    "notes": "梁静茹 - 可惜不是你, 1=F# 4/4 Slow Soul. Low-resolution phone photo / scan test fixture (800x1132, JPEG quality 65). Boxed chords with 4M7, 5/4, 6m9, 1sus, 4/5."
+  },
+  {
+    "slug": "xueronghua",
+    "title": "雪绒花",
+    "source_url": "https://www.qupu123.com/jipu/p350066.html",
+    "format": "circled_below",
+    "time_signature": "3/4",
+    "pages": 2,
+    "notes": "雪绒花 (Edelweiss), 1=D 3/4 Waltz. Page 1: 专业版 typeset by 小乔 (circled chords below melody with stacked fractions). Page 2: 弹唱版 (chord-only chart)."
+  },
+  {
+    "slug": "dangnilaole",
+    "title": "当你老了",
+    "source_url": "https://www.qupu123.com/jipu/p349368.html",
+    "format": "circled_below",
+    "time_signature": "6/8",
+    "pages": 2,
+    "notes": "赵照 - 当你老了, 1=C 6/8. Typeset by 一秒&果冻. Page 1: 专业版 with circled chords below melody and dashed pickup barlines. Page 2: 唯美版 (simplified circled chords)."
+  },
+  {
+    "slug": "lvxiuzi",
+    "title": "绿袖子",
+    "source_url": "https://www.qupu123.com/jipu/p350613.html",
+    "format": "circled_below",
+    "time_signature": "3/4",
+    "pages": 1,
+    "notes": "绿袖子 (Greensleeves), 1=G 3/4. Circled chords below melody with dashed pickup barlines and modal chord b⑦m."
+  },
+  {
+    "slug": "shanghaitan",
+    "title": "上海灘",
+    "source_url": "https://github.com/impishian/80s_chinese_songs",
+    "format": "letter",
+    "time_signature": "4/4",
+    "pages": 1,
+    "notes": "叶丽仪 - 上海灘, 1=F 4/4. LilyPond notation with letter chords (Dm, C, Am, G, C7, F, Bb) above melody. Includes repeat barlines and 1st/2nd/3rd voltas."
+  },
+  {
+    "slug": "zhendeaini",
+    "title": "真的爱你",
+    "source_url": "https://www.qupu123.com/jipu/p345613.html",
+    "format": "letter",
+    "time_signature": "4/4",
+    "pages": 1,
+    "notes": "Beyond - 真的爱你, 1=C 4/4. Printed scan (700x972) with letter chords (C, Dm, G7, Am, G, E7, F) above melody. Includes 2/4 meter change bar in row 4, voltas, and repeat barlines."
+  }
+]

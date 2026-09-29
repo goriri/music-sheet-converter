@@ -1,0 +1,134 @@
+{
+  "fixtures/holdout/tianshi/page1.jpg": {
+    "systems": 10,
+    "num_systems": 10,
+    "measures_per_system": [5, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "total_measures": 41,
+    "chords_per_system": [8, 6, 6, 8, 8, 8, 8, 6, 6, 8],
+    "total_chords": 72,
+    "format": "boxed",
+    "notes": "五月天 - 天使, 1=D 4/4 Slow Soul. Row 1 has a pickup fragment before double barline (0 05 15 2 ||). 10 systems total.",
+    "verified_by_eye": true
+  },
+  "fixtures/holdout/tingmamadehua/page1.jpg": {
+    "systems": 10,
+    "num_systems": 10,
+    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "total_measures": 40,
+    "chords_per_system": [1, 8, 9, 8, 9, 8, 9, 8, 9, 8],
+    "total_chords": 77,
+    "format": "boxed",
+    "notes": "周杰伦 - 听妈妈的话, 1=Bb 4/4 Slow Soul. Taiwanese boxed number chords with slash bass (37/5#, /5, 2m/1).",
+    "verified_by_eye": true
+  },
+  "fixtures/holdout/qinghuaci/page1.jpg": {
+    "systems": 10,
+    "num_systems": 10,
+    "measures_per_system": [4, 3, 3, 3, 3, 3, 3, 3, 3, 3],
+    "total_measures": 31,
+    "chords_per_system": [7, 4, 4, 7, 6, 6, 6, 5, 3, 5],
+    "total_chords": 53,
+    "format": "boxed",
+    "notes": "周杰伦 - 青花瓷, 1=A-Bb 4/4 Slow Soul. Row 1 has pickup before double barline (0.56 5323 ||). Row 2 contains 3 measures with beat repeat (%). Contains 3bdim, 4m6, and slash chords 1/3, 3m/7, 4/5, 5/4.",
+    "verified_by_eye": true
+  },
+  "fixtures/holdout/qilixiang/page1.jpg": {
+    "systems": 10,
+    "num_systems": 10,
+    "measures_per_system": [5, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "total_measures": 41,
+    "chords_per_system": [9, 10, 9, 10, 9, 10, 9, 10, 8, 6],
+    "total_chords": 90,
+    "format": "boxed",
+    "notes": "周杰伦 - 七里香, 1=Cm 4/4 Slow Soul. Row 1 has pickup before double barline (2356 ||). Contains 4#m7-5, 4M7, 37/5#.",
+    "verified_by_eye": true
+  },
+  "fixtures/holdout/kexibushini_lowres/page1.jpg": {
+    "systems": 10,
+    "num_systems": 10,
+    "measures_per_system": [5, 5, 4, 4, 4, 4, 4, 4, 4, 4],
+    "total_measures": 42,
+    "chords_per_system": [3, 5, 9, 9, 9, 10, 9, 11, 8, 8],
+    "total_chords": 81,
+    "format": "boxed",
+    "notes": "梁静茹 - 可惜不是你, 1=F# 4/4 Slow Soul. Low-resolution phone photo / scan test fixture (800x1132). Boxed chords with 4M7, 5/4, 6m9, 1sus, 4/5.",
+    "verified_by_eye": true
+  },
+  "fixtures/holdout/xueronghua/page1.jpg": {
+    "systems": 10,
+    "num_systems": 10,
+    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "total_measures": 40,
+    "chords_per_system": [4, 4, 4, 7, 4, 4, 7, 5, 4, 5],
+    "total_chords": 48,
+    "format": "circled_below",
+    "notes": "雪绒花 (Edelweiss) 专业版, 1=D 3/4 Waltz. Typeset by 小乔. Circled chords below melody with stacked fractions.",
+    "verified_by_eye": true
+  },
+  "fixtures/holdout/xueronghua/page2.jpg": {
+    "systems": 8,
+    "num_systems": 8,
+    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4],
+    "total_measures": 32,
+    "chords_per_system": [4, 4, 4, 4, 4, 4, 4, 4],
+    "total_chords": 32,
+    "format": "chord_only",
+    "notes": "雪绒花 弹唱版 (chord-only sheet), 1=D 3/4. Only circled chord symbols without melody.",
+    "verified_by_eye": true
+  },
+  "fixtures/holdout/dangnilaole/page1.jpg": {
+    "systems": 10,
+    "num_systems": 10,
+    "measures_per_system": [4, 4, 5, 4, 5, 4, 4, 4, 4, 4],
+    "total_measures": 42,
+    "chords_per_system": [4, 4, 4, 4, 4, 4, 5, 4, 5, 4],
+    "total_chords": 42,
+    "format": "circled_below",
+    "notes": "赵照 - 当你老了 专业版, 1=C 6/8. Typeset by 一秒&果冻. Rows 3 and 5 have pickup measures marked with dashed barlines.",
+    "verified_by_eye": true
+  },
+  "fixtures/holdout/dangnilaole/page2.jpg": {
+    "systems": 8,
+    "num_systems": 8,
+    "measures_per_system": [5, 4, 5, 4, 4, 4, 4, 4],
+    "total_measures": 34,
+    "chords_per_system": [4, 4, 4, 4, 5, 4, 5, 4],
+    "total_chords": 34,
+    "format": "circled_below",
+    "notes": "赵照 - 当你老了 唯美版, 1=C 6/8. Simplified circled chords below melody. Rows 1 and 3 have dashed pickup barlines.",
+    "verified_by_eye": true
+  },
+  "fixtures/holdout/lvxiuzi/page1.jpg": {
+    "systems": 11,
+    "num_systems": 11,
+    "measures_per_system": [4, 4, 5, 4, 5, 4, 4, 4, 4, 4, 4],
+    "total_measures": 46,
+    "chords_per_system": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "total_chords": 44,
+    "format": "circled_below",
+    "notes": "绿袖子 (Greensleeves), 1=G 3/4. Rows 3 and 5 have dashed pickup barlines. Features modal modulation and altered circled chords like b⑦m.",
+    "verified_by_eye": true
+  },
+  "fixtures/holdout/shanghaitan/page1.jpg": {
+    "systems": 5,
+    "num_systems": 5,
+    "measures_per_system": [5, 6, 5, 5, 5],
+    "total_measures": 26,
+    "chords_per_system": [0, 5, 6, 5, 6],
+    "total_chords": 22,
+    "format": "letter",
+    "notes": "叶丽仪 - 上海灘, 1=F 4/4. LilyPond notation with letter chords (Dm, C, Am, G, C7, F, Bb) above melody. Includes repeat barlines and 1st/2nd/3rd voltas.",
+    "verified_by_eye": true
+  },
+  "fixtures/holdout/zhendeaini/page1.jpg": {
+    "systems": 6,
+    "num_systems": 6,
+    "measures_per_system": [4, 3, 3, 3, 2, 4],
+    "total_measures": 19,
+    "chords_per_system": [0, 4, 6, 4, 3, 3],
+    "total_chords": 20,
+    "format": "letter",
+    "notes": "Beyond - 真的爱你, 1=C 4/4. Printed scan (700x972) with letter chords (C, Dm, G7, Am, G, E7, F) above melody. Includes 2/4 meter change bar in row 4, voltas, and repeat barlines.",
+    "verified_by_eye": true
+  }
+}
