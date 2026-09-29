@@ -240,6 +240,101 @@ def _bar_group_key(g: list[tuple]) -> tuple[float, int]:
     return (span_g, len(g))
 
 
+def extract_chord_only_boxes(
+    bin_img: np.ndarray,
+    y0_px: int,
+    y1_px: int,
+    measures: list[GMeasure],
+    img_w: int,
+    img_h: int,
+    force: bool = False,
+) -> tuple[bool, list[GChordBox]]:
+    """Detect if notation band is chord-only ('弹唱版') and extract circled chord boxes.
+
+    Circled degree numbers (e.g. ①, ⑤, stacked ⑦/⑤, ⑥m, ♭⑦) sitting in the melody
+    band are merged with their accidentals and suffixes into unboxed GChordBox objects.
+    """
+    crop = bin_img[max(0, y0_px - 10):min(img_h, y1_px + 10), :]
+    nl, _, stats, _ = cv2.connectedComponentsWithStats(crop)
+
+    seeds: list[tuple[int, int, int, int]] = []
+    digits: list[tuple[int, int, int, int]] = []
+
+    for ci in range(1, nl):
+        cx, cy, cw, ch, area = stats[ci]
+        is_circle = (28 <= cw <= 80 and 28 <= ch <= 80 and 0.75 <= cw / float(ch) <= 1.35 and 200 <= area <= 1200)
+        is_slash = (30 <= cw <= 80 and 50 <= ch <= 110 and area >= 200)
+        if is_circle or is_slash:
+            seeds.append((cx, y0_px - 10 + cy, cw, ch))
+        elif 6 <= cw <= 24 and 16 <= ch <= 35 and area <= 280:
+            digits.append((cx, y0_px - 10 + cy, cw, ch))
+
+    if not force:
+        if len(seeds) < 2 or (len(seeds) < 3 and len(digits) > len(seeds)):
+            return False, []
+    elif not seeds:
+        return False, []
+
+    # Cluster seeds into chord tokens horizontally within 25px
+    seeds.sort(key=lambda s: s[0])
+    grouped: list[list[int]] = []
+    for s in seeds:
+        if not grouped or s[0] - grouped[-1][1] > 25:
+            grouped.append([s[0], s[0] + s[2], s[1], s[1] + s[3]])
+        else:
+            grouped[-1][1] = max(grouped[-1][1], s[0] + s[2])
+            grouped[-1][2] = min(grouped[-1][2], s[1])
+            grouped[-1][3] = max(grouped[-1][3], s[1] + s[3])
+
+    # Expand tokens to include accidentals on the left and suffixes on the right
+    for grp in grouped:
+        for ci in range(1, nl):
+            cx, cy, cw, ch, area = stats[ci]
+            abs_y0 = y0_px - 10 + cy
+            abs_y1 = abs_y0 + ch
+            if abs_y1 >= grp[2] - 5 and abs_y0 <= grp[3] + 5:
+                if 0 <= grp[0] - (cx + cw) <= 18 and cw <= 25:
+                    grp[0] = min(grp[0], cx)
+                if 0 <= cx - grp[1] <= 25 and cw <= 40:
+                    grp[1] = max(grp[1], cx + cw)
+
+    chord_boxes: list[GChordBox] = []
+    for bx0, bx1, by0, by1 in grouped:
+        x_mid_norm = (bx0 + bx1) / 2.0 / float(img_w)
+        target_m_idx = 0
+        min_dist = 1e9
+        for m in measures:
+            if m.x0 <= x_mid_norm <= m.x1:
+                target_m_idx = m.index_in_system
+                break
+            dist = min(abs(x_mid_norm - m.x0), abs(x_mid_norm - m.x1))
+            if dist < min_dist:
+                min_dist = dist
+                target_m_idx = m.index_in_system
+
+        m_obj = measures[target_m_idx]
+        m_w = max(1e-4, m_obj.x1 - m_obj.x0)
+        frac = max(0.0, min(0.99, (x_mid_norm - m_obj.x0) / m_w))
+        beat_geo = float(max(1, min(4, int(frac * 4) + 1)))
+
+        bbox_norm: BBox = (
+            round(bx0 / float(img_w), 4),
+            round(by0 / float(img_h), 4),
+            round(bx1 / float(img_w), 4),
+            round(by1 / float(img_h), 4),
+        )
+        chord_boxes.append(
+            GChordBox(
+                bbox=bbox_norm,
+                measure_index_in_system=target_m_idx,
+                beat_geo=beat_geo,
+                boxed=False,
+            )
+        )
+
+    return True, chord_boxes
+
+
 def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
     """Analyze a music sheet page using classical CV to extract layout geometry.
 
@@ -301,15 +396,24 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                 raw_clusters[-1].append(b)
 
         # Process clusters into candidate music rows
+        has_text_lines = False
         processed_cands: list[dict] = []
         for c in raw_clusters:
+            y_mean = float(np.mean([b[1] for b in c]))
             xs = sorted([b[0] for b in c])
             merged: list[float] = []
             for x in xs:
                 if not merged or x - merged[-1] > 15:
                     merged.append(x)
             span = (merged[-1] - merged[0]) / float(w) if len(merged) > 1 else 0.0
-            y_mean = float(np.mean([b[1] for b in c]))
+
+            # Reject text lines: in paragraph text lines, vertical strokes of CJK characters
+            # yield 11 or more strokes across the row, or excessive density (avg measure width < 0.065)
+            avg_m_w = span / max(1, len(merged) - 1)
+            if len(merged) >= 11 or (len(merged) >= 8 and avg_m_w < 0.065):
+                has_text_lines = True
+                continue
+
             # Allow short systems (1-2 measures) if span >= 0.16 and len(merged) >= 2
             if span >= 0.35 or (span >= 0.16 and len(merged) >= 2):
                 processed_cands.append({
@@ -460,7 +564,18 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
             if s_idx == 0:
                 y_top = max(y_top, int(ym - (90 if is_tall_bar else 55)))
             if s_idx == num_sys - 1:
-                y_bot = min(y_bot, int(ym + (90 if is_tall_bar else 65)))
+                typical_margin = (
+                    int(np.median([split_ys[i + 1] - int(suppressed_cands[i]["y_mean"]) for i in range(num_sys - 1)]))
+                    if num_sys > 1
+                    else (160 if is_tall_bar else 90)
+                )
+                max_search_y = min(h - int(0.02 * h), int(ym + max(typical_margin, (160 if is_tall_bar else 90))))
+                sub_proj = np.sum(bin_img[int(ym):max_search_y, int(sheet_left):int(sheet_right)] > 0, axis=1)
+                content_rows = np.where(sub_proj > 20)[0]
+                if len(content_rows) > 0:
+                    y_bot = min(h, int(ym + content_rows[-1] + 25))
+                else:
+                    y_bot = min(y_bot, int(ym + (90 if is_tall_bar else 65)))
 
             # Melody band
             if is_tall_bar:
@@ -517,7 +632,7 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                 # Check if system starts with a pickup before m_bars[0]
                 if m_bars and m_bars[0] > sheet_left + 0.08 * w:
                     pickup_crop = bin_img[mel_y0:mel_y1, int(sheet_left - 0.02 * w):int(m_bars[0] - 10)]
-                    if np.sum(pickup_crop > 0) > 450:
+                    if np.sum(pickup_crop > 0) > 80:
                         m_bars.insert(0, sheet_left)
 
                 # Check if system continues to sheet_right
@@ -577,9 +692,17 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                 chords_below=chords_below,
             )
 
+            is_chord_only = False
+            if len(chord_boxes) == 0:
+                is_co, co_boxes = extract_chord_only_boxes(bin_img, mel_y0, mel_y1, measures, w, h)
+                if is_co:
+                    is_chord_only = True
+                    chord_boxes = co_boxes
+                    chord_band_norm = melody_band_norm
+
             # Lyric bands
             lyric_bands: list[tuple[float, float]] = []
-            lyric_y0_px = chord_y1_px if chords_below else mel_y1
+            lyric_y0_px = mel_y1 if is_chord_only else (chord_y1_px if chords_below else mel_y1)
             lyric_y1_px = y_bot
             if lyric_y1_px > lyric_y0_px:
                 lyric_proj = np.sum(bin_img[lyric_y0_px:lyric_y1_px, int(sheet_left):int(sheet_right)] > 0, axis=1)
@@ -602,9 +725,16 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
 
             diffs = [m.x1 - m.x0 for m in measures]
             regularity = float(np.std(diffs)) if len(diffs) > 1 else 0.0
-            sys_conf = float(max(0.60, min(1.0, 1.0 - regularity * 2.0)))
+            sys_conf = float(max(0.15, min(1.0, 1.0 - regularity * 3.5)))
+            if not candidate_bars:
+                sys_conf = min(sys_conf, 0.35)
 
-            sys_notes = ["chords_below"] if chords_below else []
+            sys_notes: list[str] = []
+            if is_chord_only:
+                sys_notes.append("chord_only")
+            elif chords_below:
+                sys_notes.append("chords_below")
+
             systems.append(
                 GSystem(
                     page=page,
@@ -622,7 +752,24 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                 )
             )
 
+        # Page-level chord_only post-pass: if page is chord-only, ensure short/cadence rows also extract
+        chord_only_sys_count = sum(1 for s in systems if "chord_only" in s.notes)
+        if len(systems) > 0 and chord_only_sys_count >= max(2, len(systems) // 2):
+            if "chord_only" not in notes:
+                notes.append("chord_only")
+            for s_idx, s in enumerate(systems):
+                if "chord_only" not in s.notes and len(s.chord_boxes) == 0:
+                    my0_px = int(s.melody_band[0] * h)
+                    my1_px = int(s.melody_band[1] * h)
+                    is_co, co_boxes = extract_chord_only_boxes(bin_img, my0_px, my1_px, s.measures, w, h, force=True)
+                    if is_co and co_boxes:
+                        s.chord_boxes = co_boxes
+                        s.chord_band = s.melody_band
+                        s.notes.append("chord_only")
+
         global_conf = float(min(s.confidence for s in systems)) if systems else 0.0
+        if has_text_lines:
+            global_conf = min(global_conf, 0.55)
 
         return PageGeometry(
             page=page,

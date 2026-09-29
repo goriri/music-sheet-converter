@@ -72,7 +72,7 @@ def test_ground_truth_pages(layout_truth):
         det_measures = [len(s.measures) for s in geom.systems]
         exp_measures = expected["measures_per_system"]
 
-        # Most pages should match exactly
+        # All ground truth pages should match exactly
         if rel_path in [
             "fixtures/pages/page1.jpg",
             "fixtures/pages/page2.jpg",
@@ -86,6 +86,8 @@ def test_ground_truth_pages(layout_truth):
             "fixtures/external/phone_photo_skewed/page1.jpg",
             "fixtures/external/liusha/page1.jpg",
             "fixtures/external/liusha/page2.jpg",
+            "fixtures/external/xindong/page1.jpg",
+            "fixtures/external/langrenqingge/page1.jpg",
         ]:
             assert det_measures == exp_measures, (
                 f"{rel_path}: measure counts mismatch: {det_measures} vs {exp_measures}"
@@ -181,4 +183,45 @@ def test_chords_below_layout():
                 )
             for cb in s.chord_boxes:
                 assert not cb.boxed, f"{rel_path} chord box {cb} should be unboxed (boxed=False)"
+
+
+def test_chord_only_pages():
+    """Verify chord-only ('弹唱版') sheets detect chord_only rows and extract unboxed chord boxes."""
+    # 1. xiaobaichuan p2 (3/4 waltz, 8 systems x 4 bars = 32 chords)
+    p_xbc = REPO_ROOT / "fixtures" / "external" / "xiaobaichuan" / "page2.jpg"
+    if p_xbc.exists():
+        geom_xbc = analyze_page(p_xbc.read_bytes(), page=0)
+        assert "chord_only" in geom_xbc.notes
+        total_chords_xbc = sum(len(s.chord_boxes) for s in geom_xbc.systems)
+        assert total_chords_xbc == 32, f"Expected 32 chords on xiaobaichuan p2, got {total_chords_xbc}"
+        for s in geom_xbc.systems:
+            assert "chord_only" in s.notes
+            assert all(not cb.boxed for cb in s.chord_boxes)
+            assert all(1.0 <= cb.beat_geo <= 3.0 for cb in s.chord_boxes)
+
+        # Invariant 4: System bbox must include its own lyric lines (Sys 8)
+        s8 = geom_xbc.systems[7]
+        assert len(s8.lyric_bands) > 0, "Sys 8 should have detected lyric band"
+        sy0, sy1 = s8.bbox[1], s8.bbox[3]
+        ly0, ly1 = s8.lyric_bands[0]
+        assert sy0 <= ly0 <= ly1 <= sy1, f"Sys 8 lyrics ({ly0}, {ly1}) out of system bbox ({sy0}, {sy1})"
+
+    # 2. liusha p2 (4/4 lead sheet, 7 systems = 40 chords)
+    p_ls = REPO_ROOT / "fixtures" / "external" / "liusha" / "page2.jpg"
+    if p_ls.exists():
+        geom_ls = analyze_page(p_ls.read_bytes(), page=0)
+        assert "chord_only" in geom_ls.notes
+        total_chords_ls = sum(len(s.chord_boxes) for s in geom_ls.systems)
+        assert total_chords_ls == 40, f"Expected 40 chords on liusha p2, got {total_chords_ls}"
+        assert all(not cb.boxed for s in geom_ls.systems for cb in s.chord_boxes)
+        assert all(1.0 <= cb.beat_geo <= 4.0 for s in geom_ls.systems for cb in s.chord_boxes)
+
+
+def test_non_chart_confidence():
+    """Verify non-chart instructional tutorial sheet (huochuai p1) fails render gate (confidence < 0.60)."""
+    p_hc = REPO_ROOT / "fixtures" / "external" / "huochuai" / "page1.jpg"
+    if p_hc.exists():
+        geom_hc = analyze_page(p_hc.read_bytes(), page=0)
+        assert geom_hc.confidence < 0.60, f"Tutorial page huochuai p1 should have confidence < 0.60, got {geom_hc.confidence}"
+
 
