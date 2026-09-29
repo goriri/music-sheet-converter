@@ -1,6 +1,7 @@
 """Voicing generation, voice leading dynamic programming (Viterbi), and bass line selection."""
 from __future__ import annotations
 
+import re
 from typing import Optional
 from app.models import Difficulty, ResolvedChord
 
@@ -232,21 +233,31 @@ def select_rh_voicings(chords: list[ResolvedChord], difficulty: Difficulty) -> l
         curr_bp: dict[tuple[int, ...], Optional[tuple[int, ...]]] = {}
         prev_candidates = chord_candidates[t - 1]
 
-        for curr in chord_candidates[t]:
-            curr_static = calculate_static_voicing_cost(curr)
-            best_total = float("inf")
-            best_prev = None
-
+        is_bass_only = bool(re.match(r"^/[#b]?[1-7]m?$|^/[A-Ga-g][b#♭♯]?$", chords[t].raw.strip()))
+        if is_bass_only:
+            # Bass-only slash chord (/5, /G, etc.): keep previous upper voicing
             for prev in prev_candidates:
-                prev_cost = cost_table[t - 1][prev]
-                trans_cost = calculate_transition_cost(prev, curr)
-                total = prev_cost + trans_cost + curr_static
-                if total < best_total:
-                    best_total = total
-                    best_prev = prev
+                curr = prev
+                curr_static = calculate_static_voicing_cost(curr)
+                curr_costs[curr] = cost_table[t - 1][prev] + curr_static
+                curr_bp[curr] = prev
+            chord_candidates[t] = prev_candidates
+        else:
+            for curr in chord_candidates[t]:
+                curr_static = calculate_static_voicing_cost(curr)
+                best_total = float("inf")
+                best_prev = None
 
-            curr_costs[curr] = best_total
-            curr_bp[curr] = best_prev
+                for prev in prev_candidates:
+                    prev_cost = cost_table[t - 1][prev]
+                    trans_cost = calculate_transition_cost(prev, curr)
+                    total = prev_cost + trans_cost + curr_static
+                    if total < best_total:
+                        best_total = total
+                        best_prev = prev
+
+                curr_costs[curr] = best_total
+                curr_bp[curr] = best_prev
 
         cost_table.append(curr_costs)
         backpointer.append(curr_bp)

@@ -305,15 +305,55 @@ class TestNumberChordSpellings:
             assert rc.name == exp_name, f"Failed for {raw}: got {rc.name}, expected {exp_name}"
 
     def test_leading_slash_with_prev_chord(self):
+        # 1. Number notation in C
         prev = resolve_chord("1", 0)
         rc = resolve_chord("/5", 0, beat=2.0, prev_chord=prev)
         assert rc.name == "C/G"
         assert rc.bass_pc == 7
 
         prev_am7 = resolve_chord("6m7", 0)
-        rc2 = resolve_chord("/5", 0, beat=2.0, prev_chord=prev_am7)
+        rc2 = resolve_chord("/5", 0, beat=2.0, prev=prev_am7)
         assert rc2.name == "Am7/G"
         assert rc2.bass_pc == 7
+
+        # 2. Number notation in D (qianlizhiwai style)
+        # Bm7 -> Bm7/A
+        prev_d_6m7 = resolve_chord("6m7", 2)
+        rc_bm7_a = resolve_chord("/5", 2, beat=4.0, prev=prev_d_6m7)
+        assert rc_bm7_a.name == "Bm7/A"
+        assert rc_bm7_a.bass_pc == 9
+
+        # Em7 -> Em7/A with ChordSymbol as prev
+        from app.models import ChordSymbol
+        prev_sym = ChordSymbol(raw="2m7", beat=1.0)
+        rc_em7_a = resolve_chord("/5", 2, beat=3.0, prev=prev_sym)
+        assert rc_em7_a.name == "Em7/A"
+        assert rc_em7_a.bass_pc == 9
+
+        # Accidentals in bass: /#4, /b7
+        rc_fsharp = resolve_chord("/#4", 0, prev=prev)
+        assert rc_fsharp.name == "C/F#"
+        assert rc_fsharp.bass_pc == 6
+        rc_bflat = resolve_chord("/b7", 0, prev=prev)
+        assert rc_bflat.name == "C/Bb"
+        assert rc_bflat.bass_pc == 10
+
+        # 3. Letter notation: /A, /G
+        prev_let = resolve_chord("Em7", 0, notation="letter")
+        rc_let_a = resolve_chord("/A", 0, notation="letter", prev=prev_let)
+        assert rc_let_a.name == "Em7/A"
+        assert rc_let_a.bass_pc == 9
+        rc_let_g = resolve_chord("/G", 0, notation="letter", prev=prev_let)
+        assert rc_let_g.name == "Em7/G"
+        assert rc_let_g.bass_pc == 7
+
+        # 4. Without prev -> ValueError
+        with pytest.raises(ValueError):
+            resolve_chord("/5", 0)
+        with pytest.raises(ValueError):
+            resolve_chord("/G", 0, notation="letter")
+        with pytest.raises(ValueError):
+            resolve_chord("/#4", 0)
 
     def test_garbage_and_invalid_degree_raises_value_error(self):
         bad_cases = ["056", "0", "07", "8m", "99", "", "   "]

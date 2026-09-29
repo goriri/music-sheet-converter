@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import re
 from typing import Optional
 
-from app.models import ResolvedChord
+from app.models import ChordSymbol, ResolvedChord
 from app.theory.keys import (
     KEY_NAME_TO_PC,
     canonical_key_for_pc,
@@ -442,7 +442,8 @@ def resolve_chord(
     *,
     notation: str = "number",
     printed_tonic_pc: Optional[int] = None,
-    prev_chord: Optional[ResolvedChord] = None,
+    prev_chord: Optional[ResolvedChord | ChordSymbol] = None,
+    prev: Optional[ResolvedChord | ChordSymbol] = None,
     stacked: bool = False,
     stacked_orientation: str = "bottom_is_bass",
 ) -> ResolvedChord:
@@ -451,8 +452,64 @@ def resolve_chord(
     - If notation == 'letter': transposes letter chord by (tonic_pc - printed_tonic_pc).
     - If notation == 'number': resolves scale degree relative to tonic_pc.
     - If stacked == True: resolves diagonal stacked chord using stacked_orientation.
+    - If leading slash (e.g. '/5', '/#4', '/G'): resolves as preceding chord over the new bass note.
     """
     cleaned_raw = clean_raw_chord(raw)
+
+    # Contextual leading slash chord (e.g. '/5', '/#4', '/b7', '/G', '/A')
+    if cleaned_raw.startswith("/"):
+        prior = prev if prev is not None else prev_chord
+        if prior is None:
+            raise ValueError(f"Leading slash chord {raw!r} requires preceding chord context")
+
+        if not isinstance(prior, ResolvedChord):
+            prior = resolve_chord(
+                prior.raw,
+                tonic_pc,
+                prior.beat,
+                key_name,
+                notation=notation,
+                printed_tonic_pc=printed_tonic_pc,
+                stacked=prior.stacked,
+                stacked_orientation=stacked_orientation,
+            )
+
+        bass_part = cleaned_raw[1:]
+        m_let = re.match(r"^([A-Ga-g])([b#♭♯]?)$", bass_part)
+        if m_let or notation == "letter":
+            if not m_let:
+                raise ValueError(f"Invalid letter bass note {bass_part!r} in {raw!r}")
+            b_let = m_let.group(1).upper()
+            b_acc_raw = m_let.group(2)
+            b_acc = "b" if b_acc_raw in ("b", "♭") else ("#" if b_acc_raw in ("#", "♯") else "")
+            b_name = f"{b_let}{b_acc}"
+            b_pc = KEY_NAME_TO_PC.get(b_name.upper())
+            if b_pc is None:
+                raise ValueError(f"Unrecognized bass note in letter chord: {raw!r}")
+            shift = (tonic_pc - printed_tonic_pc) % 12 if (notation == "letter" and printed_tonic_pc is not None) else 0
+            if shift != 0:
+                b_pc = (b_pc + shift) % 12
+                b_name = spell(b_pc, tonic_pc=tonic_pc, key_name=key_name)
+        else:
+            if bass_part.endswith("m") and len(bass_part) > 1:
+                bass_part = bass_part[:-1]
+            b_deg, b_acc, b_rem = parse_accidental_and_degree(bass_part)
+            if b_rem:
+                raise ValueError(f"Trailing garbage in slash bass: {bass_part!r} in {raw!r}")
+            b_name, b_pc = resolve_degree(b_deg, b_acc, tonic_pc, key_name)
+
+        root_chord_name = prior.name.split("/")[0]
+        full_name = f"{root_chord_name}/{b_name}"
+        return ResolvedChord(
+            raw=raw,
+            name=full_name,
+            beat=beat,
+            root_pc=prior.root_pc,
+            bass_pc=b_pc,
+            pcs=prior.pcs,
+            quality=prior.quality,
+        )
+
     # Auto-detect letter chords
     is_letter = (
         bool(re.match(r"^[A-Ga-g][b#]?(?![0-9])", cleaned_raw))
@@ -491,30 +548,6 @@ def resolve_chord(
             bass_pc=target_bass_pc,
             pcs=pcs,
             quality=spec.quality,
-        )
-
-    # Number notation (default)
-    # If chord is leading slash and we have a preceding chord, carry preceding chord harmony
-    if cleaned_raw.startswith("/"):
-        if prev_chord is None:
-            raise ValueError(f"Leading slash chord {raw!r} requires preceding chord context")
-        bass_part = cleaned_raw[1:]
-        if bass_part.endswith("m") and len(bass_part) > 1:
-            bass_part = bass_part[:-1]
-        b_deg, b_acc, b_rem = parse_accidental_and_degree(bass_part)
-        if b_rem:
-            raise ValueError(f"Trailing garbage in slash bass: {bass_part!r} in {raw!r}")
-        b_name, b_pc = resolve_degree(b_deg, b_acc, tonic_pc, key_name)
-        root_chord_name = prev_chord.name.split("/")[0]
-        full_name = f"{root_chord_name}/{b_name}"
-        return ResolvedChord(
-            raw=raw,
-            name=full_name,
-            beat=beat,
-            root_pc=prev_chord.root_pc,
-            bass_pc=b_pc,
-            pcs=prev_chord.pcs,
-            quality=prev_chord.quality,
         )
 
     num_spec = parse_chord(raw, stacked=stacked, stacked_orientation=stacked_orientation)

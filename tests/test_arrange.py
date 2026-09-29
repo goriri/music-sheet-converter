@@ -707,5 +707,61 @@ class TestLetterChordArrangement:
                 for n in ev.notes:
                     assert 64 <= n.midi <= 81
 
+    @pytest.mark.parametrize("diff", ["beginner", "intermediate", "advanced"])
+    def test_arrange_qianlizhiwai_rows_with_bass_only_slash_5(self, diff):
+        """Test arrange() resolves bass-only '/5' as previous chord over bass 5, keeping upper voicing."""
+        with open("fixtures/groundtruth/qianlizhiwai.json", encoding="utf-8") as f:
+            d = json.load(f)
+        header = SongHeader.model_validate(d.get("header", {}))
+        systems = []
+        idx = 0
+        for r in d.get("rows", []):
+            measures = []
+            for m in r.get("measures", []):
+                chords = [ChordSymbol(raw=c["raw"], beat=c.get("beat", 1.0)) for c in m.get("chords", [])]
+                measures.append(Measure(index=idx, bbox=(0, 0, 1, 1), beats=4.0, chords=chords))
+                idx += 1
+            systems.append(System(page=r.get("page", 0), bbox=(0, 0, 1, 1), measures=measures))
+        sheet = ParsedSheet(header=header, pages=[], systems=systems)
+
+        arr = arrange(sheet, start_key="D", difficulty=diff)
+        assert len(arr.measures) == len(sheet.measures())
+        validate_arrangement(arr, sheet)
+
+        # M4: ['6m7', '/5'] -> Bm7, Bm7/A
+        m4 = arr.measures[4]
+        assert [c.name for c in m4.chords] == ["Bm7", "Bm7/A"]
+        assert m4.chords[1].bass_pc == 9  # A
+
+        # M11: ['6m7', '/5'] -> Bm7, Bm7/A
+        m11 = arr.measures[11]
+        assert [c.name for c in m11.chords] == ["Bm7", "Bm7/A"]
+        assert m11.chords[1].bass_pc == 9
+
+        # M21: ['2m7', '/5', '5/7'] -> Em7, Em7/A, A/C#
+        m21 = arr.measures[21]
+        assert [c.name for c in m21.chords] == ["Em7", "Em7/A", "A/C#"]
+        assert m21.chords[1].bass_pc == 9
+
+        # In intermediate & advanced, verify RH upper voicing is preserved and LH plays new bass
+        for test_m in [m4, m11, m21]:
+            # RH notes at beat 1 and slash-5 beat have identical pitch content
+            rh_onsets = {round(ev.onset, 2): tuple(n.midi for n in ev.notes) for ev in test_m.rh if ev.notes}
+            slash_beat_onset = round(test_m.chords[1].beat - 1.0, 2)
+            if 0.0 in rh_onsets and slash_beat_onset in rh_onsets:
+                assert rh_onsets[0.0] == rh_onsets[slash_beat_onset]
+            # LH at slash-5 beat has bass pitch class 9 (A)
+            lh_onsets = {round(ev.onset, 2): ev.notes[0].midi for ev in test_m.lh if ev.notes}
+            if slash_beat_onset in lh_onsets:
+                assert lh_onsets[slash_beat_onset] % 12 == 9
+
+    def test_arrange_first_chord_leading_slash_raises_value_error(self):
+        """If the very first chord of the song is '/5', arrange() raises ValueError."""
+        header = SongHeader(title="Bad Start", original_key="C", chord_notation="number")
+        m0 = Measure(index=0, bbox=(0, 0, 1, 1), beats=4.0, chords=[ChordSymbol(raw="/5", beat=1.0)])
+        sheet = ParsedSheet(header=header, pages=[], systems=[System(page=0, bbox=(0, 0, 1, 1), measures=[m0])])
+        with pytest.raises(ValueError):
+            arrange(sheet, start_key="C")
+
 
 

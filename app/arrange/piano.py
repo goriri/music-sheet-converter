@@ -312,6 +312,8 @@ def arrange(
             resolved = []
             for cs in m.chords:
                 prev_c = resolved[-1] if resolved else (last_chords[-1] if last_chords else None)
+                if cs.raw.strip().startswith("/") and prev_c is None:
+                    raise ValueError(f"Leading slash chord {cs.raw!r} cannot be the first chord of the sheet")
                 try:
                     rc = resolve_chord(
                         cs.raw,
