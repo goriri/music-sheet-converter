@@ -1,0 +1,861 @@
+{
+  "slug": "liusha",
+  "pages": 2,
+  "header": {
+    "time_signature": "4/4",
+    "original_key": "A",
+    "chord_notation": "number"
+  },
+  "key_changes": [],
+  "rows": [
+    {
+      "page": 1,
+      "row": 1,
+      "measures": [
+        {
+          "chords": []
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "7/5",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m",
+              "beat": 1.0
+            },
+            {
+              "raw": "5/1",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4maj7",
+              "beat": 1.0
+            },
+            {
+              "raw": "4m",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "57/11",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 2,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "7/5",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m",
+              "beat": 1.0
+            },
+            {
+              "raw": "5/1",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4maj7",
+              "beat": 1.0
+            },
+            {
+              "raw": "3/1add9",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0
+            },
+            {
+              "raw": "5",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 3,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "7",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            },
+            {
+              "raw": "4/2m7-5",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "7",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            },
+            {
+              "raw": "4/2m7-5",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 4,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "7",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            },
+            {
+              "raw": "4/2m7-5",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "7",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            },
+            {
+              "raw": "4m",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 5,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "4maj7",
+              "beat": 1.0
+            },
+            {
+              "raw": "37",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m",
+              "beat": 1.0
+            },
+            {
+              "raw": "5/3m",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "27",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": []
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 6,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "57/11",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 7,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1sus2",
+              "beat": 1.0
+            },
+            {
+              "raw": "7/5",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m7",
+              "beat": 1.0
+            },
+            {
+              "raw": "5/1",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4maj7",
+              "beat": 1.0
+            },
+            {
+              "raw": "3/1add9",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0
+            },
+            {
+              "raw": "57/11",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 8,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1sus2",
+              "beat": 1.0
+            },
+            {
+              "raw": "7/5",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m7",
+              "beat": 1.0
+            },
+            {
+              "raw": "1",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5m",
+              "beat": 1.0
+            },
+            {
+              "raw": "17",
+              "beat": 2.0
+            },
+            {
+              "raw": "4maj7",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "3/1add9",
+              "beat": 1.0
+            },
+            {
+              "raw": "2m7",
+              "beat": 2.0
+            },
+            {
+              "raw": "57/11",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 9,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "17/9",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6/4",
+              "beat": 1.0
+            },
+            {
+              "raw": "4m",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "17/9",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6/4",
+              "beat": 1.0
+            },
+            {
+              "raw": "4m",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 10,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "4maj7",
+              "beat": 1.0
+            },
+            {
+              "raw": "37",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m",
+              "beat": 1.0
+            },
+            {
+              "raw": "5/3m",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "27",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": []
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 11,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "2m7",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "57/11",
+              "beat": 1.0
+            },
+            {
+              "raw": "1",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 12,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "17/9",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6/4",
+              "beat": 1.0
+            },
+            {
+              "raw": "4m",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "17/9",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6/4",
+              "beat": 1.0
+            },
+            {
+              "raw": "4m",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 13,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1add9",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 1,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "b7",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4m",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 2,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "b7",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4m",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 3,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "3",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m",
+              "beat": 1.0
+            },
+            {
+              "raw": "5/3m",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "2",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 4,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "2m",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 5,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "7/5",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m",
+              "beat": 1.0
+            },
+            {
+              "raw": "5/1",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            },
+            {
+              "raw": "3/1",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "2m",
+              "beat": 1.0
+            },
+            {
+              "raw": "5",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 6,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "7/5",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m",
+              "beat": 1.0
+            },
+            {
+              "raw": "5/1",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            },
+            {
+              "raw": "3/1",
+              "beat": 3.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "2m",
+              "beat": 1.0
+            },
+            {
+              "raw": "5",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 7,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "slug": "huochuai",
+  "pages": 2,
+  "header": {
+    "time_signature": "12/8",
+    "original_key": "C",
+    "chord_notation": "number"
+  },
+  "key_changes": [],
+  "rows": [
+    {
+      "page": 1,
+      "row": 1,
+      "measures": [
+        {
+          "chords": []
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 2,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "C",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": []
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 3,
+      "measures": [
+        {
+          "chords": []
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 4,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "C",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": []
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 1,
+      "measures": [
+        {
+          "chords": []
+        },
+        {
+          "chords": []
+        },
+        {
+          "chords": []
+        },
+        {
+          "chords": []
+        },
+        {
+          "chords": []
+        }
+      ]
+    }
+  ]
+}

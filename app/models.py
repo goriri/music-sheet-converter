@@ -44,6 +44,14 @@ class ChordSymbol(BaseModel):
     bbox: Optional[BBox] = Field(None, description="Box of the printed chord symbol")
     confidence: float = Field(1.0, ge=0.0, le=1.0, description="Post-verification confidence")
     alternatives: list[str] = Field(default_factory=list, description="Other plausible readings")
+    stacked: bool = Field(
+        False,
+        description=(
+            "Printed as a diagonal/stacked fraction (e.g. circled '⑦╱⑤' or '①╱②m7-5') rather than an inline "
+            "slash. raw is then 'TOP/BOTTOM' in printed order; which part is the bass is publisher-dependent "
+            "and resolved per chart by the theory layer."
+        ),
+    )
 
 
 class Measure(BaseModel):
