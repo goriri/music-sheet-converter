@@ -558,6 +558,22 @@ def read_sheet(
                     f"[v2_reader_measures_seen] page={p_idx} system={s_idx} measures_seen={reading.measures_seen}"
                 )
 
+            if sys_geom.measures and sys_geom.measures[-1].right_double_bar:
+                warnings.append(
+                    f"[v2_final_barline] page={p_idx} system={s_idx} right_double_bar=True"
+                )
+
+            has_fine = False
+            if reading.section_label and re.search(r"\b(?:fine|end|outro)\b|完", reading.section_label, re.I):
+                has_fine = True
+            for mc in reading.measures:
+                if mc.lyrics and re.search(r"\b(?:fine|end)\b|\|\]|\|\||完", mc.lyrics, re.I):
+                    has_fine = True
+                if mc.rhythm_hint and re.search(r"\b(?:fine|end)\b|\|\]|\|\|", mc.rhythm_hint, re.I):
+                    has_fine = True
+            if has_fine:
+                warnings.append(f"[v2_end_mark] page={p_idx} system={s_idx} fine=True")
+
             # Key change modulation in this system
             if reading.key_change and reading.key_change.raw:
                 kc_raw = reading.key_change.raw.strip()

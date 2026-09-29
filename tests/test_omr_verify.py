@@ -1127,6 +1127,110 @@ def test_v2_robustness_evaluation_corrupted_outputs():
     assert f_xbc == 0, f"xiaobaichuan false auto-fixes {f_xbc} > 0"
 
 
+def _mock_ask_row_rescan_found(prompt, schema, images=None, role="reader", timeout_s=30.0):
+    from app.qa.omr_verify import RowKeyScanAnnotation, RowKeyScanResponse, PageKeyLocateResponse
+    if schema == PageKeyLocateResponse:
+        return PageKeyLocateResponse(annotations=[])
+    if schema == RowKeyScanResponse:
+        return RowKeyScanResponse(
+            found=True,
+            annotations=[
+                RowKeyScanAnnotation(measure_index=0, raw="轉2調(E)", semitones=2)
+            ],
+        )
+    return _mock_ask_no_key_ann(prompt, schema, images=images, role=role, timeout_s=timeout_s)
+
+
+def test_key_change_unlocated_end_present_needs_review(monkeypatch, clean_sheet):
+    """When the song end is present (final double bar on last system) and key change is unlocated,
+    it must trigger targeted row re-scan and escalate to needs_review if unlocated."""
+    import cv2
+    import numpy as np
+
+    img = np.ones((1000, 1000, 3), dtype=np.uint8) * 255
+    _, buf = cv2.imencode(".jpg", img)
+    single_page_images = [buf.tobytes()]
+
+    sheet = clean_sheet.model_copy(deep=True)
+    sheet.pages = [sheet.pages[0]]
+    sheet.systems = [s for s in sheet.systems if s.page == 0]
+    sheet.key_changes = []
+    sheet.header.raw = "SLOW SOUL 4/4 ( D - Eb ) ♩ = 59"
+    sheet.header.original_key = "D"
+    sheet.warnings = ["[v2_final_barline] page=0 system=4 right_double_bar=True"]
+
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_no_key_ann)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(single_page_images, sheet, use_llm=True)
+    assert len(verified.key_changes) == 0
+
+    unloc_issue = next((i for i in verified.issues if i.code == "key_change_unlocated"), None)
+    assert unloc_issue is not None
+    assert unloc_issue.severity == "needs_review"
+    assert "谱头显示有转调但未能定位，请在核对表中设置转调小节" in unloc_issue.message
+
+
+def test_key_change_unlocated_partial_upload_warning(monkeypatch, clean_sheet):
+    """When the song end is NOT present on uploaded page, unlocated key change must downgrade to warning."""
+    import cv2
+    import numpy as np
+
+    img = np.ones((1000, 1000, 3), dtype=np.uint8) * 255
+    _, buf = cv2.imencode(".jpg", img)
+    single_page_images = [buf.tobytes()]
+
+    sheet = clean_sheet.model_copy(deep=True)
+    sheet.pages = [sheet.pages[0]]
+    sheet.systems = [s for s in sheet.systems if s.page == 0]
+    sheet.key_changes = []
+    sheet.header.raw = "SLOW SOUL 4/4 ( D - Eb ) ♩ = 59"
+    sheet.header.original_key = "D"
+    sheet.warnings = []
+
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_no_key_ann)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(single_page_images, sheet, use_llm=True)
+    assert len(verified.key_changes) == 0
+
+    unloc_issue = next((i for i in verified.issues if i.code == "key_change_unlocated"), None)
+    assert unloc_issue is not None
+    assert unloc_issue.severity == "warning"
+    assert "谱头标示 D→Eb 转调，但所给页面中未找到转调记号；如转调在后续页请一并上传" in unloc_issue.message
+
+
+def test_key_change_targeted_row_rescan_restores_key(monkeypatch, clean_sheet):
+    """When song end is present and initial page scan missed key change, targeted row re-scan finds and restores it."""
+    import cv2
+    import numpy as np
+
+    img = np.ones((1000, 1000, 3), dtype=np.uint8) * 255
+    _, buf = cv2.imencode(".jpg", img)
+    single_page_images = [buf.tobytes()]
+
+    sheet = clean_sheet.model_copy(deep=True)
+    sheet.pages = [sheet.pages[0]]
+    sheet.systems = [s for s in sheet.systems if s.page == 0]
+    sheet.key_changes = []
+    sheet.header.raw = "SLOW SOUL 4/4 ( D - E ) ♩ = 59"
+    sheet.header.original_key = "D"
+    sheet.warnings = ["[v2_final_barline] page=0 system=4 right_double_bar=True"]
+
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_row_rescan_found)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(single_page_images, sheet, use_llm=True)
+    assert len(verified.key_changes) == 1
+    assert verified.key_changes[0].raw == "轉2調(E)"
+    assert verified.key_changes[0].semitones == 2
+
+    restored_issue = next((i for i in verified.issues if i.code == "key_change_restored"), None)
+    assert restored_issue is not None
+    assert restored_issue.severity == "auto_fixed"
+    assert not any(i.code == "key_change_unlocated" for i in verified.issues)
+
+
 
 
 

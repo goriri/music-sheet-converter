@@ -63,9 +63,10 @@ DECISION RULE SPECIFICATION
 from __future__ import annotations
 
 import concurrent.futures
-import io
 import logging
+import os
 import re
+import time
 from typing import Any, Optional
 
 import cv2
@@ -145,6 +146,17 @@ class LocatedKeyAnnotation(BaseModel):
 
 class PageKeyLocateResponse(BaseModel):
     annotations: list[LocatedKeyAnnotation] = Field(default_factory=list)
+
+
+class RowKeyScanAnnotation(BaseModel):
+    measure_index: int = Field(0, description="0-based measure index in this row where key change text appears")
+    raw: str = Field(description="Exact verbatim key change text, e.g. '轉2調', '转调', '1=Eb'")
+    semitones: int = Field(0, description="Signed integer semitones modulated")
+
+
+class RowKeyScanResponse(BaseModel):
+    found: bool = Field(False, description="True if any key change text is printed in this row")
+    annotations: list[RowKeyScanAnnotation] = Field(default_factory=list)
 
 
 class DetectedMeasureChordBox(BaseModel):
@@ -365,6 +377,101 @@ def _crop_measure(img_bgr: np.ndarray, system: System, measure: Measure) -> Opti
 
     _, buf = cv2.imencode(".jpg", c_img)
     return buf.tobytes()
+
+
+def _crop_system(img_bgr: np.ndarray, bbox: tuple[float, float, float, float]) -> Optional[bytes]:
+    """Extract an image crop of a full system row."""
+    h, w = img_bgr.shape[:2]
+    y0 = max(0, int(bbox[1] * h))
+    y1 = min(h, int(bbox[3] * h))
+    x0 = max(0, int(bbox[0] * w))
+    x1 = min(w, int(bbox[2] * w))
+    if y1 <= y0 or x1 <= x0:
+        return None
+    c_img = img_bgr[y0:y1, x0:x1]
+    if c_img.size == 0 or c_img.shape[0] < 5 or c_img.shape[1] < 5:
+        return None
+    ret, buf = cv2.imencode(".jpg", c_img)
+    return buf.tobytes() if ret else None
+
+
+def _scan_system_row_key(
+    sys_item: System,
+    cv2_pages: list[Optional[np.ndarray]],
+    rescan_prompt: str,
+) -> tuple[System, Optional[RowKeyScanResponse]]:
+    """Scan a single system row for key change annotations using Gemini Flash."""
+    p_idx = sys_item.page
+    if p_idx >= len(cv2_pages) or cv2_pages[p_idx] is None:
+        return sys_item, None
+    row_crop = _crop_system(cv2_pages[p_idx], sys_item.bbox)
+    if not row_crop:
+        return sys_item, None
+    try:
+        scan_resp = ask_json(
+            prompt=rescan_prompt,
+            schema=RowKeyScanResponse,
+            images=[row_crop],
+            role="reader",
+            timeout_s=30.0,
+        )
+        return sys_item, scan_resp
+    except Exception as exc:
+        logger.warning("Targeted row key re-scan failed for system page %d: %s", sys_item.page, exc)
+        return sys_item, None
+
+
+def detect_song_end_evidence(
+    sheet: ParsedSheet,
+    cv2_pages: list[Optional[np.ndarray]],
+    pages: Optional[list[bytes]] = None,
+) -> bool:
+    """Detect whether the last uploaded page contains physical/textual evidence of the song end.
+
+    Evidence sources:
+    1. Sheet warnings: [v2_final_barline], [v2_end_mark], right_double_bar=True, or final double bar.
+    2. Reader-detected text: 'Fine', 'fine', 'End', '|]', '||', or '完' in section_label or measure lyrics/rhythm_hint on the last system.
+    3. Terminal measure rest/stop: is_stop=True on the last measure of the chart when multiple pages/systems are present.
+    4. Classical CV / layout on the last page: layout analysis detecting right_double_bar=True on the final measure.
+    """
+    if not sheet.systems:
+        return False
+
+    # 1. Warnings from layout/reader
+    for w in sheet.warnings:
+        if re.search(r"\[v2_final_barline\]|\[v2_end_mark\]|final.*double\s*bar|right_double_bar=True|\bfine\b", w, re.I):
+            return True
+
+    # 2. Inspect the last system and its measures
+    last_page_idx = max((s.page for s in sheet.systems), default=0)
+    page_systems = [s for s in sheet.systems if s.page == last_page_idx]
+    if page_systems:
+        last_sys = page_systems[-1]
+        if last_sys.section_label and re.search(r"\b(?:fine|end|outro)\b|完", last_sys.section_label, re.I):
+            return True
+
+        if last_sys.measures:
+            last_m = last_sys.measures[-1]
+            if last_m.lyrics and re.search(r"\b(?:fine|end)\b|\|\]|\|\||完", last_m.lyrics, re.I):
+                return True
+            if last_m.rhythm_hint and re.search(r"\b(?:fine|end)\b|\|\]|\|\|", last_m.rhythm_hint, re.I):
+                return True
+            # Terminal stop on the last measure of a multi-page sheet or multi-system chart
+            if last_m.is_stop and (len(sheet.pages) > 1 or len(sheet.systems) >= 4):
+                return True
+
+    # 3. Layout CV analysis on the last page image
+    if pages and 0 <= last_page_idx < len(pages) and pages[last_page_idx]:
+        try:
+            from app.omr.layout import analyze_page
+            geom = analyze_page(pages[last_page_idx], page=last_page_idx)
+            if geom.systems and geom.systems[-1].measures:
+                if geom.systems[-1].measures[-1].right_double_bar:
+                    return True
+        except Exception as exc:
+            logger.debug("Layout analyze_page on last page failed: %s", exc)
+
+    return False
 
 
 def parse_header_key_pair(
@@ -713,6 +820,8 @@ def verify_sheet(
     sheet: ParsedSheet,
     *,
     use_llm: bool = True,
+    enable_ladder: bool = True,
+    ladder_stats: Optional[dict[str, Any]] = None,
 ) -> ParsedSheet:
     """Verify and refine a ParsedSheet using structural checks, crop re-read, and music priors.
 
@@ -752,6 +861,23 @@ def verify_sheet(
         arr = np.frombuffer(p_bytes, np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         cv2_pages.append(img)
+
+    # Spawn web evidence reference lookup in parallel with first verify pass
+    web_future = None
+    if verified.header.title and os.environ.get("WEB_EVIDENCE") != "0":
+        try:
+            from app.qa.infer import get_web_reference_candidates
+            start_pc = key_name_to_pc(verified.header.original_key or "C")
+            web_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            web_future = web_executor.submit(
+                get_web_reference_candidates,
+                verified.header.title,
+                "",
+                verified,
+                start_pc,
+            )
+        except Exception as exc:
+            logger.debug("Web evidence pre-fetch start failed: %s", exc)
 
     # 1. Structural Checks: Key Change Detection from Header
     header_raw = verified.header.raw or ""
@@ -850,7 +976,76 @@ def verify_sheet(
 
         if not key_change_restored:
             pair_str = f"{k1}→{k2}" if (k1 and k2) else f"{expected_shift:+d}半音"
-            if len(pages) <= 1 and not key_change_annotations_read:
+            end_present = detect_song_end_evidence(verified, cv2_pages, pages)
+
+            if end_present:
+                # Song end is present: modulation MUST be somewhere!
+                # Run one targeted re-scan of all rows for key-change text before escalating
+                if can_use_llm and cv2_pages and verified.systems:
+                    rescan_prompt = (
+                        "You are an expert music reader performing a targeted re-scan of a system row from a Taiwanese band chart. "
+                        "Search carefully for any mid-song key-change markings (e.g. '轉N調', '轉成N調', '转调', '1=X', 'Key:', 'Key Change'). "
+                        "Inspect above/below chords, beside rehearsal labels, and between measures. "
+                        f"The header indicates an expected key modulation of {expected_shift:+d} semitones. "
+                        "Return found=True and the annotations if any key-change text appears in this row."
+                    )
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(verified.systems))) as pool:
+                        futs = [
+                            pool.submit(_scan_system_row_key, s, cv2_pages, rescan_prompt)
+                            for s in verified.systems
+                        ]
+                        scan_results = [f.result() for f in futs]
+
+                    for s, scan_resp in scan_results:
+                        if scan_resp and scan_resp.found and scan_resp.annotations:
+                            for ann in scan_resp.annotations:
+                                parsed_semi = _parse_semitones_from_annotation(
+                                    ann.raw,
+                                    expected_shift,
+                                    verified.header.original_key,
+                                )
+                                match_semi = (
+                                    ann.semitones == expected_shift
+                                    or parsed_semi == expected_shift
+                                    or ("轉" in ann.raw and str(abs(expected_shift)) in ann.raw)
+                                )
+                                if match_semi:
+                                    m_idx = min(len(s.measures) - 1, max(0, ann.measure_index))
+                                    global_m = s.measures[m_idx].index
+                                    verified.key_changes.append(
+                                        KeyChange(
+                                            at_measure=global_m,
+                                            raw=ann.raw,
+                                            semitones=expected_shift,
+                                        )
+                                    )
+                                    new_issues.append(
+                                        QualityIssue(
+                                            stage="omr",
+                                            measure_index=global_m,
+                                            severity="auto_fixed",
+                                            code="key_change_restored",
+                                            message=f"行级重扫描定位并恢复第{global_m + 1}小节转调标记：{ann.raw} ({expected_shift:+d}半音)",
+                                            detail={"at_measure": global_m, "raw": ann.raw, "semitones": expected_shift},
+                                        )
+                                    )
+                                    key_change_restored = True
+                                    break
+                        if key_change_restored:
+                            break
+
+                if not key_change_restored:
+                    new_issues.append(
+                        QualityIssue(
+                            stage="omr",
+                            measure_index=None,
+                            severity="needs_review",
+                            code="key_change_unlocated",
+                            message="谱头显示有转调但未能定位，请在核对表中设置转调小节",
+                            detail={"expected_semitones": expected_shift, "detected_semitones": detected_shift},
+                        )
+                    )
+            else:
                 warn_msg = f"谱头标示 {pair_str} 转调，但所给页面中未找到转调记号；如转调在后续页请一并上传"
                 verified.warnings.append(f"[omr_verify] {warn_msg}")
                 new_issues.append(
@@ -865,17 +1060,6 @@ def verify_sheet(
                             "detected_semitones": detected_shift,
                             "header_pair": pair_str,
                         },
-                    )
-                )
-            else:
-                new_issues.append(
-                    QualityIssue(
-                        stage="omr",
-                        measure_index=None,
-                        severity="needs_review",
-                        code="key_change_unlocated",
-                        message="谱头显示有转调但未能定位，请在核对表中设置转调小节",
-                        detail={"expected_semitones": expected_shift, "detected_semitones": detected_shift},
                     )
                 )
 
@@ -1311,13 +1495,19 @@ def verify_sheet(
                                 f"Group notes into exactly {int(m.beats)} space-separated beat groups so the measure has {m.beats:.1f} beats in total. "
                                 f"For example: '2323 35. 2321 12.' or '1 2 3 4'."
                             )
-                            crop_resp = ask_json(
-                                prompt=melody_prompt,
-                                schema=MeasureMelodyCropReading,
-                                images=[crop_bytes],
-                                role="reader",
-                                timeout_s=30.0,
-                            )
+                            m_exec = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                            try:
+                                m_fut = m_exec.submit(
+                                    ask_json,
+                                    prompt=melody_prompt,
+                                    schema=MeasureMelodyCropReading,
+                                    images=[crop_bytes],
+                                    role="reader",
+                                    timeout_s=10.0,
+                                )
+                                crop_resp = m_fut.result(timeout=10.0)
+                            finally:
+                                m_exec.shutdown(wait=False, cancel_futures=True)
                             if crop_resp and crop_resp.melody:
                                 new_pm = parse_melody(crop_resp.melody, beats=m.beats)
                                 if abs(new_pm.beat_sum - m.beats) < 1.0:
@@ -1806,7 +1996,7 @@ def verify_sheet(
                                 severity="auto_fixed",
                                 code="chord_corrected",
                                 message=f"第{m.index + 1}小节和弦由 '{orig_raw}' 更正为 '{top_cand}'（修复格式错误）",
-                                detail={"original": orig_raw, "corrected": top_cand, "score": top_score},
+                                detail={"original": orig_raw, "corrected": top_cand, "score": top_score, "evidence": ["crop"]},
                             )
                         )
                     else:
@@ -1867,7 +2057,7 @@ def verify_sheet(
                             severity="auto_fixed",
                             code="chord_corrected",
                             message=f"第{m.index + 1}小节和弦由 {orig_raw} 更正为 {top_cand}（{reason_str}）",
-                            detail={"original": orig_raw, "corrected": top_cand, "score": top_score},
+                            detail={"original": orig_raw, "corrected": top_cand, "score": top_score, "evidence": ["crop"]},
                         )
                     )
                 elif top_cand == raw_full and (top_score - second_score >= (0.10 if is_v2_geometry else 0.25)):
@@ -1905,6 +2095,47 @@ def verify_sheet(
     else:
         for it in undecided_chords:
             _finalize_undecided(it, new_issues)
+
+    if ladder_stats is not None:
+        ladder_stats["nr_before"] = sum(1 for i in new_issues if i.severity == "needs_review")
+        ladder_stats["issues_before"] = [i.model_copy() for i in new_issues]
+
+    # 6. Escalation Ladder for any remaining needs_review items
+    if enable_ladder:
+        web_cands_map = None
+        if web_future is not None:
+            try:
+                web_cands_map = web_future.result(timeout=10.0)
+            except Exception as exc:
+                logger.debug("Web evidence future result wait: %s", exc)
+                web_cands_map = None
+            finally:
+                try:
+                    web_executor.shutdown(wait=False, cancel_futures=True)
+                except Exception:
+                    pass
+
+        t0_ladder = time.perf_counter()
+        try:
+            from app.qa.infer import run_escalation_ladder
+            new_issues = run_escalation_ladder(
+                verified,
+                cv2_pages,
+                new_issues,
+                can_use_llm=can_use_llm,
+                web_candidates_map=web_cands_map,
+            )
+        except Exception as exc:
+            logger.warning("Escalation ladder execution failed: %s", exc)
+        t_ladder_dur = time.perf_counter() - t0_ladder
+        if ladder_stats is not None:
+            ladder_stats["ladder_latency_s"] = t_ladder_dur
+            ladder_stats["nr_after"] = sum(1 for i in new_issues if i.severity == "needs_review")
+            ladder_stats["issues_after"] = [i.model_copy() for i in new_issues]
+    elif ladder_stats is not None:
+        ladder_stats["ladder_latency_s"] = 0.0
+        ladder_stats["nr_after"] = ladder_stats["nr_before"]
+        ladder_stats["issues_after"] = list(ladder_stats["issues_before"])
 
     verified.issues = new_issues
     return verified
