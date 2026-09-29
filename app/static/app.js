@@ -49,6 +49,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const renderErrorMessage = document.getElementById("render-error-message");
   const qaNeedsReviewSection = document.getElementById("qa-needs-review-section");
   const qaNeedsReviewList = document.getElementById("qa-needs-review-list");
+  const qaWarningsDetails = document.getElementById("qa-warnings-details");
+  const qaWarningsSummary = document.getElementById("qa-warnings-summary");
+  const qaWarningsList = document.getElementById("qa-warnings-list");
   const qaAutofixedDetails = document.getElementById("qa-autofixed-details");
   const qaAutofixedSummary = document.getElementById("qa-autofixed-summary");
   const qaAutofixedList = document.getElementById("qa-autofixed-list");
@@ -1404,8 +1407,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const issues = currentParsedSheet.issues || [];
     const needsReview = issues.filter(i => i.severity === "needs_review");
     const autoFixed = issues.filter(i => i.severity === "auto_fixed");
+    const warnings = issues.filter(i => i.severity === "warning");
     const N = autoFixed.length;
     const M = needsReview.length;
+    const K = warnings.length;
 
     if (qaSummaryBar) {
       qaSummaryBar.classList.remove("hidden", "has-issues", "all-clean");
@@ -1414,7 +1419,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         qaSummaryBar.classList.add("all-clean");
       }
-      qaSummaryText.textContent = `自动校验：修正 ${N} 处，需要您确认 ${M} 处`;
+      qaSummaryText.textContent = `自动校验：修正 ${N} 处，需要您确认 ${M} 处，提示 ${K} 条`;
     }
 
     const genLabel = M > 0 ? `生成（仍有 ${M} 处未确认） 🎶` : "生成伴奏谱 🎶";
@@ -1423,6 +1428,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (measuresDetails) {
       measuresDetails.open = (M > 0);
+    }
+
+    // Warnings section (Collapsible, blue styling under summary bar)
+    if (qaWarningsDetails) {
+      if (K > 0) {
+        qaWarningsDetails.classList.remove("hidden");
+        qaWarningsSummary.textContent = `提示 (${K} 条)`;
+        qaWarningsList.innerHTML = "";
+        warnings.forEach(issue => {
+          const item = document.createElement("div");
+          item.className = "qa-warning-item";
+          const mText = (issue.measure_index !== null && issue.measure_index !== undefined)
+            ? `第 ${issue.measure_index + 1} 小节` : "全局提示";
+          item.innerHTML = `<span><strong>${mText}</strong>: ${issue.message}</span>`;
+          qaWarningsList.appendChild(item);
+        });
+      } else {
+        qaWarningsDetails.classList.add("hidden");
+      }
     }
 
     // Auto-fixed section

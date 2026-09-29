@@ -854,3 +854,70 @@ def test_qianlizhiwai_review_and_gate_workflow(client, setup_test_environment):
     )
 
 
+def test_sheet_with_only_warnings_renders_without_409(client, setup_test_environment):
+    """QualityIssue severity 'warning' never blocks render with 409 and is never mutated by confirm/edit flows."""
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    parsed = get_resp.json()["parsed"]
+    from app.models import QualityIssue
+
+    warning_issue = QualityIssue(
+        stage="omr",
+        measure_index=None,
+        severity="warning",
+        code="key_change_unlocated_warning",
+        message="谱头标示 D→Eb 转调，但所给页面中未找到转调记号…",
+        detail={},
+    )
+    arr_warning = QualityIssue(
+        stage="arrange",
+        measure_index=0,
+        severity="warning",
+        code="bass_only_without_context",
+        message="第1小节低音无上下文参照，采用默认级数",
+        detail={"measure": 0},
+    )
+    parsed["issues"] = [warning_issue.model_dump(), arr_warning.model_dump()]
+    store.put_json(f"sheets/{sheet_id}/parsed.json", parsed)
+
+    # 1. Render must succeed with 200 (not 409)
+    render_resp = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "C", "difficulty": "intermediate", "instrument": "piano"},
+    )
+    assert render_resp.status_code == 200
+    assert "pdf_url" in render_resp.json()
+
+    # 2. Confirm flows must not mutate or drop warning issues
+    conf_resp = client.post(
+        f"/api/sheets/{sheet_id}/confirm",
+        json={
+            "issue_code": "key_change_unlocated_warning",
+            "action": "confirm",
+        },
+    )
+    assert conf_resp.status_code == 200
+    p_after_conf = conf_resp.json()["parsed"]
+    warn_codes = [i["code"] for i in p_after_conf["issues"] if i["severity"] == "warning"]
+    assert "key_change_unlocated_warning" in warn_codes
+    assert "bass_only_without_context" in warn_codes
+
+    # 3. Edit flows (PUT /api/sheets/{sheet_id}/parsed) must not drop warning issues
+    put_resp = client.put(f"/api/sheets/{sheet_id}/parsed", json=p_after_conf)
+    assert put_resp.status_code == 200
+    p_after_put = put_resp.json()["parsed"]
+    warn_codes_put = [i["code"] for i in p_after_put["issues"] if i["severity"] == "warning"]
+    assert "key_change_unlocated_warning" in warn_codes_put
+    assert "bass_only_without_context" in warn_codes_put
+
+

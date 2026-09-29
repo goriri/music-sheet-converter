@@ -260,9 +260,13 @@ def confirm_sheet_issue(sheet_id: str, request: ConfirmRequest):
 
     target_issues: list[QualityIssue] = []
     if request.issue_index is not None and 0 <= request.issue_index < len(sheet.issues):
-        target_issues.append(sheet.issues[request.issue_index])
+        cand = sheet.issues[request.issue_index]
+        if cand.severity == "needs_review":
+            target_issues.append(cand)
     else:
         for iss in sheet.issues:
+            if iss.severity != "needs_review":
+                continue
             code_match = (request.issue_code is None) or (iss.code == request.issue_code)
             meas_match = (
                 (request.measure_index is None)
@@ -342,10 +346,14 @@ def confirm_sheet_issue(sheet_id: str, request: ConfirmRequest):
             iss.severity = "info"
             iss.detail["confirmed"] = True
 
-    # Drop confirmed issues from needs_review
+    # Drop confirmed issues from needs_review (preserve warnings and unconfirmed issues)
     sheet.issues = [
         iss for iss in sheet.issues
-        if not (iss.detail.get("confirmed") or iss.detail.get("confirmed_with_correction") or (iss in target_issues and iss.severity != "needs_review"))
+        if iss.severity == "warning" or not (
+            iss.detail.get("confirmed")
+            or iss.detail.get("confirmed_with_correction")
+            or (iss in target_issues and iss.severity != "needs_review")
+        )
     ]
 
     # Check structural confirmation

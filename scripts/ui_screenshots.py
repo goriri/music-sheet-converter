@@ -118,6 +118,15 @@ def setup_test_sheets(storage_dir: Path) -> tuple[str, str]:
             message="第21小节旋律拍数（2.0拍）与小节拍数（4.0拍）不符且和弦起始拍存疑，请核对",
             detail={"melody": "3 5 1 -", "beat_sum": 2.0, "expected_beats": 4.0},
         ).model_dump(),
+        # 5. Non-blocking warning notice
+        QualityIssue(
+            stage="omr",
+            measure_index=None,
+            severity="warning",
+            code="key_change_notice",
+            message="谱头标示 D→Eb 转调，但所给页面中未找到转调记号，已采用原调生成",
+            detail={"expected_semitones": 1},
+        ).model_dump(),
     ]
     store.put_json(f"sheets/{sheet_a_id}/parsed.json", parsed_a)
     store.put_json(
@@ -208,6 +217,12 @@ def capture_screenshots(port: int, sheet_a: str, sheet_b: str, out_dir: Path) ->
             page.wait_for_timeout(1500)  # Wait for canvases to complete drawImage
 
             # 1. Full page overview
+            summary_text = page.locator("#qa-summary-text").inner_text()
+            assert "提示 1 条" in summary_text, f"Expected summary to contain '提示 1 条', got: {summary_text}"
+            warnings_details = page.locator("#qa-warnings-details")
+            assert warnings_details.is_visible(), "Expected #qa-warnings-details to be visible"
+            assert "提示 (1 条)" in warnings_details.locator("summary").inner_text()
+
             p_full = str(out_dir / f"{dev_name}_full_review.png")
             page.screenshot(path=p_full, full_page=True)
             screenshot_paths.append(p_full)

@@ -103,9 +103,15 @@
 
       <!-- QA Summary Bar -->
       <div id="qa-summary-bar" class="qa-summary-bar hidden">
-        <span id="qa-summary-text">自动校验：修正 0 处，需要您确认 0 处</span>
+        <span id="qa-summary-text">自动校验：修正 0 处，需要您确认 0 处，提示 0 条</span>
         <span id="qa-policy-badge" style="font-size: 0.8rem; font-weight: 500;">✓ 允许直接生成</span>
       </div>
+
+      <!-- QA Warnings (Collapsible) -->
+      <details id="qa-warnings-details" class="qa-warnings-details hidden">
+        <summary id="qa-warnings-summary">提示 (0 条)</summary>
+        <div id="qa-warnings-list" class="qa-warnings-list" style="margin-top: 8px;"></div>
+      </details>
 
       <!-- Needs Review Items at top -->
       <div id="qa-needs-review-section" class="hidden" style="margin-bottom: 20px;">
