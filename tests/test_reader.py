@@ -413,3 +413,153 @@ def test_gemini_omr_uses_v2_when_layout_high_confidence(monkeypatch):
     mock_read.assert_called_once()
     assert sheet.header.title == "V2 Success"
     assert sheet.layout_confidence == 0.9
+
+
+def test_parse_chord_symbol_stacked_mapping():
+    from app.omr.reader import parse_chord_symbol
+
+    # Circled mainland diagonal fraction '⑦╱⑤' -> raw '7/5', stacked=True
+    r1, s1 = parse_chord_symbol("⑦╱⑤")
+    assert r1 == "7/5"
+    assert s1 is True
+
+    # Circled mainland diagonal fraction '①╱②m7-5' -> raw '1/2m7-5', stacked=True
+    r2, s2 = parse_chord_symbol("①╱②m7-5")
+    assert r2 == "1/2m7-5"
+    assert s2 is True
+
+    # Circled inline chord '⑤7/9' -> raw '57/9', stacked=False
+    r3, s3 = parse_chord_symbol("⑤7/9")
+    assert r3 == "57/9"
+    assert s3 is False
+
+    # Standard Taiwanese number chord '1(2)' -> stacked=False
+    r4, s4 = parse_chord_symbol("1(2)")
+    assert r4 == "1(2)"
+    assert s4 is False
+
+    # Standard inline slash '5/7' -> stacked=False
+    r5, s5 = parse_chord_symbol("5/7")
+    assert r5 == "5/7"
+    assert s5 is False
+
+    # Circled mainland with standard slash '⑦/⑤' -> raw '7/5', stacked=True
+    r6, s6 = parse_chord_symbol("⑦/⑤")
+    assert r6 == "7/5"
+    assert s6 is True
+
+    # Explicit model_stacked=True
+    r7, s7 = parse_chord_symbol("4/5", model_stacked=True)
+    assert r7 == "4/5"
+    assert s7 is True
+
+
+def test_read_sheet_stacked_chord_boxes(monkeypatch):
+    img_bytes = _create_test_image(800, 1000)
+
+    geoms = [
+        PageGeometry(
+            page=0,
+            width=800,
+            height=1000,
+            confidence=0.95,
+            header_band=(0.02, 0.12),
+            systems=[
+                GSystem(
+                    page=0,
+                    index_on_page=0,
+                    bbox=(0.05, 0.15, 0.95, 0.35),
+                    melody_band=(0.20, 0.28),
+                    measures=[
+                        GMeasure(index_in_system=0, x0=0.05, x1=0.50),
+                        GMeasure(index_in_system=1, x0=0.50, x1=0.95),
+                    ],
+                    chord_boxes=[
+                        GChordBox(index_in_system=0, measure_index_in_system=0, bbox=(0.10, 0.15, 0.20, 0.19), beat_geo=1.0),
+                        GChordBox(index_in_system=1, measure_index_in_system=1, bbox=(0.55, 0.15, 0.65, 0.19), beat_geo=1.0),
+                    ],
+                    confidence=0.95,
+                ),
+            ],
+        )
+    ]
+
+    mock_sys_reading = SystemReading(
+        section_label="",
+        chord_boxes=[
+            BoxReading(box_id=1, text="⑦╱⑤", stacked=True),
+            BoxReading(box_id=2, text="⑤7/9", stacked=False),
+        ],
+        extra_chords=[],
+        measures=[
+            MeasureContentReading(measure_index=0, melody="1 2 3 4"),
+            MeasureContentReading(measure_index=1, melody="5 6 7 1"),
+        ],
+        key_change=None,
+    )
+
+    with patch("app.omr.reader.ask_reader") as mock_ask:
+        mock_ask.side_effect = [HeaderReading(title="Test Stacked"), mock_sys_reading]
+        sheet = read_sheet([img_bytes], geoms, model="mock-model")
+
+    m0_chord = sheet.systems[0].measures[0].chords[0]
+    assert m0_chord.raw == "7/5"
+    assert m0_chord.stacked is True
+
+    m1_chord = sheet.systems[0].measures[1].chords[0]
+    assert m1_chord.raw == "57/9"
+    assert m1_chord.stacked is False
+
+
+def test_read_sheet_chord_only_system():
+    img_bytes = _create_test_image(800, 1000)
+
+    geoms = [
+        PageGeometry(
+            page=0,
+            width=800,
+            height=1000,
+            confidence=0.95,
+            header_band=(0.02, 0.12),
+            systems=[
+                GSystem(
+                    page=0,
+                    index_on_page=0,
+                    bbox=(0.05, 0.15, 0.95, 0.35),
+                    melody_band=(0.20, 0.28),
+                    measures=[
+                        GMeasure(index_in_system=0, x0=0.05, x1=0.50),
+                        GMeasure(index_in_system=1, x0=0.50, x1=0.95),
+                    ],
+                    chord_boxes=[
+                        GChordBox(index_in_system=0, measure_index_in_system=0, bbox=(0.10, 0.15, 0.20, 0.19), beat_geo=1.0),
+                    ],
+                    confidence=0.95,
+                    notes=["chord_only"],
+                ),
+            ],
+        )
+    ]
+
+    mock_sys_reading = SystemReading(
+        measures_seen=2,
+        chord_boxes=[
+            BoxReading(box_id=1, text="1"),
+        ],
+        measures=[
+            MeasureContentReading(measure_index=0, melody="1 2 3 4", lyrics="lyrics"),
+            MeasureContentReading(measure_index=1, melody="5 6 7 1", lyrics="more lyrics"),
+        ],
+    )
+
+    with patch("app.omr.reader.ask_reader") as mock_ask:
+        mock_ask.side_effect = [HeaderReading(title="Test Chord Only"), mock_sys_reading]
+        sheet = read_sheet([img_bytes], geoms, model="mock-model")
+
+    assert sheet.layout_source == "cv"
+    assert sheet.systems[0].measures[0].melody == ""
+    assert sheet.systems[0].measures[0].lyrics == ""
+    assert sheet.systems[0].measures[0].chords[0].raw == "1"
+    assert any("[v2_chord_only] page=0 system=0" in w for w in sheet.warnings)
+    assert any("[v2_reader_measures_seen] page=0 system=0 measures_seen=2" in w for w in sheet.warnings)
+

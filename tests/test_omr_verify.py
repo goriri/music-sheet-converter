@@ -752,4 +752,150 @@ def test_verify_sheet_melody_mismatch_unresolved_geometrically_needs_review(monk
     assert review_issue_m45.severity == "needs_review"
 
 
+# ---------------------------------------------------------------------------
+# 10. v2 Classical CV Layout Verification Tests
+# ---------------------------------------------------------------------------
+
+def _mock_ask_no_row_transcription(prompt: str, schema: Any, images=None, role: str = "reader", timeout_s: float = 60.0):
+    if schema == PageRowTranscriptionResponse:
+        raise AssertionError("_transcribe_page_row should NOT be called for v2 geometry!")
+    elif schema == PageCropReadings:
+        return PageCropReadings()
+    elif schema == ArbiterBatchResponse:
+        return ArbiterBatchResponse()
+    elif schema == CandidateInsertionBatchResponse:
+        return CandidateInsertionBatchResponse()
+    elif schema == MeasureCropChordResponse:
+        return MeasureCropChordResponse(chords=[])
+    raise RuntimeError(f"Unexpected schema: {schema}")
+
+
+def test_v2_geometry_verification_pipeline(monkeypatch, clean_sheet, dummy_images):
+    """Verify that v2 geometry sheets skip row transcription and suppress false fill alerts."""
+    v2_sheet = clean_sheet.model_copy(deep=True)
+    v2_sheet.warnings = ["[v2_geometry] Classical CV layout authoritative boundaries"]
+    v2_sheet.layout_confidence = 0.95
+    v2_sheet.layout_source = "cv"
+
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_no_row_transcription)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(dummy_images, v2_sheet, use_llm=True)
+
+    # 1. Barline checks emitted barline_count_consistent info issues
+    barline_issues = [i for i in verified.issues if i.code == "barline_count_consistent"]
+    assert len(barline_issues) > 0
+    assert all(i.severity == "info" for i in barline_issues)
+
+    # 2. No needs_review barline issues
+    barline_mismatches = [i for i in verified.issues if i.code == "barline_count_mismatch" and i.severity == "needs_review"]
+    assert len(barline_mismatches) == 0
+
+    # 3. Fill measures did not trigger false missing chord needs_review issues
+    fill_needs_review = [i for i in verified.issues if i.code == "missing_chord_suspected" and i.severity == "needs_review"]
+    assert len(fill_needs_review) == 0
+
+
+def test_v2_dropped_barline_emits_needs_review(clean_sheet, dummy_images):
+    """Verify that a missed barline (merged measures ~2x beats) raises barline_count_mismatch needs_review."""
+    sheet = clean_sheet.model_copy(deep=True)
+    sheet.layout_source = "cv"
+    sheet.layout_confidence = 0.95
+    sheet.warnings = ["[v2_geometry] Classical CV layout authoritative boundaries"]
+
+    # Simulate merged measure with ~8 beats in 4/4
+    target_m = sheet.systems[0].measures[1]
+    target_m.melody = "1 - - - 1 - - -"
+    target_m.beats = 4.0
+
+    verified = verify_sheet(dummy_images, sheet, use_llm=False)
+    mismatch_issues = [i for i in verified.issues if i.code == "barline_count_mismatch"]
+    assert len(mismatch_issues) > 0
+    assert any(i.severity == "needs_review" for i in mismatch_issues)
+    assert mismatch_issues[0].detail["system"] == 0
+
+
+def test_v2_boxed_chart_measure_without_box_emits_info_carry_over(clean_sheet, dummy_images):
+    """Verify that in a boxed chart, absence of a chord box emits info chord_carry_over."""
+    sheet = clean_sheet.model_copy(deep=True)
+    sheet.layout_source = "cv"
+    sheet.layout_confidence = 0.95
+    sheet.warnings = ["[v2_geometry] Classical CV layout authoritative boundaries"]
+
+    # Ensure system measures have chord boxes to establish a boxed chart
+    for s in sheet.systems:
+        for m in s.measures:
+            for c in m.chords:
+                if not c.bbox:
+                    c.bbox = (0.1, 0.2, 0.2, 0.25)
+
+    # Set up cadence in measure 2 (c0=4 cadence to 1 in measure 3) with no chord at beat 3
+    m2 = sheet.systems[0].measures[2]
+    m2.chords = [ChordSymbol(raw="4", beat=1.0, bbox=(0.5, 0.2, 0.6, 0.25))]
+    m2.melody = "5 5 2 3"
+    m3 = sheet.systems[0].measures[3]
+    m3.chords = [ChordSymbol(raw="1", beat=1.0, bbox=(0.7, 0.2, 0.8, 0.25))]
+
+    verified = verify_sheet(dummy_images, sheet, use_llm=False)
+    carry_over_issues = [i for i in verified.issues if i.code == "chord_carry_over" and i.measure_index == m2.index]
+    assert len(carry_over_issues) > 0
+    assert carry_over_issues[0].severity == "info"
+
+    # Make sure no needs_review was emitted for m2
+    m2_needs_review = [i for i in verified.issues if i.measure_index == m2.index and i.severity == "needs_review"]
+    assert len(m2_needs_review) == 0
+
+
+def test_v2_llm_unavailable_missing_chord_suspected_emitted(clean_sheet, dummy_images):
+    """Verify that when LLM is unavailable and chart is unboxed/low-confidence, missing_chord_suspected is emitted."""
+    sheet = clean_sheet.model_copy(deep=True)
+    sheet.layout_source = "llm"  # Unboxed / fallback whole-page layout
+    sheet.layout_confidence = 0.5
+    sheet.warnings = []
+
+    # Strip bboxes so it is an unboxed chart
+    for s in sheet.systems:
+        for m in s.measures:
+            for c in m.chords:
+                c.bbox = None
+
+    # Set up cadence measure without beat 3 chord
+    m2 = sheet.systems[0].measures[2]
+    m2.chords = [ChordSymbol(raw="4", beat=1.0, bbox=None)]
+    m2.melody = "5 5 2 3"
+    m3 = sheet.systems[0].measures[3]
+    m3.chords = [ChordSymbol(raw="1", beat=1.0, bbox=None)]
+
+    verified = verify_sheet(dummy_images, sheet, use_llm=False)
+    suspected_issues = [
+        i for i in verified.issues
+        if i.code == "missing_chord_suspected" and i.measure_index == m2.index
+    ]
+    assert len(suspected_issues) > 0
+    assert any(i.severity == "needs_review" for i in suspected_issues)
+
+
+def test_v2_chord_only_system_bypasses_melody_beat_sum(clean_sheet, dummy_images):
+    """Verify that chord_only systems bypass melody beat-sum checks and do not emit anomalies."""
+    sheet = clean_sheet.model_copy(deep=True)
+    sheet.layout_source = "cv"
+    sheet.layout_confidence = 0.95
+    sheet.warnings = [
+        "[v2_geometry] Classical CV layout authoritative boundaries",
+        "[v2_chord_only] page=0 system=0",
+    ]
+
+    # Chord-only system: melody is empty
+    for m in sheet.systems[0].measures:
+        m.melody = ""
+
+    verified = verify_sheet(dummy_images, sheet, use_llm=False)
+    s0_mismatches = [
+        i for i in verified.issues
+        if i.code == "barline_count_mismatch" and i.detail.get("system") == 0
+    ]
+    assert len(s0_mismatches) == 0
+
+
+
 

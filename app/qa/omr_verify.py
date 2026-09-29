@@ -699,6 +699,10 @@ def verify_sheet(
         verified = ParsedSheet.model_validate_json(sheet.model_dump_json())
 
     new_issues: list[QualityIssue] = list(verified.issues)
+    is_v2_geometry = (
+        verified.layout_source == "cv"
+        and verified.layout_confidence >= 0.6
+    )
 
     can_use_llm = use_llm and llm_available()
     if not can_use_llm:
@@ -862,15 +866,17 @@ def verify_sheet(
         pages_with_crops = sorted(set(it["page"] for it in chords_to_read))
         num_workers = max(1, len(cv2_pages) + len(pages_with_crops))
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
-            row_futs = [
-                executor.submit(
-                    _transcribe_page_row,
-                    p_idx,
-                    cv2_pages[p_idx],
-                    [s for s in verified.systems if s.page == p_idx],
-                )
-                for p_idx in range(len(cv2_pages))
-            ]
+            row_futs = []
+            if not is_v2_geometry:
+                row_futs = [
+                    executor.submit(
+                        _transcribe_page_row,
+                        p_idx,
+                        cv2_pages[p_idx],
+                        [s for s in verified.systems if s.page == p_idx],
+                    )
+                    for p_idx in range(len(cv2_pages))
+                ]
             crop_futs = {
                 executor.submit(
                     _read_page_crops, p, [it for it in chords_to_read if it["page"] == p]
@@ -893,58 +899,133 @@ def verify_sheet(
                 except Exception as exc:
                     logger.error("Crop reading future failed: %s", exc)
 
-    # 3. Structural Checks: Barline Warnings cross-checked with row transcription
-    for w in verified.warnings:
-        m_match = re.search(r"Page\s+(\d+)\s+System\s+(\d+):\s+detected\s+(\d+)\s+barlines\s+for\s+(\d+)\s+measures", w)
-        if m_match:
-            p_idx = int(m_match.group(1)) - 1
-            s_idx = int(m_match.group(2)) - 1
+    # 3. Structural Checks: Barline Warnings cross-checked with row transcription / geometry
+    if is_v2_geometry:
+        reader_meas_counts: dict[tuple[int, int], int] = {}
+        chord_only_systems: set[tuple[int, int]] = set()
+        for w in verified.warnings:
+            m_v2 = re.search(r"\[v2_reader_measures_seen\]\s+page=(\d+)\s+system=(\d+)\s+measures_seen=(\d+)", w)
+            if m_v2:
+                reader_meas_counts[(int(m_v2.group(1)), int(m_v2.group(2)))] = int(m_v2.group(3))
+            m_co = re.search(r"\[v2_chord_only\]\s+page=(\d+)\s+system=(\d+)", w)
+            if m_co:
+                chord_only_systems.add((int(m_co.group(1)), int(m_co.group(2))))
+
+        total_meas = len(all_measures)
+        for p_idx in range(len(cv2_pages)):
             page_sys = [s for s in verified.systems if s.page == p_idx]
-            target_sys = page_sys[s_idx] if 0 <= s_idx < len(page_sys) else None
-            first_m = target_sys.measures[0].index if target_sys and target_sys.measures else None
-            parsed_count = len(target_sys.measures) if target_sys else 0
+            for s_idx, target_sys in enumerate(page_sys):
+                geometry_count = len(target_sys.measures)
+                first_m = target_sys.measures[0].index if target_sys.measures else None
+                reader_count = reader_meas_counts.get((p_idx, s_idx))
+                beat_sums = [round(parsed_melodies[m.index].beat_sum, 2) for m in target_sys.measures]
+                is_chord_only_sys = (p_idx, s_idx) in chord_only_systems
 
-            is_monotonic_non_overlapping = True
-            if target_sys and len(target_sys.measures) > 1:
-                for k in range(len(target_sys.measures) - 1):
-                    m_curr = target_sys.measures[k]
-                    m_next = target_sys.measures[k + 1]
-                    if not (m_curr.bbox[0] < m_next.bbox[0] and m_curr.bbox[2] <= m_next.bbox[0] + 0.015):
-                        is_monotonic_non_overlapping = False
-                        break
+                # (a) Check melody beat-sum anomalies (exclude pickup/first measure, final measure, and chord_only measures)
+                has_beat_anomaly = False
+                if not is_chord_only_sys:
+                    for m in target_sys.measures:
+                        if m.index == 0 or m.index == total_meas - 1:
+                            continue
+                        if not m.melody or not m.melody.strip():
+                            continue
+                        b_sum = parsed_melodies[m.index].beat_sum
+                        exp_b = m.beats
+                        if b_sum > 0:
+                            # Missed barline -> merged measure ~2x beats; Extra barline -> under-full measure
+                            if b_sum >= 1.75 * exp_b or b_sum <= 0.55 * exp_b:
+                                has_beat_anomaly = True
+                                break
 
-            transcribed_count = None
-            if p_idx in page_row_meas_counts:
-                transcribed_count = page_row_meas_counts[p_idx].get(s_idx)
+                # (b) Cross-check reader measures_seen with geometry_count
+                has_count_mismatch = (reader_count is not None and reader_count != geometry_count)
 
-            agrees = (
-                transcribed_count is not None
-                and transcribed_count == parsed_count
-                and is_monotonic_non_overlapping
-            )
-
-            if agrees:
-                new_issues.append(
-                    QualityIssue(
-                        stage="omr",
-                        measure_index=first_m,
-                        severity="info",
-                        code="barline_count_consistent",
-                        message=f"第{p_idx + 1}页第{s_idx + 1}行小节线检测与行级转录一致（共{parsed_count}小节，布局正常）",
-                        detail={"warning": w, "measure_count": parsed_count},
+                if has_count_mismatch or has_beat_anomaly:
+                    new_issues.append(
+                        QualityIssue(
+                            stage="omr",
+                            measure_index=first_m,
+                            severity="needs_review",
+                            code="barline_count_mismatch",
+                            message=f"第{p_idx + 1}页第{s_idx + 1}行小节线检测与阅读器或节拍总数不符（几何={geometry_count}，阅读器={reader_count}，节拍={beat_sums}），请核对小节划分",
+                            detail={
+                                "page": p_idx,
+                                "system": s_idx,
+                                "geometry_count": geometry_count,
+                                "reader_count": reader_count,
+                                "beat_sums": beat_sums,
+                            },
+                        )
                     )
-                )
-            else:
-                new_issues.append(
-                    QualityIssue(
-                        stage="omr",
-                        measure_index=first_m,
-                        severity="needs_review",
-                        code="barline_count_mismatch",
-                        message=f"第{p_idx + 1}页第{s_idx + 1}行小节线检测数量不符，请核对小节划分",
-                        detail={"warning": w, "parsed_count": parsed_count, "transcribed_count": transcribed_count},
+                else:
+                    new_issues.append(
+                        QualityIssue(
+                            stage="omr",
+                            measure_index=first_m,
+                            severity="info",
+                            code="barline_count_consistent",
+                            message=f"第{p_idx + 1}页第{s_idx + 1}行小节线与阅读器及节拍一致（共{geometry_count}小节，布局正常）",
+                            detail={
+                                "page": p_idx,
+                                "system": s_idx,
+                                "geometry_count": geometry_count,
+                                "reader_count": reader_count,
+                                "beat_sums": beat_sums,
+                            },
+                        )
                     )
+    else:
+        for w in verified.warnings:
+            m_match = re.search(r"Page\s+(\d+)\s+System\s+(\d+):\s+detected\s+(\d+)\s+barlines\s+for\s+(\d+)\s+measures", w)
+            if m_match:
+                p_idx = int(m_match.group(1)) - 1
+                s_idx = int(m_match.group(2)) - 1
+                page_sys = [s for s in verified.systems if s.page == p_idx]
+                target_sys = page_sys[s_idx] if 0 <= s_idx < len(page_sys) else None
+                first_m = target_sys.measures[0].index if target_sys and target_sys.measures else None
+                parsed_count = len(target_sys.measures) if target_sys else 0
+
+                is_monotonic_non_overlapping = True
+                if target_sys and len(target_sys.measures) > 1:
+                    for k in range(len(target_sys.measures) - 1):
+                        m_curr = target_sys.measures[k]
+                        m_next = target_sys.measures[k + 1]
+                        if not (m_curr.bbox[0] < m_next.bbox[0] and m_curr.bbox[2] <= m_next.bbox[0] + 0.015):
+                            is_monotonic_non_overlapping = False
+                            break
+
+                transcribed_count = None
+                if p_idx in page_row_meas_counts:
+                    transcribed_count = page_row_meas_counts[p_idx].get(s_idx)
+
+                agrees = (
+                    transcribed_count is not None
+                    and transcribed_count == parsed_count
+                    and is_monotonic_non_overlapping
                 )
+
+                if agrees:
+                    new_issues.append(
+                        QualityIssue(
+                            stage="omr",
+                            measure_index=first_m,
+                            severity="info",
+                            code="barline_count_consistent",
+                            message=f"第{p_idx + 1}页第{s_idx + 1}行小节线检测与行级转录一致（共{parsed_count}小节，布局正常）",
+                            detail={"warning": w, "measure_count": parsed_count},
+                        )
+                    )
+                else:
+                    new_issues.append(
+                        QualityIssue(
+                            stage="omr",
+                            measure_index=first_m,
+                            severity="needs_review",
+                            code="barline_count_mismatch",
+                            message=f"第{p_idx + 1}页第{s_idx + 1}行小节线检测数量不符，请核对小节划分",
+                            detail={"warning": w, "parsed_count": parsed_count, "transcribed_count": transcribed_count},
+                        )
+                    )
 
     # 4. Visual Row-Level Chord Transcription & Sequence Alignment
     row_aligned_restored_measures: set[int] = set()
@@ -1227,7 +1308,7 @@ def verify_sheet(
                 suspected_missing_measures.append({
                     "measure": m,
                     "beat": 1.0,
-                    "reason": "empty_measure_melody_clash",
+                    "reason": "fill_empty" if m.fill else "empty_measure_melody_clash",
                 })
         elif len(m.chords) == 1 and m.beats >= 4.0:
             c0 = m.chords[0]
@@ -1255,12 +1336,18 @@ def verify_sheet(
                         "beat": 3.0,
                         "reason": "fill_measure",
                     })
-                elif is_cadence and fit_h2 < 0.30 and len(h2_notes) >= 2:
-                    suspected_missing_measures.append({
-                        "measure": m,
-                        "beat": 3.0,
-                        "reason": "cadence_measure",
-                    })
+                elif is_cadence and len(h2_notes) >= 2:
+                    if fit_h2 < 0.30:
+                        suspected_missing_measures.append({
+                            "measure": m,
+                            "beat": 3.0,
+                            "reason": "cadence_measure",
+                        })
+
+    is_boxed_chart = (
+        is_v2_geometry
+        and any(c.bbox is not None for s in verified.systems for m_i in s.measures for c in m_i.chords)
+    )
 
     for it in suspected_missing_measures:
         m = it["measure"]
@@ -1269,6 +1356,53 @@ def verify_sheet(
         p_idx = m_sys.page if m_sys else 0
         img_bgr = cv2_pages[p_idx] if p_idx < len(cv2_pages) else None
 
+        # Check for unmapped ink in the chord band
+        has_unmapped_ink = False
+        if is_boxed_chart and img_bgr is not None and m_sys is not None:
+            h_img, w_img = img_bgr.shape[:2]
+            sys_boxed_chords = [c for m_i in m_sys.measures for c in m_i.chords if c.bbox]
+            if sys_boxed_chords:
+                y0_band = min(c.bbox[1] for c in sys_boxed_chords)
+                y1_band = max(c.bbox[3] for c in sys_boxed_chords)
+            else:
+                y0_band = m_sys.bbox[1]
+                y1_band = m_sys.bbox[1] + 0.35 * (m_sys.bbox[3] - m_sys.bbox[1])
+
+            if sus_beat <= 2.0:
+                x0_b = m.bbox[0]
+                x1_b = m.bbox[0] + 0.50 * (m.bbox[2] - m.bbox[0])
+            else:
+                x0_b = m.bbox[0] + 0.45 * (m.bbox[2] - m.bbox[0])
+                x1_b = m.bbox[2]
+
+            y0_px = max(0, int(y0_band * h_img))
+            y1_px = min(h_img, int(y1_band * h_img))
+            x0_px = max(0, int(x0_b * w_img))
+            x1_px = min(w_img, int(x1_b * w_img))
+
+            if y1_px > y0_px and x1_px > x0_px:
+                band_crop = img_bgr[y0_px:y1_px, x0_px:x1_px]
+                if band_crop.size > 0:
+                    g_crop = cv2.cvtColor(band_crop, cv2.COLOR_BGR2GRAY)
+                    _, bin_crop = cv2.threshold(g_crop, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                    if int(np.sum(bin_crop > 0)) > 120:
+                        has_unmapped_ink = True
+
+        # In boxed charts, absence of a chord box and ink token is strong evidence no chord is printed -> info carry-over
+        if is_boxed_chart and not has_unmapped_ink:
+            new_issues.append(
+                QualityIssue(
+                    stage="omr",
+                    measure_index=m.index,
+                    severity="info",
+                    code="chord_carry_over",
+                    message=f"第{m.index + 1}小节未检测到和弦框及油墨，判定为沿用前序和弦进行（carry-over）",
+                    detail={"measure": m.index, "beat": sus_beat, "reason": "boxed_chart_no_box_carry_over"},
+                )
+            )
+            continue
+
+        # If unmapped ink is present or chart is unboxed / low-confidence:
         if not can_use_llm or img_bgr is None or m_sys is None:
             new_issues.append(
                 QualityIssue(
@@ -1514,10 +1648,16 @@ def verify_sheet(
                         chord_duration=dur,
                     )
                     boost = 0.0
-                    if is_crop_valid and cand == raw_crop:
-                        boost += 0.65
-                    if is_full_valid and cand == raw_full:
-                        boost += 0.30
+                    if is_v2_geometry:
+                        if is_full_valid and cand == raw_full:
+                            boost += 0.65
+                        if is_crop_valid and cand == raw_crop:
+                            boost += 0.30
+                    else:
+                        if is_crop_valid and cand == raw_crop:
+                            boost += 0.65
+                        if is_full_valid and cand == raw_full:
+                            boost += 0.30
                     total = prior_s + boost
                     cand_scores.append((cand, total))
 
@@ -1570,8 +1710,9 @@ def verify_sheet(
                 )
 
                 # If raw_full is valid, supported by priors, and not contradicted by a valid crop:
-                if is_full_valid and prior_full >= 0.55 and (not is_crop_valid or raw_crop == raw_full):
-                    c.confidence = 0.92
+                min_prior = 0.35 if is_v2_geometry else 0.55
+                if is_full_valid and prior_full >= min_prior and (not is_crop_valid or raw_crop == raw_full or (is_v2_geometry and top_cand == raw_full)):
+                    c.confidence = 0.95 if is_v2_geometry else 0.92
                     c.alternatives = [x[0] for x in cand_scores if x[0] != raw_full][:3]
                     continue
 
@@ -1603,8 +1744,8 @@ def verify_sheet(
                             detail={"original": orig_raw, "corrected": top_cand, "score": top_score},
                         )
                     )
-                elif top_cand == raw_full and (top_score - second_score >= 0.25):
-                    c.confidence = 0.90
+                elif top_cand == raw_full and (top_score - second_score >= (0.10 if is_v2_geometry else 0.25)):
+                    c.confidence = 0.92 if is_v2_geometry else 0.90
                     c.alternatives = [x[0] for x in cand_scores[1:4]]
                 else:
                     undecided_chords.append({

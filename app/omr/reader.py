@@ -58,6 +58,50 @@ DEGREE_SEMITONES: dict[str, int] = {
 }
 
 
+CIRCLE_DIGIT_MAP: dict[str, str] = {
+    "①": "1", "②": "2", "③": "3", "④": "4", "⑤": "5",
+    "⑥": "6", "⑦": "7", "⑧": "8", "⑨": "9", "⑩": "10",
+    "❶": "1", "❷": "2", "❸": "3", "❹": "4", "❺": "5",
+    "❻": "6", "❼": "7", "❽": "8", "❾": "9", "❿": "10",
+}
+DIAGONAL_SLASHES = ("╱", "⁄", "∕")
+
+
+def parse_chord_symbol(raw_text: str, model_stacked: bool = False) -> tuple[str, bool]:
+    """Parse chord text into (clean_raw, stacked).
+
+    When a chord is printed as a diagonal/stacked fraction (circled mainland style,
+    e.g. '⑦╱⑤', '①╱②m7-5'), output raw 'TOP/BOTTOM' in printed order WITHOUT circles
+    (e.g. '7/5', '1/2m7-5') and set stacked=True.
+    Circled '⑤7/9' is inline (stacked=False, raw '57/9').
+    """
+    if not raw_text or not isinstance(raw_text, str):
+        return "", False
+
+    s = raw_text.strip()
+    has_diag_slash = any(ds in s for ds in DIAGONAL_SLASHES) or "\n" in s
+
+    stacked = bool(model_stacked or has_diag_slash)
+    if not stacked and "/" in s:
+        parts = s.split("/", 1)
+        has_circle_top = any(c in parts[0] for c in CIRCLE_DIGIT_MAP)
+        has_circle_bottom = any(c in parts[1] for c in CIRCLE_DIGIT_MAP)
+        if has_circle_top and has_circle_bottom:
+            stacked = True
+
+    for ds in DIAGONAL_SLASHES:
+        s = s.replace(ds, "/")
+    s = s.replace("\n", "/")
+
+    for circ, digit in CIRCLE_DIGIT_MAP.items():
+        s = s.replace(circ, digit)
+
+    # Normalize internal whitespace around slash
+    s = re.sub(r"\s*/\s*", "/", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s, stacked
+
+
 def compute_key_change_semitones(raw: str, prev_key: Optional[str] = None) -> int:
     """Compute semitone shift from modulation text.
 
@@ -268,11 +312,13 @@ def _read_single_system(
     target_model: str,
 ) -> tuple[tuple[int, int], SystemReading]:
     p_idx, s_idx, sys_geom, crop_bytes, num_boxes = task_item
+    is_chord_only = "chord_only" in sys_geom.notes
     prompt = build_system_crop_prompt(
         system_index_on_page=s_idx,
         total_measures=len(sys_geom.measures),
         num_boxes=num_boxes,
         chord_notation=chord_notation,
+        chord_only=is_chord_only,
     )
     res = ask_reader(prompt, SystemReading, images=[crop_bytes], model=target_model)
     return (p_idx, s_idx), res
@@ -398,21 +444,26 @@ def read_sheet(
             # Pre-index box readings by box_id
             box_readings_map: dict[int, str] = {}
             box_beats_map: dict[int, Optional[float]] = {}
+            box_stacked_map: dict[int, bool] = {}
             for br in reading.chord_boxes:
                 box_readings_map[br.box_id] = br.text
                 if br.beat is not None:
                     box_beats_map[br.box_id] = br.beat
+                box_stacked_map[br.box_id] = br.stacked
 
             # Pre-group extra chords by measure index
-            extra_chords_by_m: dict[int, list[tuple[str, float]]] = {}
+            extra_chords_by_m: dict[int, list[tuple[str, float, bool]]] = {}
             for ec in reading.extra_chords:
                 m_ec = ec.measure_index
                 if m_ec not in extra_chords_by_m:
                     extra_chords_by_m[m_ec] = []
-                extra_chords_by_m[m_ec].append((ec.text, ec.beat))
+                extra_chords_by_m[m_ec].append((ec.text, ec.beat, ec.stacked))
 
             # Pre-index measure content readings by measure_index
             measure_content_map = {mc.measure_index: mc for mc in reading.measures}
+            is_chord_only = "chord_only" in sys_geom.notes
+            if is_chord_only:
+                warnings.append(f"[v2_chord_only] page={p_idx} system={s_idx}")
 
             for m_idx, g_m in enumerate(sys_geom.measures):
                 chords_in_measure: list[ChordSymbol] = []
@@ -422,7 +473,8 @@ def read_sheet(
                 for b_idx, cb in enumerate(sys_geom.chord_boxes, 1):
                     if cb.measure_index_in_system == m_idx:
                         raw_text = box_readings_map.get(b_idx, "")
-                        cleaned = clean_raw_chord(raw_text)
+                        is_stacked = box_stacked_map.get(b_idx, False)
+                        cleaned, stacked = parse_chord_symbol(raw_text, model_stacked=is_stacked)
                         if cleaned and cleaned.lower() not in {"", "none", "null", "no", "x"}:
                             beat = resolve_chord_beat(
                                 beat_geo=cb.beat_geo,
@@ -438,12 +490,13 @@ def read_sheet(
                                     beat=beat,
                                     bbox=cb.bbox,
                                     confidence=1.0,
+                                    stacked=stacked,
                                 )
                             )
 
                 # 2. Extra chords
-                for extra_text, extra_beat in extra_chords_by_m.get(m_idx, []):
-                    cleaned_extra = clean_raw_chord(extra_text)
+                for extra_text, extra_beat, extra_stacked in extra_chords_by_m.get(m_idx, []):
+                    cleaned_extra, stacked_extra = parse_chord_symbol(extra_text, model_stacked=extra_stacked)
                     if cleaned_extra and cleaned_extra.lower() not in {"", "none", "null", "no", "x"}:
                         # Deduplicate if already present at roughly the same beat
                         already_present = any(
@@ -458,6 +511,7 @@ def read_sheet(
                                     beat=final_b,
                                     bbox=None,
                                     confidence=0.9,
+                                    stacked=stacked_extra,
                                 )
                             )
 
@@ -465,8 +519,8 @@ def read_sheet(
 
                 # Measure content
                 mc = measure_content_map.get(m_idx)
-                melody = mc.melody if mc else ""
-                lyrics = mc.lyrics if mc else ""
+                melody = "" if is_chord_only else (mc.melody if mc else "")
+                lyrics = "" if is_chord_only else (mc.lyrics if mc else "")
                 bass_hint = mc.bass_hint if mc else None
                 rhythm_hint = mc.rhythm_hint if mc else None
                 fill = mc.fill if mc else False
@@ -496,6 +550,11 @@ def read_sheet(
             )
             all_systems.append(system)
 
+            if reading.measures_seen is not None:
+                warnings.append(
+                    f"[v2_reader_measures_seen] page={p_idx} system={s_idx} measures_seen={reading.measures_seen}"
+                )
+
             # Key change modulation in this system
             if reading.key_change and reading.key_change.raw:
                 kc_raw = reading.key_change.raw.strip()
@@ -512,12 +571,15 @@ def read_sheet(
 
     pages_info = [PageInfo(width=g.width, height=g.height) for g in geoms]
     min_confidence = min((g.confidence for g in geoms), default=1.0)
+    warnings_list = list(warnings)
+    warnings_list.append("[v2_geometry] Classical CV layout authoritative boundaries")
 
     return ParsedSheet(
         header=header,
         pages=pages_info,
         systems=all_systems,
         key_changes=key_changes,
-        warnings=warnings,
+        warnings=warnings_list,
         layout_confidence=min_confidence,
+        layout_source="cv",
     )
