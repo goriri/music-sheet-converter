@@ -127,6 +127,7 @@ def detect_chord_boxes(
     img_w: int,
     img_h: int,
     chords_below: bool = False,
+    is_boxed_page: bool = False,
 ) -> list[GChordBox]:
     """Detect printed chord boxes or chord text tokens in the chord band."""
     if y1_px <= y0_px or not measures:
@@ -146,16 +147,32 @@ def detect_chord_boxes(
         if bw < 8 or bh < 8 or bw > 0.40 * img_w or bh > 0.08 * img_h:
             continue
 
-        rect_ratio = area / float(bw * bh)
-        # Printed chord boxes (Taiwanese charts)
-        is_boxed = (
-            bw >= 24 and bh >= 12 and rect_ratio >= 0.50 and (bw / float(bh)) <= 4.8 and not chords_below
-        )
-        # Unboxed chord text tokens or circled numbers (Mainland charts)
-        is_unboxed = (bw >= 10 and bh >= 8 and (rect_ratio >= 0.20 or area >= 25))
+        rect_ratio = area / float(bw * bh) if bw * bh > 0 else 0.0
+        aspect = bw / float(bh)
 
-        if is_boxed or is_unboxed:
-            candidates.append([bx, by + y0_px, bw, bh, is_boxed])
+        if is_boxed_page:
+            # On boxed charts, closed rounded rectangles or hollow outlines strictly in chord band
+            is_boxed = (
+                bw >= 20
+                and bh >= 18
+                and 1.05 <= aspect <= 4.8
+                and (
+                    rect_ratio >= 0.65
+                    or (rect_ratio >= 0.22 and area >= 150)
+                )
+            )
+            if is_boxed:
+                candidates.append([bx, by + y0_px, bw, bh, True])
+        else:
+            # Printed chord boxes (Taiwanese charts)
+            is_boxed = (
+                bw >= 24 and bh >= 12 and rect_ratio >= 0.50 and aspect <= 4.8 and not chords_below
+            )
+            # Unboxed chord text tokens or circled numbers (Mainland charts)
+            is_unboxed = (bw >= 10 and bh >= 8 and (rect_ratio >= 0.20 or area >= 25))
+
+            if is_boxed or is_unboxed:
+                candidates.append([bx, by + y0_px, bw, bh, is_boxed])
 
     if chords_below:
         # Merge horizontally close components (<= 15px) for circled numbers, slashes, extensions
@@ -335,6 +352,45 @@ def extract_chord_only_boxes(
     return True, chord_boxes
 
 
+def clean_narrow_measures(bars: list[float], min_m_w: float) -> list[float]:
+    """Prune spurious barlines from boxed charts while preserving true measure boundaries."""
+    if len(bars) <= 2:
+        return bars
+    cleaned = list(bars)
+    while len(cleaned) > 2:
+        diffs = [cleaned[i + 1] - cleaned[i] for i in range(len(cleaned) - 1)]
+        too_narrow = [i for i, d in enumerate(diffs) if d < min_m_w]
+        if not too_narrow:
+            break
+        i_min = min(too_narrow, key=lambda i: diffs[i])
+        c_a = cleaned[:i_min] + cleaned[i_min + 1:]
+        c_b = cleaned[:i_min + 1] + cleaned[i_min + 2:]
+        diffs_a = [c_a[j + 1] - c_a[j] for j in range(len(c_a) - 1)]
+        diffs_b = [c_b[j + 1] - c_b[j] for j in range(len(c_b) - 1)]
+        cleaned = c_a if np.std(diffs_a) <= np.std(diffs_b) else c_b
+    return cleaned
+
+
+def measure_intrinsic_unit(bin_img: np.ndarray) -> float:
+    """Estimate intrinsic notation scale unit (nominal digit/stroke height) from connected components."""
+    h, w = bin_img.shape
+    nl, _, stats, _ = cv2.connectedComponentsWithStats(bin_img)
+    cands: list[int] = []
+    for i in range(1, nl):
+        sw = stats[i, 2]
+        sh = stats[i, 3]
+        area = stats[i, 4]
+        if (
+            0.004 * h <= sh <= 0.04 * h
+            and 0.003 * w <= sw <= 0.04 * w
+            and 0.25 <= sw / float(sh) <= 1.8
+            and 0.15 <= area / float(sw * sh) <= 0.85
+            and area >= max(6, int(0.000005 * w * h))
+        ):
+            cands.append(sh)
+    return float(np.median(cands)) if cands else float(max(15.0, 0.01 * h))
+
+
 def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
     """Analyze a music sheet page using classical CV to extract layout geometry.
 
@@ -353,12 +409,27 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
             )
 
         gray, skew_angle = deskew_image(gray_raw)
-        h, w = gray.shape
+        orig_h, orig_w = gray.shape[:2]
         notes: list[str] = []
         if abs(skew_angle) >= 0.3:
             notes.append(f"Deskewed by {skew_angle:.2f} degrees")
 
-        bin_img = binarize_sheet(gray)
+        bin_pre = binarize_sheet(gray)
+        u_intrinsic = measure_intrinsic_unit(bin_pre)
+        TARGET_UNIT = 20.0
+        scaled_page = False
+        if u_intrinsic < 15.0 or u_intrinsic > 26.0:
+            scale = TARGET_UNIT / max(6.0, u_intrinsic)
+            target_w = int(round(orig_w * scale))
+            target_h = int(round(orig_h * scale))
+            interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_NEAREST
+            gray = cv2.resize(gray, (target_w, target_h), interpolation=interp)
+            bin_img = binarize_sheet(gray)
+            h, w = gray.shape
+            scaled_page = True
+        else:
+            bin_img = bin_pre
+            h, w = orig_h, orig_w
 
         # Detect whether page is a landscape chord accompaniment chart with tall barlines
         k45 = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 45))
@@ -371,7 +442,7 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
         if is_tall_bar:
             kh = 45
         else:
-            kh = max(20, min(26, int(0.015 * h)))
+            kh = (24 if scaled_page else max(20, min(26, int(0.015 * h))))
 
         k = cv2.getStructuringElement(cv2.MORPH_RECT, (1, kh))
         vert = cv2.morphologyEx(bin_img, cv2.MORPH_OPEN, k)
@@ -399,18 +470,34 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
         has_text_lines = False
         processed_cands: list[dict] = []
         for c in raw_clusters:
-            y_mean = float(np.mean([b[1] for b in c]))
-            xs = sorted([b[0] for b in c])
+            if scaled_page:
+                sb_bars = sorted(c, key=lambda b: b[1])
+                sub_groups: list[list[tuple]] = []
+                for b in sb_bars:
+                    if not sub_groups or (b[1] - sub_groups[-1][0][1]) > (12 if is_tall_bar else 6.0):
+                        sub_groups.append([b])
+                    else:
+                        sub_groups[-1].append(b)
+                best_group = max(sub_groups, key=_bar_group_key)
+                y_mean = float(np.mean([b[1] for b in best_group]))
+                xs = sorted([b[0] for b in best_group])
+                c_bars = best_group
+            else:
+                y_mean = float(np.mean([b[1] for b in c]))
+                xs = sorted([b[0] for b in c])
+                c_bars = c
+
             merged: list[float] = []
             for x in xs:
-                if not merged or x - merged[-1] > 15:
+                if not merged or x - merged[-1] > (18 if scaled_page else 15):
                     merged.append(x)
             span = (merged[-1] - merged[0]) / float(w) if len(merged) > 1 else 0.0
 
             # Reject text lines: in paragraph text lines, vertical strokes of CJK characters
             # yield 11 or more strokes across the row, or excessive density (avg measure width < 0.065)
             avg_m_w = span / max(1, len(merged) - 1)
-            if len(merged) >= 11 or (len(merged) >= 8 and avg_m_w < 0.065):
+            limit = 12 if scaled_page else 11
+            if len(merged) >= limit or (len(merged) >= 8 and avg_m_w < 0.065):
                 has_text_lines = True
                 continue
 
@@ -418,7 +505,7 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
             if span >= 0.35 or (span >= 0.16 and len(merged) >= 2):
                 processed_cands.append({
                     "y_mean": y_mean,
-                    "bars": c,
+                    "bars": c_bars,
                     "merged_xs": merged,
                     "span": span,
                 })
@@ -472,34 +559,52 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
         if not suppressed_cands:
             return PageGeometry(
                 page=page,
-                width=w,
-                height=h,
+                width=orig_w,
+                height=orig_h,
                 confidence=0.0,
                 notes=["No musical systems detected on page"],
             )
 
-        # Decide chords_below vs chords_above from evidence
-        boxed_above_count = 0
-        tokens_below_count = 0
-        for cand in suppressed_cands[:8]:
-            ym = int(cand["y_mean"])
-            crop_above = bin_img[max(0, ym - int(0.025 * h)):ym - int(0.006 * h), int(0.1 * w):int(0.9 * w)]
-            crop_below = bin_img[ym + int(0.006 * h):min(h, ym + int(0.025 * h)), int(0.1 * w):int(0.9 * w)]
+        # Detect whether page is a boxed Taiwanese chart
+        cnts_page, _ = cv2.findContours(bin_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        closed_boxes = 0
+        for cnt in cnts_page:
+            bx, by, bw, bh = cv2.boundingRect(cnt)
+            if bw < 25 or bh < 16 or bw > 0.30 * w or bh > 0.08 * h:
+                continue
+            aspect = bw / float(bh)
+            if 1.05 <= aspect <= 4.8:
+                area = cv2.contourArea(cnt)
+                rect_ratio = area / float(bw * bh) if bw * bh > 0 else 0
+                if rect_ratio >= 0.65:
+                    closed_boxes += 1
+        is_boxed_page = (closed_boxes >= 20)
 
-            cnts_above, _ = cv2.findContours(crop_above, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            for cnt in cnts_above:
-                bx, by, bw, bh = cv2.boundingRect(cnt)
-                rect = cv2.contourArea(cnt) / float(bw * bh) if bw * bh > 0 else 0
-                if bw >= 20 and bh >= 10 and rect >= 0.50:
-                    boxed_above_count += 1
+        # Decide chords_below vs chords_above from evidence (strictly False on boxed pages)
+        if is_boxed_page:
+            chords_below = False
+        else:
+            boxed_above_count = 0
+            tokens_below_count = 0
+            for cand in suppressed_cands[:8]:
+                ym = int(cand["y_mean"])
+                crop_above = bin_img[max(0, ym - int(0.025 * h)):ym - int(0.006 * h), int(0.1 * w):int(0.9 * w)]
+                crop_below = bin_img[ym + int(0.006 * h):min(h, ym + int(0.025 * h)), int(0.1 * w):int(0.9 * w)]
 
-            cnts_below, _ = cv2.findContours(crop_below, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            for cnt in cnts_below:
-                bx, by, bw, bh = cv2.boundingRect(cnt)
-                if 12 <= bw <= 55 and 12 <= bh <= 35 and 0.5 <= (bw / float(bh)) <= 2.8:
-                    tokens_below_count += 1
+                cnts_above, _ = cv2.findContours(crop_above, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                for cnt in cnts_above:
+                    bx, by, bw, bh = cv2.boundingRect(cnt)
+                    rect = cv2.contourArea(cnt) / float(bw * bh) if bw * bh > 0 else 0
+                    if bw >= 20 and bh >= 10 and rect >= 0.50:
+                        boxed_above_count += 1
 
-        chords_below = (tokens_below_count >= 15 and boxed_above_count < 5)
+                cnts_below, _ = cv2.findContours(crop_below, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                for cnt in cnts_below:
+                    bx, by, bw, bh = cv2.boundingRect(cnt)
+                    if 12 <= bw <= 55 and 12 <= bh <= 35 and 0.5 <= (bw / float(bh)) <= 2.8:
+                        tokens_below_count += 1
+
+            chords_below = (tokens_below_count >= 15 and boxed_above_count < 5)
         if chords_below:
             notes.append("chords_below")
 
@@ -635,6 +740,9 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                     if np.sum(pickup_crop > 0) > 80:
                         m_bars.insert(0, sheet_left)
 
+                if is_boxed_page and scaled_page:
+                    m_bars = clean_narrow_measures(m_bars, 0.14 * w)
+
                 # Check if system continues to sheet_right
                 if m_bars and m_bars[-1] < sheet_right - 0.12 * w:
                     if not is_tall_bar and sys_cand["span"] >= 0.55:
@@ -674,6 +782,9 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
             if chords_below:
                 chord_y0_px = mel_y1
                 chord_y1_px = min(y_bot, mel_y1 + (55 if is_tall_bar else 45))
+            elif is_boxed_page:
+                chord_y0_px = max(y_top, int(mel_y0 - max(45, int(0.035 * h))))
+                chord_y1_px = min(mel_y1, int(mel_y0 + 10))
             else:
                 chord_y0_px = max(y_top, int(mel_y0 - (60 if is_tall_bar else 35)))
                 chord_y1_px = mel_y0
@@ -690,10 +801,11 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                 img_w=w,
                 img_h=h,
                 chords_below=chords_below,
+                is_boxed_page=is_boxed_page,
             )
 
             is_chord_only = False
-            if len(chord_boxes) == 0:
+            if len(chord_boxes) == 0 and not is_boxed_page:
                 is_co, co_boxes = extract_chord_only_boxes(bin_img, mel_y0, mel_y1, measures, w, h)
                 if is_co:
                     is_chord_only = True
@@ -712,6 +824,16 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                         round(max(lyric_y0_px, lyr_peak - 12) / float(h), 4),
                         round(min(lyric_y1_px, lyr_peak + 12) / float(h), 4),
                     ))
+
+            # Exclude any chord box falling inside lyric bands
+            if lyric_bands and chord_boxes:
+                valid_chords = []
+                for cb in chord_boxes:
+                    cb_y_mid = (cb.bbox[1] + cb.bbox[3]) / 2.0
+                    in_lyric = any(ly0 <= cb_y_mid <= ly1 for ly0, ly1 in lyric_bands)
+                    if not in_lyric:
+                        valid_chords.append(cb)
+                chord_boxes = valid_chords
 
             # Full row bbox: guarantees containing melody, chords, lyrics, and non-overlapping
             sys_x0 = max(0.0, round((sheet_left - 10) / float(w), 4))
@@ -773,8 +895,8 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
 
         return PageGeometry(
             page=page,
-            width=w,
-            height=h,
+            width=orig_w,
+            height=orig_h,
             header_band=header_band,
             systems=systems,
             confidence=global_conf,

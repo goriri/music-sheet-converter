@@ -225,3 +225,116 @@ def test_non_chart_confidence():
         assert geom_hc.confidence < 0.60, f"Tutorial page huochuai p1 should have confidence < 0.60, got {geom_hc.confidence}"
 
 
+def test_boxed_chart_chords_groundtruth():
+    """Verify diaole p1 & p2 and qianlizhiwai p1 have detected chord boxes matching ground truth
+
+    chord count per measure with <= 2 mismatched measures per page, and 0 chord boxes inside lyric bands.
+    """
+    cases = [
+        ("fixtures/groundtruth/diaole.json", 1, "fixtures/pages/page1.jpg"),
+        ("fixtures/groundtruth/diaole.json", 2, "fixtures/pages/page2.jpg"),
+        ("fixtures/groundtruth/qianlizhiwai.json", 1, "fixtures/external/qianlizhiwai/page1.jpg"),
+    ]
+    for gt_rel, p_num, img_rel in cases:
+        gt_path = REPO_ROOT / gt_rel
+        img_path = REPO_ROOT / img_rel
+        if not gt_path.exists() or not img_path.exists():
+            continue
+        with open(gt_path, "r", encoding="utf-8") as f:
+            gt = json.load(f)
+        geom = analyze_page(img_path.read_bytes(), page=0)
+        gt_rows = [r for r in gt["rows"] if r["page"] == p_num]
+        assert len(geom.systems) == len(gt_rows), f"{img_rel}: systems {len(geom.systems)} != {len(gt_rows)}"
+
+        mismatched_measures = 0
+        total_measures = 0
+        in_lyric_count = 0
+        for s_idx, (sys_geom, gt_row) in enumerate(zip(geom.systems, gt_rows)):
+            for cb in sys_geom.chord_boxes:
+                cb_y = (cb.bbox[1] + cb.bbox[3]) / 2.0
+                for ly0, ly1 in sys_geom.lyric_bands:
+                    if ly0 <= cb_y <= ly1:
+                        in_lyric_count += 1
+            exp_m_counts = [len(m.get("chords", [])) for m in gt_row["measures"]]
+            act_m_counts = [0] * len(sys_geom.measures)
+            for cb in sys_geom.chord_boxes:
+                act_m_counts[cb.measure_index_in_system] += 1
+            assert len(exp_m_counts) == len(act_m_counts), f"Row {s_idx} measure count mismatch: {len(act_m_counts)} vs {len(exp_m_counts)}"
+            for act_c, exp_c in zip(act_m_counts, exp_m_counts):
+                total_measures += 1
+                if act_c != exp_c:
+                    mismatched_measures += 1
+
+        assert in_lyric_count == 0, f"{img_rel}: expected 0 chord boxes in lyric bands, got {in_lyric_count}"
+        assert mismatched_measures <= 2, f"{img_rel}: expected <= 2 mismatched measures, got {mismatched_measures}/{total_measures}"
+
+
+def test_scale_and_rotation_invariance():
+    """Verify scale and rotation invariance across image scales (0.6x down to 1.7x up)
+
+    with JPEG compression artifacts (quality 70) and rotation (+/- 2 degrees).
+    Target truth pages (fixtures/pages/page1.jpg, fixtures/pages/page2.jpg) must produce
+    identical systems and measures-per-system, and chord-box count within +/- 5%.
+    """
+    import cv2
+
+    target_pages = [
+        "fixtures/pages/page1.jpg",
+        "fixtures/pages/page2.jpg",
+    ]
+    for rel_path in target_pages:
+        img_path = REPO_ROOT / rel_path
+        if not img_path.exists():
+            continue
+
+        raw_bytes = img_path.read_bytes()
+        geom_orig = analyze_page(raw_bytes, page=0)
+        orig_systems = len(geom_orig.systems)
+        orig_measures = [len(s.measures) for s in geom_orig.systems]
+        orig_chords = sum(len(s.chord_boxes) for s in geom_orig.systems)
+
+        img = cv2.imread(str(img_path))
+        h, w = img.shape[:2]
+
+        # 1. 0.6x downscale with INTER_AREA, JPEG quality 70, +2.0 deg rotation
+        s06 = cv2.resize(img, (int(w * 0.6), int(h * 0.6)), interpolation=cv2.INTER_AREA)
+        m06 = cv2.getRotationMatrix2D((s06.shape[1] // 2, s06.shape[0] // 2), 2.0, 1.0)
+        rot06 = cv2.warpAffine(s06, m06, (s06.shape[1], s06.shape[0]), borderValue=(255, 255, 255))
+        _, enc06 = cv2.imencode(".jpg", rot06, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        geom06 = analyze_page(enc06.tobytes(), page=0)
+
+        assert len(geom06.systems) == orig_systems, (
+            f"{rel_path} at 0.6x: expected {orig_systems} systems, got {len(geom06.systems)}"
+        )
+        det_m06 = [len(s.measures) for s in geom06.systems]
+        assert det_m06 == orig_measures, (
+            f"{rel_path} at 0.6x: measures mismatch {det_m06} vs {orig_measures}"
+        )
+        chords06 = sum(len(s.chord_boxes) for s in geom06.systems)
+        diff06 = abs(chords06 - orig_chords) / float(orig_chords)
+        assert diff06 <= 0.05, (
+            f"{rel_path} at 0.6x: chord count diff {diff06:.1%} > 5% ({chords06} vs {orig_chords})"
+        )
+
+        # 2. 1.7x upscale with INTER_CUBIC, JPEG quality 70, -2.0 deg rotation
+        s17 = cv2.resize(img, (int(w * 1.7), int(h * 1.7)), interpolation=cv2.INTER_CUBIC)
+        m17 = cv2.getRotationMatrix2D((s17.shape[1] // 2, s17.shape[0] // 2), -2.0, 1.0)
+        rot17 = cv2.warpAffine(s17, m17, (s17.shape[1], s17.shape[0]), borderValue=(255, 255, 255))
+        _, enc17 = cv2.imencode(".jpg", rot17, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        geom17 = analyze_page(enc17.tobytes(), page=0)
+
+        assert len(geom17.systems) == orig_systems, (
+            f"{rel_path} at 1.7x: expected {orig_systems} systems, got {len(geom17.systems)}"
+        )
+        det_m17 = [len(s.measures) for s in geom17.systems]
+        assert det_m17 == orig_measures, (
+            f"{rel_path} at 1.7x: measures mismatch {det_m17} vs {orig_measures}"
+        )
+        chords17 = sum(len(s.chord_boxes) for s in geom17.systems)
+        diff17 = abs(chords17 - orig_chords) / float(orig_chords)
+        assert diff17 <= 0.05, (
+            f"{rel_path} at 1.7x: chord count diff {diff17:.1%} > 5% ({chords17} vs {orig_chords})"
+        )
+
+
+
