@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app.models import Difficulty, ParsedSheet
+from app.models import Difficulty, ParsedSheet, QualityIssue
 from app.pipeline import ingest_uploaded_files, render as pipeline_render, start_parse
 from app.storage import get_storage
 
@@ -48,6 +48,16 @@ class ConfirmRequest(BaseModel):
     semitones: Optional[int] = None
     at_measure: Optional[int] = None
     note: Optional[str] = None
+
+
+def _is_structural_issue(issue: QualityIssue | dict) -> bool:
+    code = issue.code if isinstance(issue, QualityIssue) else issue.get("code", "")
+    return (
+        code == "barline_count_mismatch"
+        or code.startswith("barline_")
+        or code.startswith("structural_")
+        or "measure_count" in code
+    )
 
 
 @app.get("/healthz")
@@ -197,29 +207,27 @@ def update_parsed_sheet(sheet_id: str, parsed: ParsedSheet):
         if any(c.confidence == 1.0 for c in m.chords):
             measures_edited.add(m.index)
 
-    # Drop needs_review issues for confirmed/edited measures
+    # Drop needs_review chord issues for confirmed/edited measures (preserve structural issues)
     parsed.issues = [
         issue for issue in parsed.issues
-        if not (issue.severity == "needs_review" and issue.measure_index in measures_edited)
+        if not (
+            issue.severity == "needs_review"
+            and issue.measure_index in measures_edited
+            and not _is_structural_issue(issue)
+        )
     ]
 
     parsed_dict = parsed.model_dump()
     storage.put_json(parsed_path, parsed_dict)
 
-    # If all structural issues have been confirmed/cleared, update state.json
+    # Check unconfirmed structural issues to update state.json
     has_unconfirmed_structural = any(
-        i.severity == "needs_review" and (
-            i.code == "barline_count_mismatch"
-            or i.code.startswith("barline_")
-            or i.code.startswith("structural_")
-            or "measure_count" in i.code
-        )
+        i.severity == "needs_review" and _is_structural_issue(i)
         for i in parsed.issues
     )
-    if not has_unconfirmed_structural:
-        state = storage.get_json(state_path) if storage.exists(state_path) else {}
-        state["structural_confirmed"] = True
-        storage.put_json(state_path, state)
+    state = storage.get_json(state_path) if storage.exists(state_path) else {}
+    state["structural_confirmed"] = not has_unconfirmed_structural
+    storage.put_json(state_path, state)
 
     return {"status": "ok", "parsed": parsed_dict}
 

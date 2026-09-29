@@ -625,6 +625,43 @@ body {
   font-weight: 600;
 }
 
+.qa-render-error-alert {
+  background: #fef2f2;
+  border: 1.5px solid #ef4444;
+  border-radius: var(--radius-md);
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  color: #991b1b;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.12);
+  animation: slideDown 0.25s ease-out;
+}
+
+.qa-render-error-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: #b91c1c;
+}
+
+.qa-render-error-icon {
+  font-size: 1.2rem;
+}
+
+.qa-render-error-title {
+  color: #b91c1c;
+}
+
+.qa-render-error-message {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-line;
+  color: #7f1d1d;
+  margin: 0;
+}
+
 .qa-needs-review-list {
   display: flex;
   flex-direction: column;
@@ -737,6 +774,11 @@ body {
   transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
 }
 
+.qa-crop-canvas-wrapper.scrollable-row {
+  width: 100%;
+  display: block;
+}
+
 .qa-crop-canvas-wrapper:hover {
   border-color: var(--primary);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
@@ -758,6 +800,36 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.qa-mobile-scroll-hint {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .qa-crop-canvas-wrapper.scrollable-row {
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    display: block !important;
+    -webkit-overflow-scrolling: touch;
+    width: 100% !important;
+    border: 1px solid #cbd5e1;
+  }
+
+  .qa-crop-canvas-wrapper.scrollable-row .qa-crop-canvas {
+    width: auto !important;
+    min-width: 960px !important;
+    height: 75px !important;
+    max-width: none !important;
+  }
+
+  .qa-mobile-scroll-hint {
+    display: inline-block !important;
+    color: #2563eb;
+    font-weight: 600;
+    font-size: 0.8rem;
+    margin-left: 6px;
+  }
 }
 
 /* Actions in Card */

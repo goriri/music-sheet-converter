@@ -45,12 +45,27 @@ document.addEventListener("DOMContentLoaded", () => {
   const qaLayoutGateBanner = document.getElementById("qa-layout-gate-banner");
   const qaLayoutGateDesc = document.getElementById("qa-layout-gate-desc");
   const qaLayoutGateDetails = document.getElementById("qa-layout-gate-details");
+  const renderErrorAlert = document.getElementById("render-error-alert");
+  const renderErrorMessage = document.getElementById("render-error-message");
   const qaNeedsReviewSection = document.getElementById("qa-needs-review-section");
   const qaNeedsReviewList = document.getElementById("qa-needs-review-list");
   const qaAutofixedDetails = document.getElementById("qa-autofixed-details");
   const qaAutofixedSummary = document.getElementById("qa-autofixed-summary");
   const qaAutofixedList = document.getElementById("qa-autofixed-list");
   const measuresDetails = document.getElementById("measures-details");
+
+  function showRenderError(msg) {
+    if (renderErrorAlert && renderErrorMessage) {
+      renderErrorMessage.textContent = msg;
+      renderErrorAlert.classList.remove("hidden");
+    }
+  }
+
+  function hideRenderError() {
+    if (renderErrorAlert) {
+      renderErrorAlert.classList.add("hidden");
+    }
+  }
 
   // Lightbox Elements
   const lightboxModal = document.getElementById("lightbox-modal");
@@ -521,7 +536,7 @@ document.addEventListener("DOMContentLoaded", () => {
       cropContainer.className = "qa-crop-container";
 
       const canvasWrapper = document.createElement("div");
-      canvasWrapper.className = "qa-crop-canvas-wrapper";
+      canvasWrapper.className = "qa-crop-canvas-wrapper scrollable-row";
       canvasWrapper.style.width = "100%";
 
       const canvas = document.createElement("canvas");
@@ -529,9 +544,10 @@ document.addEventListener("DOMContentLoaded", () => {
       canvasWrapper.appendChild(canvas);
       cropContainer.appendChild(canvasWrapper);
 
+      const rowMeasureCount = targetSystem && targetSystem.measures ? targetSystem.measures.length : 4;
       const hint = document.createElement("div");
       hint.className = "qa-crop-hint";
-      hint.innerHTML = `<span>🔍 点击整行截图可在高清大图中自由缩放平移（当前行检测到 ${targetSystem.measures ? targetSystem.measures.length : 0} 个小节，蓝色竖线为识别的小节线）</span>`;
+      hint.innerHTML = `<span>🔍 点击整行截图可在高清大图中自由缩放平移（当前行检测到 ${rowMeasureCount} 个小节，蓝色竖线为识别的小节线）</span><span class="qa-mobile-scroll-hint"> ← 左右滑动可完整查看 →</span>`;
       cropContainer.appendChild(hint);
 
       card.appendChild(cropContainer);
@@ -631,8 +647,8 @@ document.addEventListener("DOMContentLoaded", () => {
     numInput.className = "form-control";
     numInput.style.width = "64px";
     numInput.style.padding = "4px 8px";
-    const defaultCount = (targetSystem && targetSystem.measures ? targetSystem.measures.length : 4);
-    numInput.value = (issue.detail && issue.detail.transcribed_count) ? issue.detail.transcribed_count : defaultCount;
+    const rowCount = (targetSystem && targetSystem.measures) ? targetSystem.measures.length : 4;
+    numInput.value = rowCount;
     corrGroup.appendChild(numInput);
 
     const corrBtn = document.createElement("button");
@@ -676,7 +692,15 @@ document.addEventListener("DOMContentLoaded", () => {
           targetMeasure = m;
           targetSystem = sys;
           if (m.chords && m.chords.length > 0) {
-            targetChord = m.chords[0];
+            if (issue.detail && issue.detail.chord_index !== undefined && m.chords[issue.detail.chord_index]) {
+              targetChord = m.chords[issue.detail.chord_index];
+            } else if (issue.detail && issue.detail.beat !== undefined) {
+              targetChord = m.chords.find(c => Math.abs(c.beat - issue.detail.beat) < 0.01) || m.chords[0];
+            } else if (issue.detail && issue.detail.raw) {
+              targetChord = m.chords.find(c => c.raw === issue.detail.raw) || m.chords[0];
+            } else {
+              targetChord = m.chords[0];
+            }
           }
         }
       });
@@ -734,17 +758,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
         canvas.width = Math.round(dispW);
         canvas.height = Math.round(dispH);
-        canvas.style.maxWidth = `${Math.round(dispW)}px`;
+        canvas.style.width = `${Math.round(dispW)}px`;
+        canvas.style.maxWidth = "100%";
+        canvas.style.height = "auto";
 
         const ctx = canvas.getContext("2d");
         if (scale <= 4) ctx.imageSmoothingEnabled = false;
         ctx.drawImage(pageImg, srcX, srcY, srcW, srcH, 0, 0, canvas.width, canvas.height);
 
-        if (targetChord && targetChord.bbox) {
-          const cbX = Math.round((targetChord.bbox[0] * natW - srcX) * (canvas.width / srcW));
-          const cbY = Math.round((targetChord.bbox[1] * natH - srcY) * (canvas.height / srcH));
-          const cbW = Math.round((targetChord.bbox[2] - targetChord.bbox[0]) * natW * (canvas.width / srcW));
-          const cbH = Math.round((targetChord.bbox[3] - targetChord.bbox[1]) * natH * (canvas.height / srcH));
+        const chordBbox = (targetChord && targetChord.bbox)
+          ? targetChord.bbox
+          : (issue.detail && issue.detail.bbox ? issue.detail.bbox : null);
+
+        if (chordBbox) {
+          const cbX = Math.round((chordBbox[0] * natW - srcX) * (canvas.width / srcW));
+          const cbY = Math.round((chordBbox[1] * natH - srcY) * (canvas.height / srcH));
+          const cbW = Math.round((chordBbox[2] - chordBbox[0]) * natW * (canvas.width / srcW));
+          const cbH = Math.round((chordBbox[3] - chordBbox[1]) * natH * (canvas.height / srcH));
           ctx.strokeStyle = "#dc2626";
           ctx.lineWidth = 3.5;
           ctx.strokeRect(cbX, cbY, cbW, cbH);
@@ -838,10 +868,10 @@ document.addEventListener("DOMContentLoaded", () => {
     freeGroup.appendChild(freeBtn);
     actionsBar.appendChild(freeGroup);
 
-    const curChord = targetChord ? targetChord.raw : (issue.detail && issue.detail.raw ? issue.detail.raw : "当前");
+    const curChord = (targetChord && targetChord.raw) ? targetChord.raw : (issue.detail && issue.detail.raw ? issue.detail.raw : "当前");
     const confirmBtn = document.createElement("button");
     confirmBtn.type = "button";
-    confirmBtn.className = "btn btn-secondary btn-sm";
+    confirmBtn.className = "btn btn-secondary btn-sm qa-confirm-chord-btn";
     confirmBtn.textContent = `确认 "${curChord}" 正确`;
     confirmBtn.onclick = async () => {
       await confirmIssue({
@@ -1251,7 +1281,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
         canvas.width = Math.round(dispW);
         canvas.height = Math.round(dispH);
-        canvas.style.maxWidth = `${Math.round(dispW)}px`;
+        canvas.style.width = `${Math.round(dispW)}px`;
+        canvas.style.maxWidth = "100%";
+        canvas.style.height = "auto";
 
         const ctx = canvas.getContext("2d");
         if (scale <= 4) ctx.imageSmoothingEnabled = false;
@@ -1413,6 +1445,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // Layout Gate Check
+    hideRenderError();
     const layoutConf = currentParsedSheet.layout_confidence !== undefined ? currentParsedSheet.layout_confidence : 1.0;
     const allMeasures = [];
     (currentParsedSheet.systems || []).forEach(s => (s.measures || []).forEach(m => allMeasures.push(m)));
@@ -1721,6 +1754,7 @@ document.addEventListener("DOMContentLoaded", () => {
     btn.textContent = "正在生成伴奏...";
     bottomBtn.textContent = "正在生成伴奏...";
 
+    hideRenderError();
     try {
       const resp = await fetch(`/api/sheets/${currentSheetId}/render`, {
         method: "POST",
@@ -1734,14 +1768,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
-        throw new Error(err.detail || `生成伴奏失败 (HTTP ${resp.status})`);
+        const msg = err.detail || `生成伴奏失败 (HTTP ${resp.status})`;
+        showRenderError(msg);
+        throw new Error(msg);
       }
 
       const result = await resp.json();
       displayRenderResult(result, key, diff);
       setStep(4);
     } catch (err) {
-      alert(`伴奏生成失败: ${err.message}`);
+      showRenderError(err.message);
     } finally {
       btn.disabled = false;
       bottomBtn.disabled = false;
@@ -1806,4 +1842,24 @@ document.addEventListener("DOMContentLoaded", () => {
   btnBackToEdit.addEventListener("click", () => {
     setStep(3);
   });
+
+  // Auto-load sheet from URL parameter (e.g. ?sheet_id=xxx)
+  const urlParams = new URLSearchParams(window.location.search);
+  const initialSheetId = urlParams.get("sheet_id");
+  if (initialSheetId) {
+    currentSheetId = initialSheetId;
+    fetch(`/api/sheets/${initialSheetId}`)
+      .then((r) => r.json())
+      .then((state) => {
+        if (state.status === "ready" && state.parsed) {
+          currentParsedSheet = state.parsed;
+          renderStep3();
+          setStep(3);
+        } else {
+          setStep(2);
+          startPolling(initialSheetId);
+        }
+      })
+      .catch((err) => console.error("Failed to load initial sheet:", err));
+  }
 });
