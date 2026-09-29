@@ -27,11 +27,13 @@ Instrument = Literal["piano", "guitar", "ukulele"]
 # --------------------------------------------------------------------------- quality assurance
 class QualityIssue(BaseModel):
     """A finding from an automatic check. Only severity='needs_review' is surfaced to the user as
-    something to confirm; 'auto_fixed' is shown as an informational note; 'info' is log-only."""
+    something to confirm; 'warning' is shown as a non-blocking notice (no action needed, e.g. a
+    modulation announced in the header but not found on the uploaded pages); 'auto_fixed' is shown
+    as an informational note; 'info' is log-only."""
 
     stage: Literal["omr", "arrange", "render"]
     measure_index: Optional[int] = None
-    severity: Literal["info", "auto_fixed", "needs_review"]
+    severity: Literal["info", "auto_fixed", "warning", "needs_review"]
     code: str = Field(description="Machine code, e.g. 'chord_disagreement', 'lh_non_chord_tone'")
     message: str = Field(description="User-facing message in simplified Chinese")
     detail: dict = Field(default_factory=dict)

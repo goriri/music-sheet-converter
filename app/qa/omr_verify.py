@@ -89,6 +89,27 @@ from app.theory.keys import key_name_to_pc
 
 logger = logging.getLogger(__name__)
 
+BASS_ONLY_PATTERN = re.compile(r"^/[#b♯♭]?[1-7]$")
+NON_CHORD_VOICING_PATTERN = re.compile(r"^(?:0|\d{3,})$")
+
+
+def is_valid_chord_grammar(raw: str) -> bool:
+    """Check whether raw chord text is grammatically valid.
+
+    Supports standard Taiwanese chord notation via parse_chord,
+    as well as bass-only slash changes (e.g. '/5', '/#4', '/b7').
+    """
+    if not raw or not raw.strip():
+        return False
+    r = raw.strip()
+    if BASS_ONLY_PATTERN.match(r):
+        return True
+    try:
+        parse_chord(r)
+        return True
+    except Exception:
+        return False
+
 
 # ---------------------------------------------------------------------------
 # Pydantic schemas for reader & arbiter batch calls
@@ -134,6 +155,12 @@ class DetectedMeasureChordBox(BaseModel):
 
 class MeasureCropChordResponse(BaseModel):
     chords: list[DetectedMeasureChordBox] = Field(default_factory=list)
+
+
+class MeasureMelodyCropReading(BaseModel):
+    melody: str = Field(
+        description="Jianpu melody for this measure grouped into space-separated beats (e.g. '2323 35. 2321 12.')."
+    )
 
 
 class MissingChordArbiterConfirmation(BaseModel):
@@ -340,16 +367,18 @@ def _crop_measure(img_bgr: np.ndarray, system: System, measure: Measure) -> Opti
     return buf.tobytes()
 
 
-def parse_header_key_changes(header_raw: str, header: Optional[SongHeader] = None) -> int:
-    """Parse key pairs from header into expected total modulation.
+def parse_header_key_pair(
+    header_raw: str, header: Optional[SongHeader] = None
+) -> tuple[int, Optional[str], Optional[str]]:
+    """Parse key pairs from header into (semitone_shift, k1, k2).
 
     Handles formats like:
       - '(X - Y)', '(X-Y)', 'X→Y', 'X->Y', 'X - Y'
       - '男調(X-Y)', '女調(X-Y)', '原調(X-Y)'
       - '[X - Y]', '降B - C', '升F - 降A'
 
-    Returns the semitone shift mod 12, choosing the smaller signed value (-5..+6).
-    Returns 0 if no valid key modulation pair is detected.
+    Returns (diff, k1, k2) where diff is the semitone shift mod 12 (-5..+6).
+    Returns (0, None, None) if no valid key modulation pair is detected.
     """
     candidates_text: list[str] = []
     if header_raw:
@@ -374,11 +403,17 @@ def parse_header_key_changes(header_raw: str, header: Optional[SongHeader] = Non
                 if diff > 6:
                     diff -= 12
                 if diff != 0:
-                    return diff
+                    return diff, k1, k2
             except Exception:
                 continue
 
-    return 0
+    return 0, None, None
+
+
+def parse_header_key_changes(header_raw: str, header: Optional[SongHeader] = None) -> int:
+    """Parse key pairs from header into expected total modulation."""
+    diff, _, _ = parse_header_key_pair(header_raw, header)
+    return diff
 
 
 def _parse_semitones_from_annotation(
@@ -534,11 +569,7 @@ def _finalize_undecided(item: dict[str, Any], issues: list[QualityIssue]) -> Non
     top_cand, top_score = cand_scores[0]
     c.alternatives = [x[0] for x in cand_scores[1:4]]
 
-    is_full_valid = True
-    try:
-        parse_chord(orig_raw)
-    except Exception:
-        is_full_valid = False
+    is_full_valid = is_valid_chord_grammar(orig_raw)
 
     if top_cand != orig_raw and (not is_full_valid or (prior_full < 0.40 and top_score >= 0.75)):
         c.raw = top_cand
@@ -724,11 +755,12 @@ def verify_sheet(
 
     # 1. Structural Checks: Key Change Detection from Header
     header_raw = verified.header.raw or ""
-    expected_shift = parse_header_key_changes(header_raw, verified.header)
+    expected_shift, k1, k2 = parse_header_key_pair(header_raw, verified.header)
     detected_shift = sum(kc.semitones for kc in verified.key_changes)
 
     if expected_shift != 0 and expected_shift != detected_shift:
         key_change_restored = False
+        key_change_annotations_read: list[LocatedKeyAnnotation] = []
         if can_use_llm and pages:
             locate_prompt = (
                 "You are analyzing a page of a Taiwanese band chart sheet music. "
@@ -750,6 +782,8 @@ def verify_sheet(
                         role="reader",
                         timeout_s=45.0,
                     )
+                    if resp.annotations:
+                        key_change_annotations_read.extend(resp.annotations)
                     page_systems = [s for s in verified.systems if s.page == p_idx]
                     for ann in resp.annotations:
                         s_idx = ann.system_index
@@ -815,16 +849,35 @@ def verify_sheet(
                     logger.warning("Key change locate failed on page %d: %s", p_idx + 1, exc)
 
         if not key_change_restored:
-            new_issues.append(
-                QualityIssue(
-                    stage="omr",
-                    measure_index=None,
-                    severity="needs_review",
-                    code="key_change_unlocated",
-                    message="谱头显示有转调但未能定位，请在核对表中设置转调小节",
-                    detail={"expected_semitones": expected_shift, "detected_semitones": detected_shift},
+            pair_str = f"{k1}→{k2}" if (k1 and k2) else f"{expected_shift:+d}半音"
+            if len(pages) <= 1 and not key_change_annotations_read:
+                warn_msg = f"谱头标示 {pair_str} 转调，但所给页面中未找到转调记号；如转调在后续页请一并上传"
+                verified.warnings.append(f"[omr_verify] {warn_msg}")
+                new_issues.append(
+                    QualityIssue(
+                        stage="omr",
+                        measure_index=None,
+                        severity="warning",
+                        code="key_change_unlocated",
+                        message=warn_msg,
+                        detail={
+                            "expected_semitones": expected_shift,
+                            "detected_semitones": detected_shift,
+                            "header_pair": pair_str,
+                        },
+                    )
                 )
-            )
+            else:
+                new_issues.append(
+                    QualityIssue(
+                        stage="omr",
+                        measure_index=None,
+                        severity="needs_review",
+                        code="key_change_unlocated",
+                        message="谱头显示有转调但未能定位，请在核对表中设置转调小节",
+                        detail={"expected_semitones": expected_shift, "detected_semitones": detected_shift},
+                    )
+                )
 
     # Collect all measures and pre-parse melodies
     all_measures = verified.measures()
@@ -1110,8 +1163,7 @@ def verify_sheet(
                             continue
 
                         if is_confirmed and confirmed_c:
-                            try:
-                                parse_chord(confirmed_c)
+                            if is_valid_chord_grammar(confirmed_c):
                                 matching_existing = next(
                                     (
                                         c
@@ -1172,7 +1224,7 @@ def verify_sheet(
                                                 detail={"measure": m.index, "restored": confirmed_c, "beat": assigned_beat, "confidence": dec.confidence},
                                             )
                                         )
-                            except Exception:
+                            else:
                                 new_issues.append(
                                     QualityIssue(
                                         stage="omr",
@@ -1212,79 +1264,154 @@ def verify_sheet(
                                 detail={"measure": m.index, "candidate": cand_c, "beat": cand_b},
                             )
                         )
-    # 2a-2. Melody Beat-Sum Check (info unless >=2 chords and beat disagreement)
-    for m in all_measures:
-        pm = parsed_melodies.get(m.index)
-        if pm and pm.notes and abs(pm.beat_sum - m.beats) >= 1.0:
-            has_unresolved_beat_disagreement = False
-            if len(m.chords) >= 2:
-                beats = [c.beat for c in m.chords]
-                m_tcs = m_tc_map_global.get(m.index, [])
-                tc_beats = [tc.beat for tc in m_tcs] if m_tcs else []
-
-                has_potential_disagreement = (
-                    len(set(beats)) < len(beats)
-                    or any(c2.beat <= c1.beat for c1, c2 in zip(m.chords[:-1], m.chords[1:]))
-                    or (len(tc_beats) >= len(beats) and any(abs(b1 - b2) >= 0.5 for b1, b2 in zip(beats, tc_beats)))
-                )
-
-                if has_potential_disagreement:
-                    is_all_geometrically_resolved = True
-                    resolved_beats = []
-                    for idx, c in enumerate(m.chords):
-                        competing = [c.beat]
-                        if idx < len(tc_beats):
-                            competing.append(tc_beats[idx])
-                        resolved_b, is_ambiguous = resolve_chord_beat_geo(c, m, competing)
-                        if is_ambiguous or resolved_b is None:
-                            is_all_geometrically_resolved = False
-                            break
-                        resolved_beats.append(resolved_b)
-
-                    if is_all_geometrically_resolved:
-                        if len(set(resolved_beats)) < len(resolved_beats) or any(
-                            b2 <= b1 for b1, b2 in zip(resolved_beats[:-1], resolved_beats[1:])
-                        ):
-                            is_all_geometrically_resolved = False
-
-                    if not is_all_geometrically_resolved:
-                        has_unresolved_beat_disagreement = True
-                    else:
-                        for c, rb in zip(m.chords, resolved_beats):
-                            c.beat = rb
+    # Drop non-chord voicing tokens outside closed boxes on boxed charts
+    is_boxed_chart = any(
+        c.bbox is not None for s in verified.systems for m_i in s.measures for c in m_i.chords
+    )
+    if is_boxed_chart:
+        for s in verified.systems:
+            for m in s.measures:
+                retained_chords = []
+                for c in m.chords:
+                    raw_c = c.raw.strip()
+                    if NON_CHORD_VOICING_PATTERN.match(raw_c) and c.bbox is None:
                         new_issues.append(
                             QualityIssue(
                                 stage="omr",
                                 measure_index=m.index,
                                 severity="info",
-                                code="chord_beat_resolved_geo",
-                                message=f"第{m.index + 1}小节和弦起始拍依据打印框几何位置判定正常",
-                                detail={"measure": m.index, "beats": [c.beat for c in m.chords]},
+                                code="non_chord_token_dropped",
+                                message=f"第{m.index + 1}小节非和弦记号 '{c.raw}' 未处于和弦框内，已自动丢弃",
+                                detail={"raw": c.raw, "beat": c.beat},
                             )
                         )
+                    else:
+                        retained_chords.append(c)
+                m.chords = retained_chords
 
-            if len(m.chords) >= 2 and has_unresolved_beat_disagreement:
-                new_issues.append(
-                    QualityIssue(
-                        stage="omr",
-                        measure_index=m.index,
-                        severity="needs_review",
-                        code="melody_beat_sum_mismatch",
-                        message=f"第{m.index + 1}小节旋律拍数（{pm.beat_sum:.1f}拍）与小节拍数（{m.beats:.1f}拍）不符且和弦起始拍存疑，请核对",
-                        detail={"melody": m.melody, "beat_sum": pm.beat_sum, "expected_beats": m.beats},
-                    )
+    # 2a-2. Melody Beat-Sum Check (info unless >=2 chords and beat disagreement)
+    for m in all_measures:
+        pm = parsed_melodies.get(m.index)
+        if pm and pm.notes and abs(pm.beat_sum - m.beats) >= 1.0:
+            if can_use_llm and m.bbox:
+                m_sys = next(
+                    (s for s in verified.systems if any(meas.index == m.index for meas in s.measures)),
+                    None,
                 )
-            else:
-                new_issues.append(
-                    QualityIssue(
-                        stage="omr",
-                        measure_index=m.index,
-                        severity="info",
-                        code="melody_beat_sum_mismatch",
-                        message=f"第{m.index + 1}小节旋律拍数（{pm.beat_sum:.1f}拍）与小节拍数（{m.beats:.1f}拍）不符（简谱下划线省略，仅供参考）",
-                        detail={"melody": m.melody, "beat_sum": pm.beat_sum, "expected_beats": m.beats},
+                p_idx = m_sys.page if m_sys else 0
+                img_bgr = cv2_pages[p_idx] if p_idx < len(cv2_pages) else None
+                if img_bgr is not None and m_sys is not None:
+                    crop_bytes = _crop_measure(img_bgr, m_sys, m)
+                    if crop_bytes:
+                        try:
+                            m_meter = f"{int(m.beats)}/4" if m.beats.is_integer() else f"{m.beats} beats"
+                            melody_prompt = (
+                                f"You are an expert music assistant reading Jianpu (numbered musical notation) in {m_meter} meter. "
+                                f"Transcribe the melody for this single measure. "
+                                f"Group notes into exactly {int(m.beats)} space-separated beat groups so the measure has {m.beats:.1f} beats in total. "
+                                f"For example: '2323 35. 2321 12.' or '1 2 3 4'."
+                            )
+                            crop_resp = ask_json(
+                                prompt=melody_prompt,
+                                schema=MeasureMelodyCropReading,
+                                images=[crop_bytes],
+                                role="reader",
+                                timeout_s=30.0,
+                            )
+                            if crop_resp and crop_resp.melody:
+                                new_pm = parse_melody(crop_resp.melody, beats=m.beats)
+                                if abs(new_pm.beat_sum - m.beats) < 1.0:
+                                    orig_melody = m.melody
+                                    m.melody = crop_resp.melody
+                                    parsed_melodies[m.index] = new_pm
+                                    pm = new_pm
+                                    new_issues.append(
+                                        QualityIssue(
+                                            stage="omr",
+                                            measure_index=m.index,
+                                            severity="auto_fixed",
+                                            code="melody_corrected",
+                                            message=f"第{m.index + 1}小节旋律拍数经单小节重读更正（{new_pm.beat_sum:.1f}拍，原={orig_melody}，更正后={crop_resp.melody}）",
+                                            detail={
+                                                "original": orig_melody,
+                                                "corrected": crop_resp.melody,
+                                                "beat_sum": new_pm.beat_sum,
+                                            },
+                                        )
+                                    )
+                        except Exception as exc:
+                            logger.warning("Measure %d melody crop re-read failed: %s", m.index + 1, exc)
+
+            if abs(pm.beat_sum - m.beats) >= 1.0:
+                has_unresolved_beat_disagreement = False
+                if len(m.chords) >= 2:
+                    beats = [c.beat for c in m.chords]
+                    m_tcs = m_tc_map_global.get(m.index, [])
+                    tc_beats = [tc.beat for tc in m_tcs] if m_tcs else []
+
+                    has_potential_disagreement = (
+                        len(set(beats)) < len(beats)
+                        or any(c2.beat <= c1.beat for c1, c2 in zip(m.chords[:-1], m.chords[1:]))
+                        or (len(tc_beats) >= len(beats) and any(abs(b1 - b2) >= 0.5 for b1, b2 in zip(beats, tc_beats)))
                     )
-                )
+
+                    if has_potential_disagreement:
+                        is_all_geometrically_resolved = True
+                        resolved_beats = []
+                        for idx, c in enumerate(m.chords):
+                            competing = [c.beat]
+                            if idx < len(tc_beats):
+                                competing.append(tc_beats[idx])
+                            resolved_b, is_ambiguous = resolve_chord_beat_geo(c, m, competing)
+                            if is_ambiguous or resolved_b is None:
+                                is_all_geometrically_resolved = False
+                                break
+                            resolved_beats.append(resolved_b)
+
+                        if is_all_geometrically_resolved:
+                            if len(set(resolved_beats)) < len(resolved_beats) or any(
+                                b2 <= b1 for b1, b2 in zip(resolved_beats[:-1], resolved_beats[1:])
+                            ):
+                                is_all_geometrically_resolved = False
+
+                        if not is_all_geometrically_resolved:
+                            has_unresolved_beat_disagreement = True
+                        else:
+                            for c, rb in zip(m.chords, resolved_beats):
+                                c.beat = rb
+                            new_issues.append(
+                                QualityIssue(
+                                    stage="omr",
+                                    measure_index=m.index,
+                                    severity="info",
+                                    code="chord_beat_resolved_geo",
+                                    message=f"第{m.index + 1}小节和弦起始拍依据打印框几何位置判定正常",
+                                    detail={"measure": m.index, "beats": [c.beat for c in m.chords]},
+                                )
+                            )
+
+                if len(m.chords) >= 2 and has_unresolved_beat_disagreement:
+                    new_issues.append(
+                        QualityIssue(
+                            stage="omr",
+                            measure_index=m.index,
+                            severity="needs_review",
+                            code="melody_beat_sum_mismatch",
+                            message=f"第{m.index + 1}小节旋律拍数（{pm.beat_sum:.1f}拍）与小节拍数（{m.beats:.1f}拍）不符且和弦起始拍存疑，请核对",
+                            detail={"melody": m.melody, "beat_sum": pm.beat_sum, "expected_beats": m.beats},
+                        )
+                    )
+                else:
+                    new_issues.append(
+                        QualityIssue(
+                            stage="omr",
+                            measure_index=m.index,
+                            severity="info",
+                            code="melody_beat_sum_mismatch",
+                            message=f"第{m.index + 1}小节旋律拍数（{pm.beat_sum:.1f}拍）与小节拍数（{m.beats:.1f}拍）不符（简谱下划线省略，仅供参考）",
+                            detail={"melody": m.melody, "beat_sum": pm.beat_sum, "expected_beats": m.beats},
+                        )
+                    )
 
     # 2b. Structural Checks: Missing Chord Inspection (Crop Re-Read + Arbiter Confirmation)
     suspected_missing_measures: list[dict[str, Any]] = []
@@ -1295,11 +1422,11 @@ def verify_sheet(
         m_notes = pm.notes if pm else []
 
         prev_c = None
-        if m.index > 0 and measure_map[m.index - 1].chords:
+        if (m.index - 1) in measure_map and measure_map[m.index - 1].chords:
             prev_c = measure_map[m.index - 1].chords[-1].raw
 
         next_c = None
-        if m.index + 1 < len(all_measures) and measure_map[m.index + 1].chords:
+        if (m.index + 1) in measure_map and measure_map[m.index + 1].chords:
             next_c = measure_map[m.index + 1].chords[0].raw
 
         if len(m.chords) == 0:
@@ -1384,8 +1511,28 @@ def verify_sheet(
                 band_crop = img_bgr[y0_px:y1_px, x0_px:x1_px]
                 if band_crop.size > 0:
                     g_crop = cv2.cvtColor(band_crop, cv2.COLOR_BGR2GRAY)
+                    crop_std = float(np.std(g_crop))
                     _, bin_crop = cv2.threshold(g_crop, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-                    if int(np.sum(bin_crop > 0)) > 120:
+                    ink_frac = float(np.sum(bin_crop > 0)) / float(g_crop.size)
+
+                    # Compute median ink fraction of known chord boxes in this system
+                    box_ink_fracs: list[float] = []
+                    for c in sys_boxed_chords:
+                        bx0 = max(0, int(c.bbox[0] * w_img))
+                        by0 = max(0, int(c.bbox[1] * h_img))
+                        bx1 = min(w_img, int(c.bbox[2] * w_img))
+                        by1 = min(h_img, int(c.bbox[3] * h_img))
+                        if by1 > by0 and bx1 > bx0:
+                            b_crop = img_bgr[by0:by1, bx0:bx1]
+                            if b_crop.size > 0:
+                                bg = cv2.cvtColor(b_crop, cv2.COLOR_BGR2GRAY)
+                                _, b_bin = cv2.threshold(bg, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                                box_ink_fracs.append(float(np.sum(b_bin > 0)) / float(bg.size))
+
+                    median_box_frac = float(np.median(box_ink_fracs)) if box_ink_fracs else 0.10
+                    min_frac = max(0.015, 0.15 * median_box_frac)
+
+                    if ink_frac >= min_frac and crop_std >= 12.0:
                         has_unmapped_ink = True
 
         # In boxed charts, absence of a chord box and ink token is strong evidence no chord is printed -> info carry-over
@@ -1445,12 +1592,9 @@ def verify_sheet(
             )
             valid_cands: list[DetectedMeasureChordBox] = []
             for b in reader_resp.chords:
-                try:
-                    parse_chord(b.chord.strip())
+                if is_valid_chord_grammar(b.chord.strip()):
                     if not any(abs(c.beat - b.beat) < 0.5 for c in m.chords):
                         valid_cands.append(b)
-                except Exception:
-                    continue
 
             if valid_cands:
                 top_cand = valid_cands[0]
@@ -1477,8 +1621,7 @@ def verify_sheet(
                     and arbiter_resp.confirmed_chord
                 ):
                     clean_c = arbiter_resp.confirmed_chord.strip()
-                    try:
-                        parse_chord(clean_c)
+                    if is_valid_chord_grammar(clean_c):
                         m.chords.append(
                             ChordSymbol(
                                 raw=clean_c,
@@ -1497,7 +1640,7 @@ def verify_sheet(
                                 detail={"measure": m.index, "restored": clean_c, "beat": cand_beat, "confidence": arbiter_resp.confidence},
                             )
                         )
-                    except Exception:
+                    else:
                         new_issues.append(
                             QualityIssue(
                                 stage="omr",
@@ -1573,32 +1716,21 @@ def verify_sheet(
                 prev_c = None
                 if c_idx > 0:
                     prev_c = m.chords[c_idx - 1].raw
-                elif m.index > 0 and measure_map[m.index - 1].chords:
+                elif (m.index - 1) in measure_map and measure_map[m.index - 1].chords:
                     prev_c = measure_map[m.index - 1].chords[-1].raw
 
                 next_c = None
                 if c_idx + 1 < len(m.chords):
                     next_c = m.chords[c_idx + 1].raw
-                elif m.index + 1 < len(all_measures) and measure_map[m.index + 1].chords:
+                elif (m.index + 1) in measure_map and measure_map[m.index + 1].chords:
                     next_c = measure_map[m.index + 1].chords[0].raw
 
                 pm = parsed_melodies.get(m.index)
                 m_notes = pm.notes if pm else []
                 dur = m.beats - c.beat + 1.0 if c_idx == len(m.chords) - 1 else 2.0
 
-                is_full_valid = True
-                try:
-                    parse_chord(raw_full)
-                except Exception:
-                    is_full_valid = False
-
-                is_crop_valid = False
-                if raw_crop:
-                    try:
-                        parse_chord(raw_crop)
-                        is_crop_valid = True
-                    except Exception:
-                        is_crop_valid = False
+                is_full_valid = is_valid_chord_grammar(raw_full)
+                is_crop_valid = bool(raw_crop and is_valid_chord_grammar(raw_crop))
 
                 # 4a. Concordance Check
                 if is_crop_valid and raw_crop == raw_full:
@@ -1614,13 +1746,7 @@ def verify_sheet(
                 if is_full_valid:
                     cand_pool.add(raw_full)
 
-                valid_cands: list[str] = []
-                for cand in cand_pool:
-                    try:
-                        parse_chord(cand)
-                        valid_cands.append(cand)
-                    except Exception:
-                        continue
+                valid_cands = [cand for cand in cand_pool if is_valid_chord_grammar(cand)]
 
                 if not valid_cands:
                     c.confidence = 0.2

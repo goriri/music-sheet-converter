@@ -81,7 +81,7 @@ class ExtraChordReading(BaseModel):
         description="0-based measure index in this system (e.g. 0, 1, 2, 3) where the unnumbered chord appears."
     )
     text: str = Field(
-        description="Verbatim chord text not enclosed in any numbered box."
+        description="Verbatim chord text not enclosed in any numbered box. Exclude voicing digit patterns (e.g. '056') and rests ('0')."
     )
     beat: float = Field(
         1.0,
@@ -198,7 +198,7 @@ Please transcribe into structured JSON:
    - If a badge marks empty space, an instrument annotation only, or no chord is present, return text="".
    - If a chord is printed as a diagonal or stacked fraction (circled mainland style, e.g. '⑦╱⑤', '①╱②m7-5'): report text as 'TOP/BOTTOM' in printed order (e.g. '7/5', '1/2m7-5') without circles, and set stacked=true.
    - Inline chords (e.g. '1(2)', '5/7', or circled '⑤7/9') have stacked=false.
-4. extra_chords: any chords printed in this row that do NOT have a red numbered box (provide measure_index 0..{total_measures - 1}, text, beat, and stacked).
+4. extra_chords: any chords printed in this row that do NOT have a red numbered box (provide measure_index 0..{total_measures - 1}, text, beat, and stacked). Exclude piano/instrument voicing digits (e.g. '056', '5616', '1242') and rests ('0') which are not chords.
 5. measures: for each measure (0..{total_measures - 1}):
    - melody: jianpu melody notes as space-separated beat groups (e.g. '2 2 23 21').
    - lyrics: printed lyrics under the melody.

@@ -348,7 +348,7 @@ def arrange(
 
                         resolved.append(degraded_rc)
                         arr_issues.append(
-                            QualityIssue.model_construct(
+                            QualityIssue(
                                 stage="arrange",
                                 severity="warning",
                                 code="bass_only_without_context",

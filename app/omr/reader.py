@@ -488,7 +488,7 @@ def read_sheet(
                                 ChordSymbol(
                                     raw=cleaned,
                                     beat=beat,
-                                    bbox=cb.bbox,
+                                    bbox=cb.bbox if cb.boxed else None,
                                     confidence=1.0,
                                     stacked=stacked,
                                 )
@@ -498,6 +498,9 @@ def read_sheet(
                 for extra_text, extra_beat, extra_stacked in extra_chords_by_m.get(m_idx, []):
                     cleaned_extra, stacked_extra = parse_chord_symbol(extra_text, model_stacked=extra_stacked)
                     if cleaned_extra and cleaned_extra.lower() not in {"", "none", "null", "no", "x"}:
+                        # Filter non-chord voicing digits and rests
+                        if re.match(r"^(?:0|\d{3,})$", cleaned_extra):
+                            continue
                         # Deduplicate if already present at roughly the same beat
                         already_present = any(
                             c.raw == cleaned_extra and abs(c.beat - extra_beat) < 0.5

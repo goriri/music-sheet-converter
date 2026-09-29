@@ -897,5 +897,236 @@ def test_v2_chord_only_system_bypasses_melody_beat_sum(clean_sheet, dummy_images
     assert len(s0_mismatches) == 0
 
 
+# ---------------------------------------------------------------------------
+# 11. Conductor Rework & Robustness Verification
+# ---------------------------------------------------------------------------
+
+def test_bass_only_notation_valid_grammar(clean_sheet, dummy_images):
+    """Verify bass-only slash changes (e.g. /5, /#4, /b7) pass grammar and are not flagged as invalid."""
+    from app.qa.omr_verify import is_valid_chord_grammar
+
+    for sym in ["/5", "/1", "/#4", "/b7", "/♭3"]:
+        assert is_valid_chord_grammar(sym) is True
+    assert is_valid_chord_grammar("/8") is False
+    assert is_valid_chord_grammar("/0") is False
+
+    sheet = clean_sheet.model_copy(deep=True)
+    m0 = sheet.systems[0].measures[0]
+    m0.chords = [ChordSymbol(raw="/5", beat=1.0, confidence=1.0)]
+
+    verified = verify_sheet(dummy_images, sheet, use_llm=False)
+    invalid_issues = [
+        i for i in verified.issues
+        if i.code == "invalid_chord_grammar" and i.measure_index == m0.index
+    ]
+    assert len(invalid_issues) == 0
+
+
+def test_non_chord_voicing_tokens_dropped_unboxed_vs_boxed(clean_sheet, dummy_images):
+    """Verify pure '0' or >=3-digit voicing tokens outside boxes are dropped as info, but flagged inside boxes."""
+    sheet = clean_sheet.model_copy(deep=True)
+    sheet.layout_source = "cv"
+    sheet.layout_confidence = 0.95
+
+    # Establish boxed chart
+    for s in sheet.systems:
+        for m in s.measures:
+            for c in m.chords:
+                c.bbox = (0.1, 0.2, 0.2, 0.25)
+
+    # Add unboxed voicing token (bbox=None) to measure 0
+    m0 = sheet.systems[0].measures[0]
+    m0.chords.append(ChordSymbol(raw="056", beat=3.0, bbox=None, confidence=1.0))
+    # Add unboxed rest '0' (bbox=None) to measure 1
+    m1 = sheet.systems[0].measures[1]
+    m1.chords.append(ChordSymbol(raw="0", beat=4.0, bbox=None, confidence=1.0))
+
+    # Add boxed invalid token to measure 2
+    m2 = sheet.systems[0].measures[2]
+    m2.chords.append(ChordSymbol(raw="0", beat=3.0, bbox=(0.3, 0.2, 0.4, 0.25), confidence=1.0))
+
+    verified = verify_sheet(dummy_images, sheet, use_llm=False)
+
+    # m0 and m1 unboxed tokens should be dropped with info non_chord_token_dropped
+    dropped_m0 = [i for i in verified.issues if i.code == "non_chord_token_dropped" and i.measure_index == m0.index]
+    assert len(dropped_m0) == 1
+    assert dropped_m0[0].severity == "info"
+    assert "056" in dropped_m0[0].message
+    assert not any(c.raw == "056" for c in verified.systems[0].measures[0].chords)
+
+    dropped_m1 = [i for i in verified.issues if i.code == "non_chord_token_dropped" and i.measure_index == m1.index]
+    assert len(dropped_m1) == 1
+    assert dropped_m1[0].severity == "info"
+    assert not any(c.raw == "0" for c in verified.systems[0].measures[1].chords)
+
+    # m2 boxed token must NOT be dropped, and flagged as needs_review invalid_chord_grammar
+    m2_invalid = [i for i in verified.issues if i.code == "invalid_chord_grammar" and i.measure_index == m2.index]
+    assert len(m2_invalid) == 1
+    assert m2_invalid[0].severity == "needs_review"
+
+
+def test_key_change_unlocated_single_page_downgraded_to_warning(monkeypatch, clean_sheet):
+    """Verify that unlocated key change on a single uploaded page with no annotations is downgraded to warning."""
+    import cv2
+    import numpy as np
+    from app.qa.omr_verify import PageKeyLocateResponse
+
+    img = np.ones((1000, 1000, 3), dtype=np.uint8) * 255
+    _, buf = cv2.imencode(".jpg", img)
+    single_page_images = [buf.tobytes()]
+
+    sheet = clean_sheet.model_copy(deep=True)
+    sheet.pages = [sheet.pages[0]]
+def _mock_ask_no_key_ann(prompt, schema, images=None, role="reader", timeout_s=45.0):
+    from app.qa.omr_verify import PageKeyLocateResponse
+    if schema == PageKeyLocateResponse:
+        return PageKeyLocateResponse(annotations=[])
+    return _mock_ask_json_unlocated(prompt, schema, images=images, role=role, timeout_s=timeout_s)
+
+
+def _mock_ask_melody_crop(prompt, schema, images=None, role="reader", timeout_s=30.0):
+    from app.qa.omr_verify import MeasureMelodyCropReading
+    if schema == MeasureMelodyCropReading:
+        return MeasureMelodyCropReading(melody="2323 35. 2321 12.")
+    return _mock_ask_json_unlocated(prompt, schema, images=images, role=role, timeout_s=timeout_s)
+
+
+def _eval_song_corruptions(song_name: str, img_rel_paths: list[str], parsed_rel_path: str) -> tuple[float, int]:
+    from pathlib import Path
+    project_root = Path(__file__).resolve().parent.parent
+    images = [(project_root / p).read_bytes() for p in img_rel_paths]
+    base_sheet = ParsedSheet.model_validate_json((project_root / parsed_rel_path).read_text(encoding="utf-8"))
+    sheet = base_sheet.model_copy(deep=True)
+
+    # 1. 5 wrong chords:
+    wrong_indices = []
+    for s in sheet.systems[2:7]:
+        for m in s.measures:
+            if m.chords and len(wrong_indices) < 5:
+                wrong_indices.append(m.index)
+                m.chords[0].raw = m.chords[0].raw + "xyz"
+
+    # 2. 3 dropped chords:
+    dropped_indices = []
+    for s in sheet.systems[1:]:
+        for m in s.measures:
+            if m.index not in wrong_indices and len(m.chords) >= 2 and len(dropped_indices) < 3:
+                dropped_indices.append(m.index)
+                del m.chords[0]
+    if len(dropped_indices) < 3:
+        for s in sheet.systems[1:]:
+            for m in s.measures:
+                if m.index not in wrong_indices and m.index not in dropped_indices and len(m.chords) == 1 and len(dropped_indices) < 3:
+                    dropped_indices.append(m.index)
+                    del m.chords[0]
+
+    # 3. Two measures merged in system 0:
+    s0 = sheet.systems[0]
+    m_keep = s0.measures[0]
+    m_del = s0.measures[1]
+    m_keep.melody = (m_keep.melody + " " + m_del.melody).strip()
+    m_keep.chords.extend(m_del.chords)
+    m_keep.bbox = (m_keep.bbox[0], m_keep.bbox[1], m_del.bbox[2], m_del.bbox[3])
+    del s0.measures[1]
+
+    # 4. Key change removed:
+    if song_name == "diaole":
+        sheet.key_changes = []
+    else:
+        sheet.header.raw = sheet.header.raw + " (Eb - F)"
+        sheet.key_changes = []
+
+    verified = verify_sheet(images, sheet, use_llm=False)
+
+    caught = 0
+    for idx in wrong_indices:
+        if any(i.measure_index == idx and i.code in ("invalid_chord_grammar", "chord_corrected", "chord_ambiguous") for i in verified.issues):
+            caught += 1
+
+    for idx in dropped_indices:
+        if any(i.measure_index == idx and i.code in ("missing_chord_suspected", "chord_restored", "chord_beat_resolved_geo") for i in verified.issues):
+            caught += 1
+
+    if any(
+        (i.code == "barline_count_mismatch" and i.detail.get("system") == 0)
+        or (i.measure_index == m_keep.index and i.code in ("barline_count_mismatch", "melody_beat_sum_mismatch"))
+        for i in verified.issues
+    ):
+        caught += 1
+
+    if any(i.code in ("key_change_restored", "key_change_unlocated") for i in verified.issues):
+        caught += 1
+
+    false_fixes = sum(1 for i in verified.issues if i.severity == "auto_fixed" and "xyz" in i.detail.get("corrected", ""))
+    return caught / 10.0, false_fixes
+
+
+def test_key_change_unlocated_single_page_downgraded_to_warning(monkeypatch, clean_sheet):
+    """Verify that unlocated key change on a single uploaded page with no annotations is downgraded to warning."""
+    import cv2
+    import numpy as np
+
+    img = np.ones((1000, 1000, 3), dtype=np.uint8) * 255
+    _, buf = cv2.imencode(".jpg", img)
+    single_page_images = [buf.tobytes()]
+
+    sheet = clean_sheet.model_copy(deep=True)
+    sheet.pages = [sheet.pages[0]]
+    sheet.systems = [s for s in sheet.systems if s.page == 0]
+    sheet.key_changes = []
+    sheet.header.raw = "SLOW SOUL 4/4 ( D - Eb ) ♩ = 59"
+    sheet.header.original_key = "D"
+
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_no_key_ann)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(single_page_images, sheet, use_llm=True)
+    assert len(verified.key_changes) == 0
+
+    unloc_issue = next((i for i in verified.issues if i.code == "key_change_unlocated"), None)
+    assert unloc_issue is not None
+    assert unloc_issue.severity == "warning"
+    assert "谱头标示 D→Eb 转调，但所给页面中未找到转调记号；如转调在后续页请一并上传" in unloc_issue.message
+    # Ensure no needs_review issues for key change
+    assert not any(i.code == "key_change_unlocated" and i.severity == "needs_review" for i in verified.issues)
+
+
+def test_melody_crop_reread_beat_sum_autofix(monkeypatch, clean_sheet, dummy_images):
+    """Verify single-measure crop re-read automatically resolves melody beat-sum to 4.0 beats."""
+    sheet = clean_sheet.model_copy(deep=True)
+    m0 = sheet.systems[0].measures[0]
+    # Set melody that initially sums to 6.0 beats in 4/4
+    m0.melody = "23 23 35. 23 21 12."
+    m0.beats = 4.0
+
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_melody_crop)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(dummy_images, sheet, use_llm=True)
+    assert verified.systems[0].measures[0].melody == "2323 35. 2321 12."
+
+    corrected_issue = next((i for i in verified.issues if i.code == "melody_corrected" and i.measure_index == m0.index), None)
+    assert corrected_issue is not None
+    assert corrected_issue.severity == "auto_fixed"
+
+    # Verify no melody_beat_sum_mismatch was emitted for m0
+    m0_mismatch = [i for i in verified.issues if i.code == "melody_beat_sum_mismatch" and i.measure_index == m0.index]
+    assert len(m0_mismatch) == 0
+
+
+def test_v2_robustness_evaluation_corrupted_outputs():
+    """Build corrupted variants of v2 reader output for diaole and xiaobaichuan (10 injected anomalies each).
+    Verify >= 90% detection/auto-fix rate and 0 false auto-fixes.
+    """
+    r_diaole, f_diaole = _eval_song_corruptions("diaole", ["fixtures/pages/page1.jpg", "fixtures/pages/page2.jpg"], "out/v2/diaole_run_1_parsed.json")
+    assert r_diaole >= 0.90, f"diaole detection rate {r_diaole:.1%} < 90%"
+    assert f_diaole == 0, f"diaole false auto-fixes {f_diaole} > 0"
+
+    r_xbc, f_xbc = _eval_song_corruptions("xiaobaichuan", ["fixtures/external/xiaobaichuan/page1.jpg", "fixtures/external/xiaobaichuan/page2.jpg"], "out/v2/xiaobaichuan_run_1_parsed.json")
+    assert r_xbc >= 0.90, f"xiaobaichuan detection rate {r_xbc:.1%} < 90%"
+    assert f_xbc == 0, f"xiaobaichuan false auto-fixes {f_xbc} > 0"
+
+
+
 
 
