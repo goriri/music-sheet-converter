@@ -373,6 +373,32 @@ class TestStackedOrientation:
             assert res.orientation == "top_is_bass"
             assert res.margin > 0.0
 
+    def test_infer_orientation_empty_melody_liusha_page2(self):
+        """Charts with empty melody (弹唱版) ignore melody-fit and infer orientation purely from bass-motion."""
+        import json
+        from app.models import ParsedSheet, SongHeader, System, Measure, ChordSymbol
+        from app.theory.stacked import infer_stacked_orientation
+
+        with open("fixtures/groundtruth/liusha.json", encoding="utf-8") as f:
+            d = json.load(f)
+        header = SongHeader.model_validate(d.get("header", {}))
+        p2_rows = [r for r in d.get("rows", []) if r.get("page") == 2]
+
+        systems = []
+        idx = 0
+        for r in p2_rows:
+            measures = []
+            for m in r.get("measures", []):
+                chords = [ChordSymbol(raw=c["raw"], beat=c.get("beat", 1.0), stacked=True) for c in m.get("chords", [])]
+                measures.append(Measure(index=idx, bbox=(0, 0, 1, 1), chords=chords, melody=""))
+                idx += 1
+            systems.append(System(page=2, bbox=(0, 0, 1, 1), measures=measures))
+        sheet = ParsedSheet(header=header, pages=[], systems=systems)
+
+        res = infer_stacked_orientation(sheet)
+        assert res.orientation == "top_is_bass"
+        assert res.margin > 0.0
+
     def test_groundtruth_all_chords_sweep_resolves(self):
         import json
         from pathlib import Path

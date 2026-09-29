@@ -14,6 +14,7 @@ from app.models import (
     System,
 )
 from app.arrange.piano import arrange, validate_arrangement, validate_sequential_fingering
+from app.theory.stacked import infer_stacked_orientation
 
 
 def make_sample_sheet() -> ParsedSheet:
@@ -659,5 +660,52 @@ class TestLetterChordArrangement:
         assert arr.measures[1].chords[0].name in ("C#/E#", "C#/F")
         # M6 has 2m7/6 -> chord 2m7 over bass 6 (G#m7/D# in F#)
         assert arr.measures[6].chords[0].name == "G#m7/D#"
+
+    @pytest.mark.parametrize("diff", ["beginner", "intermediate", "advanced"])
+    def test_arrange_chord_only_empty_melody_liusha_page2(self, diff):
+        """Test arrange() handles empty melody at all 3 difficulty levels on chord-only rows.
+
+        Uses page 2 rows from fixtures/groundtruth/liusha.json with stacked chords
+        like 7/5, 5/1, 3/1 and Measure.melody == ''.
+        """
+        with open("fixtures/groundtruth/liusha.json", encoding="utf-8") as f:
+            d = json.load(f)
+        header = SongHeader.model_validate(d.get("header", {}))
+        p2_rows = [r for r in d.get("rows", []) if r.get("page") == 2]
+
+        systems = []
+        idx = 0
+        for r in p2_rows:
+            measures = []
+            for m in r.get("measures", []):
+                chords = []
+                for c in m.get("chords", []):
+                    raw = c["raw"]
+                    is_stacked = ("/" in raw and not any(raw.endswith(e) for e in ("9", "11", "13", "11-9", "9-5")))
+                    chords.append(ChordSymbol(raw=raw, beat=c.get("beat", 1.0), stacked=is_stacked))
+                measures.append(Measure(index=idx, bbox=(0, 0, 1, 1), beats=4.0, chords=chords, melody=""))
+                idx += 1
+            systems.append(System(page=2, bbox=(0, 0, 1, 1), measures=measures))
+        sheet = ParsedSheet(header=header, pages=[], systems=systems)
+
+        # 1. infer_stacked_orientation ignores melody (bass-motion only) and resolves top_is_bass
+        res = infer_stacked_orientation(sheet)
+        assert res.orientation == "top_is_bass"
+        assert res.margin > 0.0
+
+        # 2. arrange() succeeds at this level without crash, RH plays chord voicings/patterns
+        arr = arrange(sheet, start_key="A", difficulty=diff)
+        assert len(arr.measures) == len(sheet.measures())
+        assert any("叠写和弦按上方为低音解读" in n for n in arr.notes)
+        validate_arrangement(arr, sheet)
+
+        # Every measure with chords has valid RH and LH events
+        for m_arr in arr.measures:
+            assert len(m_arr.rh) > 0
+            assert len(m_arr.lh) > 0
+            for ev in m_arr.rh:
+                for n in ev.notes:
+                    assert 64 <= n.midi <= 81
+
 
 
