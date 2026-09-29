@@ -279,10 +279,41 @@ class TestNumberChordSpellings:
             ("57(#5)", "G7#5"),
             ("57(#9)", "G7#9"),
             ("57(13)", "G7add13"),
+            ("57/9", "G9"),
+            ("57/11", "G11"),
+            ("57/11-9", "G11"),
+            ("17/9", "C9"),
+            ("67", "A7"),
+            ("6madd9", "Amadd9"),
+            ("4madd9", "Fmadd9"),
+            ("#4m7-5", "F#m7b5"),
+            ("#4m-5", "F#m7b5"),
+            ("#4/2", "F#/D"),
+            ("1add9", "Cadd9"),
+            ("4maj7", "Fmaj7"),
+            ("⑤7/9", "G9"),
+            ("⑤7/11", "G11"),
+            ("⑤7/11 -9", "G11"),
+            ("①7/9", "C9"),
+            ("①add9", "Cadd9"),
+            ("④maj7", "Fmaj7"),
+            ("#④m7-5", "F#m7b5"),
+            ("⑥madd9", "Amadd9"),
         ]
         for raw, exp_name in cases:
             rc = resolve_chord(raw, 0)
             assert rc.name == exp_name, f"Failed for {raw}: got {rc.name}, expected {exp_name}"
+
+    def test_leading_slash_with_prev_chord(self):
+        prev = resolve_chord("1", 0)
+        rc = resolve_chord("/5", 0, beat=2.0, prev_chord=prev)
+        assert rc.name == "C/G"
+        assert rc.bass_pc == 7
+
+        prev_am7 = resolve_chord("6m7", 0)
+        rc2 = resolve_chord("/5", 0, beat=2.0, prev_chord=prev_am7)
+        assert rc2.name == "Am7/G"
+        assert rc2.bass_pc == 7
 
     def test_garbage_and_invalid_degree_raises_value_error(self):
         bad_cases = ["056", "0", "07", "8m", "99", "", "   "]
@@ -291,3 +322,80 @@ class TestNumberChordSpellings:
                 parse_chord(bad)
             with pytest.raises(ValueError):
                 resolve_chord(bad, 0)
+
+
+class TestStackedOrientation:
+    """Tests for stacked fraction chord orientation inference and resolution."""
+
+    def test_quality_asymmetry_evidence(self):
+        # bottom has quality -> top is bass
+        assert parse_chord("1/2m7-5").bass_degree == 1
+        rc1 = resolve_chord("1/2m7-5", 0)
+        assert rc1.name == "Dm7b5/C"
+        assert rc1.root_pc == 2 and rc1.bass_pc == 0
+
+        # top has quality -> bottom is bass
+        rc2 = resolve_chord("2m7/5", 0)
+        assert rc2.name == "Dm7/G"
+        assert rc2.root_pc == 2 and rc2.bass_pc == 7
+
+    def test_stacked_explicit_orientation(self):
+        # 7/5 with top_is_bass -> chord 5 over bass 7 (G/B in C)
+        rc_top = resolve_chord("7/5", 0, stacked=True, stacked_orientation="top_is_bass")
+        assert rc_top.name == "G/B"
+        assert rc_top.root_pc == 7 and rc_top.bass_pc == 11
+
+        # 7/5 with bottom_is_bass -> chord 7 over bass 5 (B/G in C)
+        rc_bot = resolve_chord("7/5", 0, stacked=True, stacked_orientation="bottom_is_bass")
+        assert rc_bot.name == "B/G"
+        assert rc_bot.root_pc == 11 and rc_bot.bass_pc == 7
+
+    def test_infer_orientation_tinghai_and_xiaobaichuan(self):
+        import json
+        from app.models import ParsedSheet, SongHeader, System, Measure, ChordSymbol
+        from app.theory.stacked import infer_stacked_orientation
+
+        for slug in ["tinghai", "xiaobaichuan"]:
+            with open(f"fixtures/groundtruth/{slug}.json", encoding="utf-8") as f:
+                d = json.load(f)
+            header = SongHeader.model_validate(d.get("header", {}))
+            systems = []
+            idx = 0
+            for r in d.get("rows", []):
+                measures = []
+                for m in r.get("measures", []):
+                    chords = [ChordSymbol(raw=c["raw"], beat=c.get("beat", 1.0), stacked=True) for c in m.get("chords", [])]
+                    measures.append(Measure(index=idx, bbox=(0, 0, 1, 1), chords=chords))
+                    idx += 1
+                systems.append(System(page=r.get("page", 0), bbox=(0, 0, 1, 1), measures=measures))
+            sheet = ParsedSheet(header=header, pages=[], systems=systems)
+            res = infer_stacked_orientation(sheet)
+            assert res.orientation == "top_is_bass"
+            assert res.margin > 0.0
+
+    def test_groundtruth_all_chords_sweep_resolves(self):
+        import json
+        from pathlib import Path
+        gt_dir = Path("fixtures/groundtruth")
+        total = 0
+        unresolved = []
+        for p in sorted(gt_dir.glob("*.json")):
+            with open(p, encoding="utf-8") as f:
+                data = json.load(f)
+            notation = data.get("header", {}).get("chord_notation", "number")
+            rows = data.get("rows", data.get("systems", []))
+            for r in rows:
+                for m in r.get("measures", []):
+                    prev = None
+                    for c in m.get("chords", []):
+                        raw = c.get("raw")
+                        if not raw:
+                            continue
+                        total += 1
+                        try:
+                            rc = resolve_chord(raw, 0, notation=notation, prev_chord=prev)
+                            prev = rc
+                        except Exception as e:
+                            unresolved.append((p.stem, raw, str(e)))
+        assert unresolved == [], f"Unresolved chords: {unresolved}"
+        assert total >= 500

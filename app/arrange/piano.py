@@ -17,6 +17,7 @@ from app.models import (
 )
 from app.theory.chords import resolve_chord
 from app.theory.keys import canonical_key_for_pc, key_name_to_pc
+from app.theory.stacked import infer_stacked_orientation
 from app.arrange.fingering import assign_fingering_for_measure
 from app.arrange.styles import generate_measure_events, normalize_style
 from app.arrange.voicing import select_lh_bass_notes, select_rh_voicings
@@ -242,6 +243,17 @@ def arrange(
         f"Start key: {start_key} (tonic pc {start_pc})",
     ]
 
+    stacked_res = infer_stacked_orientation(sheet)
+    stacked_orientation = stacked_res.orientation
+    has_stacked_chords = any(
+        c.stacked for m in sheet.measures() for c in m.chords
+    )
+    if has_stacked_chords:
+        if stacked_orientation == "top_is_bass":
+            arr_notes.append("叠写和弦按上方为低音解读")
+        else:
+            arr_notes.append("叠写和弦按下方为低音解读")
+
     if notation == "letter":
         orig_key = sheet.header.original_key if sheet.header else None
         if orig_key:
@@ -299,6 +311,7 @@ def arrange(
         if m.chords:
             resolved = []
             for cs in m.chords:
+                prev_c = resolved[-1] if resolved else (last_chords[-1] if last_chords else None)
                 try:
                     rc = resolve_chord(
                         cs.raw,
@@ -307,6 +320,9 @@ def arrange(
                         current_key_name,
                         notation=notation,
                         printed_tonic_pc=printed_tonic_pc,
+                        prev_chord=prev_c,
+                        stacked=cs.stacked,
+                        stacked_orientation=stacked_orientation,
                     )
                     resolved.append(rc)
                 except ValueError:
@@ -321,6 +337,9 @@ def arrange(
                                 current_key_name,
                                 notation=notation,
                                 printed_tonic_pc=printed_tonic_pc,
+                                prev_chord=prev_c,
+                                stacked=cs.stacked,
+                                stacked_orientation=stacked_orientation,
                             )
                             break
                         except ValueError:

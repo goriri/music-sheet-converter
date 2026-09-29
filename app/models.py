@@ -113,6 +113,10 @@ class ParsedSheet(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     issues: list[QualityIssue] = Field(default_factory=list)
     layout_confidence: float = Field(1.0, ge=0.0, le=1.0, description="From CV layout; low => refuse to render")
+    layout_source: Literal["cv", "llm"] = Field(
+        "llm",
+        description="'cv' = systems/barlines/chord boxes from app.omr.layout (v2 reader); 'llm' = whole-page model bboxes (v1 fallback)",
+    )
 
     def measures(self) -> list[Measure]:
         return [m for s in self.systems for m in s.measures]

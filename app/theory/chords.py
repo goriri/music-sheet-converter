@@ -41,6 +41,7 @@ QUALITY_INTERVALS: dict[str, list[int]] = {
     "mM7": [0, 3, 7, 11],
     "sus2": [0, 2, 7],
     "69": [0, 4, 7, 9, 2],
+    "madd9": [0, 3, 7, 2],
 }
 
 # Non-standard or auxiliary quality interval aliases
@@ -63,6 +64,7 @@ QUALITY_SUFFIXES: dict[str, str] = {
     "6": "6",
     "m6": "m6",
     "add9": "add9",
+    "madd9": "madd9",
     "9": "9",
     "m9": "m9",
     "maj9": "maj9",
@@ -128,10 +130,16 @@ def clean_raw_chord(raw: str) -> str:
         "－": "-", "—": "-", "–": "-", "﹣": "-", "−": "-",
         "＋": "+",
         "°": "o", "º": "o",
-        # Superscripts
+        # Superscripts and modifications
         "⁷": "7", "²": "2", "⁹": "9", "⁴": "4", "⁵": "5",
         "⁶": "6", "³": "3", "¹": "1", "⁰": "0",
         "⁺": "+", "⁻": "-", "ᵒ": "o",
+        "^": "",
+        # Circled numbers (standard and filled)
+        "①": "1", "②": "2", "③": "3", "④": "4", "⑤": "5", "⑥": "6", "⑦": "7", "⑧": "8", "⑨": "9",
+        "❶": "1", "❷": "2", "❸": "3", "❹": "4", "❺": "5", "❻": "6", "❼": "7", "❽": "8", "❾": "9",
+        # Fraction / division slashes
+        "╱": "/", "⁄": "/", "∕": "/",
     })
     s = s.translate(trans)
 
@@ -210,8 +218,10 @@ def normalize_quality(q_str: str, raw: str) -> str:
         return "maj"
 
     # Explicit lookup order: most specific first
-    if q in ("m7-5", "m7b5", "m7(-5)", "m7(b5)", "-7-5", "-7b5", "min7b5", "m7-5", "min7-5", "m7(9-5)"):
+    if q in ("m7-5", "m7b5", "m7(-5)", "m7(b5)", "-7-5", "-7b5", "min7b5", "m7-5", "min7-5", "m7(9-5)", "m-5", "mb5", "m(-5)", "m(b5)"):
         return "m7b5"
+    if q in ("madd9", "minadd9", "m(add9)"):
+        return "madd9"
     if q in ("7sus4", "7sus", "sus7", "sus47"):
         return "7sus4"
     if q in ("sus4", "sus"):
@@ -240,7 +250,7 @@ def normalize_quality(q_str: str, raw: str) -> str:
         return "7add13"
     if q in ("13", "(13)"):
         return "13"
-    if q in ("11", "(11)", "7(11)", "7/11", "7(11-9)"):
+    if q in ("11", "(11)", "7(11)", "7/11", "7(11-9)", "7/11-9", "11-9", "(11-9)"):
         return "11"
     if q in ("(2)", "2", "add2", "(9)", "add9", "9add", "(add9)", "add(9)", "add(2)"):
         return "add9"
@@ -252,7 +262,7 @@ def normalize_quality(q_str: str, raw: str) -> str:
         return "aug"
     if q == "6":
         return "6"
-    if q in ("9", "7(9)", "7/9", "79"):
+    if q in ("9", "7(9)", "7/9", "79", "(9)"):
         return "9"
     if q == "7":
         return "7"
@@ -262,7 +272,12 @@ def normalize_quality(q_str: str, raw: str) -> str:
     raise ValueError(f"Unrecognized chord quality {q_str!r} in chord {raw!r}")
 
 
-def parse_chord(raw: str) -> ChordSpec:
+def parse_chord(
+    raw: str,
+    *,
+    stacked: bool = False,
+    stacked_orientation: str = "bottom_is_bass",
+) -> ChordSpec:
     """Parse a Taiwanese number-notation chord symbol into ChordSpec.
 
     Examples:
@@ -275,6 +290,7 @@ def parse_chord(raw: str) -> ChordSpec:
       '4M7'    -> deg=4, qual='maj7'
       '7b'     -> deg=7, acc=-1, qual='maj'
       '6b'     -> deg=6, acc=-1, qual='maj'
+      '/5'     -> deg=1, qual='maj', bass_deg=5
 
     Raises ValueError with a clear message on garbage or unparseable input.
     """
@@ -282,37 +298,50 @@ def parse_chord(raw: str) -> ChordSpec:
     if not cleaned:
         raise ValueError(f"Cannot parse chord from empty string: {raw!r}")
 
+    if cleaned.startswith("/"):
+        raise ValueError(f"Cannot parse chord with empty root degree: {raw!r}")
+
+    # Convert extensions after slash (e.g. 57/9, 57/11, 57/11-9, 17/9, 1/2m7/9-5) to parenthesized extensions
+    cleaned = re.sub(r"/((?:b9|#9|#11|9|11|13)[-+b#0-9]*)", r"(\1)", cleaned)
+
     # Check for slash bass or slash extension
     if "/" in cleaned:
         parts = cleaned.split("/")
         if len(parts) != 2:
             raise ValueError(f"Multiple slashes in chord: {raw!r}")
-        root_part, bass_part = parts[0], parts[1]
-        if not bass_part:
+        top_part, bot_part = parts[0], parts[1]
+        if not bot_part:
             raise ValueError(f"Missing bass degree after slash in chord: {raw!r}")
 
-        # If bass_part is an extension (e.g. 9, 13, 11, 9b, b9, 9-5, 11-9, 6.9, 69)
-        if (
-            bass_part.startswith(("9", "11", "13", "b9", "#9"))
-            or bass_part in ("6.9", "69")
-            or "-9" in bass_part
-        ):
-            root_part = f"{root_part}({bass_part})"
-            bass_deg = None
-            bass_acc = None
+        # Decide which part is the chord and which is the bass
+        if stacked:
+            if stacked_orientation == "top_is_bass":
+                chord_part, bass_part = bot_part, top_part
+            else:
+                chord_part, bass_part = top_part, bot_part
         else:
-            # Strip trailing 'm' if present (e.g. '1/6m')
-            if bass_part.endswith("m") and len(bass_part) > 1:
-                bass_part = bass_part[:-1]
-            bass_deg, bass_acc, bass_rem = parse_accidental_and_degree(bass_part)
-            if bass_rem:
-                raise ValueError(f"Trailing garbage in slash bass: {bass_part!r} in {raw!r}")
+            # Inline slash: default chord/bass (top is chord, bot is bass).
+            # Only invert if bottom part cannot be a bass degree and top part can be
+            # (e.g. '1/2m7-5', '1/2m7/9-5').
+            bot_is_bass = bool(re.match(r"^[b#]?[1-7][b#]?m?$", bot_part))
+            top_is_bass = bool(re.match(r"^[b#]?[1-7][b#]?m?$", top_part))
+            if not bot_is_bass and top_is_bass:
+                chord_part, bass_part = bot_part, top_part
+            else:
+                chord_part, bass_part = top_part, bot_part
+
+        # Strip trailing 'm' if present on bass degree (e.g. '1/6m', '5/3m')
+        if bass_part.endswith("m") and len(bass_part) > 1:
+            bass_part = bass_part[:-1]
+        bass_deg, bass_acc, bass_rem = parse_accidental_and_degree(bass_part)
+        if bass_rem:
+            raise ValueError(f"Trailing garbage in slash bass: {bass_part!r} in {raw!r}")
     else:
-        root_part = cleaned
+        chord_part = cleaned
         bass_deg = None
         bass_acc = None
 
-    deg, acc, q_part = parse_accidental_and_degree(root_part)
+    deg, acc, q_part = parse_accidental_and_degree(chord_part)
     quality = normalize_quality(q_part, raw)
 
     return ChordSpec(
@@ -413,12 +442,25 @@ def resolve_chord(
     *,
     notation: str = "number",
     printed_tonic_pc: Optional[int] = None,
+    prev_chord: Optional[ResolvedChord] = None,
+    stacked: bool = False,
+    stacked_orientation: str = "bottom_is_bass",
 ) -> ResolvedChord:
     """Resolve a Taiwanese number-notation or letter-notation chord symbol into a concrete ResolvedChord.
 
     - If notation == 'letter': transposes letter chord by (tonic_pc - printed_tonic_pc).
     - If notation == 'number': resolves scale degree relative to tonic_pc.
+    - If stacked == True: resolves diagonal stacked chord using stacked_orientation.
     """
+    cleaned_raw = clean_raw_chord(raw)
+    # Auto-detect letter chords
+    is_letter = (
+        bool(re.match(r"^[A-Ga-g][b#]?(?![0-9])", cleaned_raw))
+        and not bool(re.match(r"^[b#][1-7]", cleaned_raw))
+    )
+    if notation == "number" and is_letter:
+        notation = "letter"
+
     if notation == "letter":
         spec = parse_letter_chord(raw)
         shift = (tonic_pc - printed_tonic_pc) % 12 if printed_tonic_pc is not None else 0
@@ -452,7 +494,30 @@ def resolve_chord(
         )
 
     # Number notation (default)
-    num_spec = parse_chord(raw)
+    # If chord is leading slash and we have a preceding chord, carry preceding chord harmony
+    if cleaned_raw.startswith("/"):
+        if prev_chord is None:
+            raise ValueError(f"Leading slash chord {raw!r} requires preceding chord context")
+        bass_part = cleaned_raw[1:]
+        if bass_part.endswith("m") and len(bass_part) > 1:
+            bass_part = bass_part[:-1]
+        b_deg, b_acc, b_rem = parse_accidental_and_degree(bass_part)
+        if b_rem:
+            raise ValueError(f"Trailing garbage in slash bass: {bass_part!r} in {raw!r}")
+        b_name, b_pc = resolve_degree(b_deg, b_acc, tonic_pc, key_name)
+        root_chord_name = prev_chord.name.split("/")[0]
+        full_name = f"{root_chord_name}/{b_name}"
+        return ResolvedChord(
+            raw=raw,
+            name=full_name,
+            beat=beat,
+            root_pc=prev_chord.root_pc,
+            bass_pc=b_pc,
+            pcs=prev_chord.pcs,
+            quality=prev_chord.quality,
+        )
+
+    num_spec = parse_chord(raw, stacked=stacked, stacked_orientation=stacked_orientation)
 
     root_name, root_pc = resolve_degree(num_spec.degree, num_spec.accidental, tonic_pc, key_name)
 

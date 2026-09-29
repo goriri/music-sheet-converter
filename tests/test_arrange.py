@@ -614,4 +614,50 @@ class TestLetterChordArrangement:
         arr = arrange(sheet, start_key="C", difficulty="beginner")
         assert any("No original key specified" in n for n in arr.notes)
 
+    def test_arrange_stacked_chords_tinghai_and_xiaobaichuan(self):
+        """Test arrange() applies top_is_bass orientation and records remark for stacked charts."""
+        for slug, key in [("tinghai", "Bb"), ("xiaobaichuan", "Eb")]:
+            with open(f"fixtures/groundtruth/{slug}.json", encoding="utf-8") as f:
+                d = json.load(f)
+            header = SongHeader.model_validate(d.get("header", {}))
+            systems = []
+            idx = 0
+            for r in d.get("rows", []):
+                measures = []
+                for m in r.get("measures", []):
+                    chords = []
+                    for c in m.get("chords", []):
+                        raw = c["raw"]
+                        is_stacked = ("/" in raw and not any(raw.endswith(e) for e in ("9", "11", "13", "11-9", "9-5")))
+                        chords.append(ChordSymbol(raw=raw, beat=c.get("beat", 1.0), stacked=is_stacked))
+                    beats = 3.0 if "3/4" in header.time_signature else 4.0
+                    measures.append(Measure(index=idx, bbox=(0, 0, 1, 1), beats=beats, chords=chords))
+                    idx += 1
+                systems.append(System(page=r.get("page", 0), bbox=(0, 0, 1, 1), measures=measures))
+            sheet = ParsedSheet(header=header, pages=[], systems=systems)
+
+            arr = arrange(sheet, start_key=key, difficulty="intermediate")
+            assert any("叠写和弦按上方为低音解读" in n for n in arr.notes)
+            validate_arrangement(arr, sheet)
+
+            if slug == "xiaobaichuan":
+                # M1 is 7/5 -> under top_is_bass in Eb, chord 5 over bass 7 -> Bb/D
+                assert arr.measures[1].chords[0].name == "Bb/D"
+                # M3 is 5/1 -> under top_is_bass in Eb, chord 1 over bass 5 -> Eb/Bb
+                assert arr.measures[3].chords[0].name == "Eb/Bb"
+            elif slug == "tinghai":
+                # M0 has 1add9 (Bbadd9) and 1/2m7-5 (Cm7b5/Bb)
+                assert arr.measures[0].chords[0].name == "Bbadd9"
+                assert arr.measures[0].chords[1].name == "Cm7b5/Bb"
+
+    def test_arrange_unstacked_preserves_inline_slashes(self):
+        """Unstacked inline slashes stay chord/bass unchanged and add no stacked note."""
+        sheet = make_sample_sheet()
+        arr = arrange(sheet, start_key="F#", difficulty="intermediate")
+        assert not any("叠写和弦按" in n for n in arr.notes)
+        # M1 has 5/7 -> chord 5 over bass 7 (C#/F in F#)
+        assert arr.measures[1].chords[0].name in ("C#/E#", "C#/F")
+        # M6 has 2m7/6 -> chord 2m7 over bass 6 (G#m7/D# in F#)
+        assert arr.measures[6].chords[0].name == "G#m7/D#"
+
 
