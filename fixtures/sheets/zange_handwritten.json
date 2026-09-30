@@ -1,0 +1,1515 @@
+{
+  "header": {
+    "title": "赞歌",
+    "style": "节拍自由、宽广地、赞颂地",
+    "time_signature": "4/4",
+    "tempo_bpm": null,
+    "original_key": "Bb",
+    "male_key": null,
+    "female_key": null,
+    "raw": "1=bB 4/4 节拍自由、宽广地、赞颂地, 赞歌 音乐舞蹈史诗《东方红》选曲 胡松华演唱 內蒙民歌 胡松华词"
+  },
+  "pages": [
+    {
+      "width": 1111,
+      "height": 1655
+    }
+  ],
+  "systems": [
+    {
+      "page": 0,
+      "bbox": [
+        0.09,
+        0.128,
+        0.85,
+        0.18
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 0,
+          "bbox": [
+            0.098,
+            0.14,
+            0.34,
+            0.17
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "(6-6ibi 6ibibi÷6−)",
+          "lyrics": "啊",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 1,
+          "bbox": [
+            0.34,
+            0.14,
+            0.44,
+            0.17
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "6 – -23",
+          "lyrics": "哈啊",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 2,
+          "bbox": [
+            0.44,
+            0.14,
+            0.64,
+            0.17
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "455 6.666",
+          "lyrics": "咳々々依哟哎",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 3,
+          "bbox": [
+            0.64,
+            0.14,
+            0.84,
+            0.17
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "6- - -",
+          "lyrics": "咳々",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.09,
+        0.19,
+        0.85,
+        0.26
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 4,
+          "bbox": [
+            0.098,
+            0.21,
+            0.29,
+            0.24
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "7675 55i",
+          "lyrics": "依哟依哟嗬々哦",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 5,
+          "bbox": [
+            0.29,
+            0.21,
+            0.44,
+            0.24
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "5555 -",
+          "lyrics": "嗬々哎",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 6,
+          "bbox": [
+            0.44,
+            0.21,
+            0.69,
+            0.24
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "55 6.22 6.666",
+          "lyrics": "咳々,啊咳々依哟哎",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 7,
+          "bbox": [
+            0.69,
+            0.21,
+            0.84,
+            0.24
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "55 612",
+          "lyrics": "咳々依啊哈啊",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.09,
+        0.27,
+        0.85,
+        0.34
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 8,
+          "bbox": [
+            0.098,
+            0.29,
+            0.29,
+            0.32
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "555 765i",
+          "lyrics": "咳々々依哟哦",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 9,
+          "bbox": [
+            0.29,
+            0.29,
+            0.54,
+            0.32
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "55i 556 555",
+          "lyrics": "霍々哦雀々哦霍々哎",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 10,
+          "bbox": [
+            0.54,
+            0.29,
+            0.74,
+            0.32
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "55 62 555i",
+          "lyrics": "咳々啊哈咳々々依哟哦",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 11,
+          "bbox": [
+            0.74,
+            0.29,
+            0.84,
+            0.32
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "7.65i",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.09,
+        0.36,
+        0.85,
+        0.43
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 12,
+          "bbox": [
+            0.098,
+            0.38,
+            0.29,
+            0.41
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "55633-232i",
+          "lyrics": "霍々哦",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 13,
+          "bbox": [
+            0.29,
+            0.38,
+            0.54,
+            0.41
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "56 222 7.65i",
+          "lyrics": "啊哈咳々々依哟我",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 14,
+          "bbox": [
+            0.54,
+            0.38,
+            0.74,
+            0.41
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "55i 5555 -",
+          "lyrics": "霍々哦霍々哎。",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 15,
+          "bbox": [
+            0.74,
+            0.38,
+            0.84,
+            0.41
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "- ",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.09,
+        0.45,
+        0.85,
+        0.52
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 16,
+          "bbox": [
+            0.098,
+            0.47,
+            0.29,
+            0.5
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "(36363636)",
+          "lyrics": "从草原来",
+          "bass_hint": null,
+          "rhythm_hint": "4/4",
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 17,
+          "bbox": [
+            0.29,
+            0.47,
+            0.44,
+            0.5
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": ": 36125",
+          "lyrics": "到",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 18,
+          "bbox": [
+            0.44,
+            0.47,
+            0.54,
+            0.5
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "3",
+          "lyrics": "天安门广场,",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 19,
+          "bbox": [
+            0.54,
+            0.47,
+            0.84,
+            0.5
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "162316.166",
+          "lyrics": "屹立在东方像",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.09,
+        0.54,
+        0.85,
+        0.61
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 20,
+          "bbox": [
+            0.098,
+            0.56,
+            0.34,
+            0.59
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "235 166 2.35.1",
+          "lyrics": "高举金杯把赞歌唱,",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 21,
+          "bbox": [
+            0.34,
+            0.56,
+            0.54,
+            0.59
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "6 - - -",
+          "lyrics": "初生的太阳光芒万丈,",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 22,
+          "bbox": [
+            0.54,
+            0.56,
+            0.74,
+            0.59
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "335 6.165",
+          "lyrics": "各民族兄弟",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 23,
+          "bbox": [
+            0.74,
+            0.56,
+            0.84,
+            0.59
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "",
+          "lyrics": "伟大的人民",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.09,
+        0.63,
+        0.85,
+        0.7
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 24,
+          "bbox": [
+            0.098,
+            0.65,
+            0.29,
+            0.68
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "35i 2.3 56",
+          "lyrics": "欢聚在一堂,",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 25,
+          "bbox": [
+            0.29,
+            0.65,
+            0.54,
+            0.68
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "335 2ii 6ii235",
+          "lyrics": "庆贺我们的翻身解放。",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 26,
+          "bbox": [
+            0.54,
+            0.65,
+            0.74,
+            0.68
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "6 - -",
+          "lyrics": "奋发图强,奔向幸福美好的前方。",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 27,
+          "bbox": [
+            0.74,
+            0.65,
+            0.84,
+            0.68
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "(362i 6) 0",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": true
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.09,
+        0.72,
+        0.85,
+        0.79
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 28,
+          "bbox": [
+            0.098,
+            0.74,
+            0.29,
+            0.77
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "6.i 2.3 5i",
+          "lyrics": "啊哈啊哈啊",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 29,
+          "bbox": [
+            0.29,
+            0.74,
+            0.49,
+            0.77
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "6 - - -",
+          "lyrics": "嗬",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 30,
+          "bbox": [
+            0.49,
+            0.74,
+            0.74,
+            0.77
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "i.i 62.35i",
+          "lyrics": "依,啊哈啊哈啊哈啊哈々",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 31,
+          "bbox": [
+            0.74,
+            0.74,
+            0.84,
+            0.77
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "i2i",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.09,
+        0.81,
+        0.85,
+        0.88
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 32,
+          "bbox": [
+            0.098,
+            0.83,
+            0.34,
+            0.86
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "6 - - -",
+          "lyrics": "嗬哎。",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": true
+        }
+      ]
+    }
+  ],
+  "key_changes": [],
+  "warnings": [
+    "Page 1 System 1: detected 3 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+    "Page 1 System 2: detected 2 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+    "Page 1 System 3: detected 5 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+    "Page 1 System 4: detected 1 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+    "Page 1 System 5: detected 4 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+    "Page 1 System 6: detected 4 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+    "Page 1 System 7: detected 4 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+    "Page 1 System 8: detected 6 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+    "Page 1 System 9: detected 2 barlines for 1 measures (expected 2); kept Gemini measure boundaries."
+  ],
+  "issues": [
+    {
+      "stage": "omr",
+      "measure_index": 0,
+      "severity": "info",
+      "code": "barline_count_consistent",
+      "message": "第1页第1行小节线检测与行级转录一致（共4小节，布局正常）",
+      "detail": {
+        "warning": "Page 1 System 1: detected 3 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+        "measure_count": 4
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 4,
+      "severity": "info",
+      "code": "barline_count_consistent",
+      "message": "第1页第2行小节线检测与行级转录一致（共4小节，布局正常）",
+      "detail": {
+        "warning": "Page 1 System 2: detected 2 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+        "measure_count": 4
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 8,
+      "severity": "info",
+      "code": "barline_count_consistent",
+      "message": "第1页第3行小节线检测与行级转录一致（共4小节，布局正常）",
+      "detail": {
+        "warning": "Page 1 System 3: detected 5 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+        "measure_count": 4
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 12,
+      "severity": "info",
+      "code": "barline_count_consistent",
+      "message": "第1页第4行小节线检测与行级转录一致（共4小节，布局正常）",
+      "detail": {
+        "warning": "Page 1 System 4: detected 1 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+        "measure_count": 4
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 16,
+      "severity": "info",
+      "code": "barline_count_consistent",
+      "message": "第1页第5行小节线检测与行级转录一致（共4小节，布局正常）",
+      "detail": {
+        "warning": "Page 1 System 5: detected 4 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+        "measure_count": 4
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 20,
+      "severity": "info",
+      "code": "barline_count_consistent",
+      "message": "第1页第6行小节线检测与行级转录一致（共4小节，布局正常）",
+      "detail": {
+        "warning": "Page 1 System 6: detected 4 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+        "measure_count": 4
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 24,
+      "severity": "info",
+      "code": "barline_count_consistent",
+      "message": "第1页第7行小节线检测与行级转录一致（共4小节，布局正常）",
+      "detail": {
+        "warning": "Page 1 System 7: detected 4 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+        "measure_count": 4
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 28,
+      "severity": "needs_review",
+      "code": "barline_count_mismatch",
+      "message": "第1页第8行小节线检测数量不符，请核对小节划分",
+      "detail": {
+        "warning": "Page 1 System 8: detected 6 barlines for 4 measures (expected 5); kept Gemini measure boundaries.",
+        "parsed_count": 4,
+        "transcribed_count": 2
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 32,
+      "severity": "needs_review",
+      "code": "barline_count_mismatch",
+      "message": "第1页第9行小节线检测数量不符，请核对小节划分",
+      "detail": {
+        "warning": "Page 1 System 9: detected 2 barlines for 1 measures (expected 2); kept Gemini measure boundaries.",
+        "parsed_count": 1,
+        "transcribed_count": 3
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 0,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第1小节旋律拍数（2.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "(6-6ibi 6ibibi÷6−)",
+        "beat_sum": 2.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 1,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第2小节旋律拍数（3.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "6 – -23",
+        "beat_sum": 3.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 2,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第3小节旋律拍数（2.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "455 6.666",
+        "beat_sum": 2.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 3,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第4小节旋律拍数（3.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "6- - -",
+        "beat_sum": 3.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 4,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第5小节旋律拍数（2.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "7675 55i",
+        "beat_sum": 2.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 5,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第6小节旋律拍数（2.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "5555 -",
+        "beat_sum": 2.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 6,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第7小节旋律拍数（3.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "55 6.22 6.666",
+        "beat_sum": 3.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 7,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第8小节旋律拍数（2.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "55 612",
+        "beat_sum": 2.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 8,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第9小节旋律拍数（2.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "555 765i",
+        "beat_sum": 2.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 9,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第10小节旋律拍数（3.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "55i 556 555",
+        "beat_sum": 3.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 10,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第11小节旋律拍数（3.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "55 62 555i",
+        "beat_sum": 3.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 11,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第12小节旋律拍数（1.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "7.65i",
+        "beat_sum": 1.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 12,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第13小节旋律拍数（1.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "55633-232i",
+        "beat_sum": 1.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 13,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第14小节旋律拍数（3.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "56 222 7.65i",
+        "beat_sum": 3.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 14,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第15小节旋律拍数（3.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "55i 5555 -",
+        "beat_sum": 3.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 16,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第17小节旋律拍数（1.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "(36363636)",
+        "beat_sum": 1.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 17,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第18小节旋律拍数（1.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": ": 36125",
+        "beat_sum": 1.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 18,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第19小节旋律拍数（1.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "3",
+        "beat_sum": 1.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 19,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第20小节旋律拍数（1.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "162316.166",
+        "beat_sum": 1.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 20,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第21小节旋律拍数（3.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "235 166 2.35.1",
+        "beat_sum": 3.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 22,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第23小节旋律拍数（2.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "335 6.165",
+        "beat_sum": 2.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 24,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第25小节旋律拍数（3.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "35i 2.3 56",
+        "beat_sum": 3.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 25,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第26小节旋律拍数（3.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "335 2ii 6ii235",
+        "beat_sum": 3.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 26,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第27小节旋律拍数（3.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "6 - -",
+        "beat_sum": 3.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 27,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第28小节旋律拍数（3.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "(362i 6) 0",
+        "beat_sum": 3.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 28,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第29小节旋律拍数（3.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "6.i 2.3 5i",
+        "beat_sum": 3.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 30,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第31小节旋律拍数（2.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "i.i 62.35i",
+        "beat_sum": 2.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 31,
+      "severity": "info",
+      "code": "melody_beat_sum_mismatch",
+      "message": "第32小节旋律拍数（1.0拍）与小节拍数（4.0拍）不符（简谱下划线省略，仅供参考）",
+      "detail": {
+        "melody": "i2i",
+        "beat_sum": 1.0,
+        "expected_beats": 4.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 0,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第1小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 0,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 1,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第2小节疑似遗漏和弦（候选：'6'），请核对",
+      "detail": {
+        "measure": 1,
+        "candidate": "6",
+        "beat": 1.0,
+        "arbiter_confidence": 0.72
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 2,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第3小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 2,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 3,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第4小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 3,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 4,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第5小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 4,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 5,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第6小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 5,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 6,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第7小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 6,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 7,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第8小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 7,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 8,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第9小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 8,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 9,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第10小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 9,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 10,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第11小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 10,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 11,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第12小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 11,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 12,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第13小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 12,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 13,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第14小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 13,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 14,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第15小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 14,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 15,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第16小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 15,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 16,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第17小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 16,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 17,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第18小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 17,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 18,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第19小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 18,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 19,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第20小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 19,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 20,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第21小节疑似遗漏和弦（候选：'6'），请核对",
+      "detail": {
+        "measure": 20,
+        "candidate": "6",
+        "beat": 2.0,
+        "arbiter_confidence": 0.9
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 21,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第22小节疑似遗漏和弦（候选：'6'），请核对",
+      "detail": {
+        "measure": 21,
+        "candidate": "6",
+        "beat": 1.0,
+        "arbiter_confidence": 0.85
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 22,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第23小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 22,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 23,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第24小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 23,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 24,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第25小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 24,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 25,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第26小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 25,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 26,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第27小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 26,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 27,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第28小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 27,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 28,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第29小节疑似遗漏和弦（候选：'1'），请核对",
+      "detail": {
+        "measure": 28,
+        "candidate": "1",
+        "beat": 1.0,
+        "arbiter_confidence": 0.85
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 29,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第30小节疑似遗漏和弦（候选：'5'），请核对",
+      "detail": {
+        "measure": 29,
+        "candidate": "5",
+        "beat": 1.0,
+        "arbiter_confidence": 0.85
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 30,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第31小节疑似遗漏和弦（候选：'5'），请核对",
+      "detail": {
+        "measure": 30,
+        "candidate": "5",
+        "beat": 1.0,
+        "arbiter_confidence": 0.85
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 31,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第32小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 31,
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 32,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第33小节疑似遗漏和弦，请核对",
+      "detail": {
+        "measure": 32,
+        "beat": 1.0
+      }
+    }
+  ]
+}

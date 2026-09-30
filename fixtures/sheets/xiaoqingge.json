@@ -1,0 +1,295 @@
+{
+  "header": {
+    "title": "小情歌",
+    "style": "null",
+    "time_signature": "4/4",
+    "tempo_bpm": null,
+    "original_key": "D",
+    "male_key": null,
+    "female_key": null,
+    "raw": "1= D 4/4 变调夹2品,用C调指法"
+  },
+  "pages": [
+    {
+      "width": 1697,
+      "height": 2400
+    }
+  ],
+  "systems": [
+    {
+      "page": 0,
+      "bbox": [
+        0.05,
+        0.13,
+        0.95,
+        0.39
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 0,
+          "bbox": [
+            0.0825,
+            0.34,
+            0.1208,
+            0.39
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "0 1 7 1 7 1 7 5 3",
+          "lyrics": "这是一首简 单的 小 情歌",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 1,
+          "bbox": [
+            0.1208,
+            0.34,
+            0.3382,
+            0.39
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "5 7 6 -",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 2,
+          "bbox": [
+            0.3382,
+            0.34,
+            0.4968,
+            0.39
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "0 1 7 1 7 1 3 3",
+          "lyrics": "唱着人们心肠的曲折",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 3,
+          "bbox": [
+            0.4968,
+            0.34,
+            0.7219,
+            0.39
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "3 - 0 0 6 1 6",
+          "lyrics": "我想我",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    },
+    {
+      "page": 0,
+      "bbox": [
+        0.05,
+        0.45,
+        0.95,
+        0.79
+      ],
+      "section_label": null,
+      "measures": [
+        {
+          "index": 4,
+          "bbox": [
+            0.0825,
+            0.6,
+            0.3559,
+            0.65
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "1 1 2 3 2 0 5 7 5",
+          "lyrics": "很 快乐当有你的温热",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 5,
+          "bbox": [
+            0.3559,
+            0.6,
+            0.5374,
+            0.65
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "7 2 1 1 -",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 6,
+          "bbox": [
+            0.5374,
+            0.6,
+            0.7148,
+            0.65
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "3 2 2 1 2 1 1 # 5",
+          "lyrics": "脚边的空气转了",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        },
+        {
+          "index": 7,
+          "bbox": [
+            0.7148,
+            0.6,
+            0.7454,
+            0.65
+          ],
+          "beats": 4.0,
+          "chords": [],
+          "melody": "5 5 1 7 6 5 -",
+          "lyrics": "",
+          "bass_hint": null,
+          "rhythm_hint": null,
+          "fill": false,
+          "is_stop": false
+        }
+      ]
+    }
+  ],
+  "key_changes": [],
+  "warnings": [
+    "Chords are in Western letter notation (e.g., Cadd9, C, Em), but the schema and domain rules require Taiwanese scale-degree number notation and explicitly forbid Western letter chords. Therefore, chords have been omitted from the output.",
+    "The prompt provided header details and system structure examples for a different song ('掉了') than the provided image ('小情歌'). The output uses information extracted directly from the provided image and its OCR for '小情歌'."
+  ],
+  "issues": [
+    {
+      "stage": "omr",
+      "measure_index": 1,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第2小节行级转录疑似存在和弦 'C'，但格式无法识别",
+      "detail": {
+        "measure": 1,
+        "candidate": "C",
+        "beat": 3.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 2,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第3小节行级转录疑似存在和弦 'Fmaj7'，但格式无法识别",
+      "detail": {
+        "measure": 2,
+        "candidate": "Fmaj7",
+        "beat": 3.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 3,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第4小节行级转录疑似存在和弦 'C'，但格式无法识别",
+      "detail": {
+        "measure": 3,
+        "candidate": "C",
+        "beat": 3.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 4,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第5小节行级转录疑似存在和弦 'Fmaj7'，但格式无法识别",
+      "detail": {
+        "measure": 4,
+        "candidate": "Fmaj7",
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 4,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第5小节行级转录疑似存在和弦 'G'，但格式无法识别",
+      "detail": {
+        "measure": 4,
+        "candidate": "G",
+        "beat": 3.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 5,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第6小节行级转录疑似存在和弦 'Em'，但格式无法识别",
+      "detail": {
+        "measure": 5,
+        "candidate": "Em",
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 5,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第6小节行级转录疑似存在和弦 'Am'，但格式无法识别",
+      "detail": {
+        "measure": 5,
+        "candidate": "Am",
+        "beat": 3.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 6,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第7小节行级转录疑似存在和弦 'Fmaj7'，但格式无法识别",
+      "detail": {
+        "measure": 6,
+        "candidate": "Fmaj7",
+        "beat": 1.0
+      }
+    },
+    {
+      "stage": "omr",
+      "measure_index": 6,
+      "severity": "needs_review",
+      "code": "missing_chord_suspected",
+      "message": "第7小节行级转录疑似存在和弦 'Fm'，但格式无法识别",
+      "detail": {
+        "measure": 6,
+        "candidate": "Fm",
+        "beat": 3.0
+      }
+    }
+  ]
+}
