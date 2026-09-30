@@ -93,6 +93,10 @@ logger = logging.getLogger(__name__)
 BASS_ONLY_PATTERN = re.compile(r"^/[#b♯♭]?[1-7]$")
 NON_CHORD_VOICING_PATTERN = re.compile(r"^(?:0|\d{3,})$")
 
+MAX_MELODY_REREADS_PER_PAGE: int = 4
+MAX_MELODY_REREADS_TOTAL: int = 8
+PAGE_MELODY_BUDGET_S: float = 10.0
+
 
 def is_valid_chord_grammar(raw: str) -> bool:
     """Check whether raw chord text is grammatically valid.
@@ -419,6 +423,36 @@ def _scan_system_row_key(
     except Exception as exc:
         logger.warning("Targeted row key re-scan failed for system page %d: %s", sys_item.page, exc)
         return sys_item, None
+
+
+def _execute_single_melody_reread(task: tuple[Measure, System, bytes]) -> tuple[int, Optional[str]]:
+    """Execute a single-measure melody crop transcription via Gemini Flash."""
+    m_item, sys_item, c_bytes = task
+    m_meter = f"{int(m_item.beats)}/4" if m_item.beats.is_integer() else f"{m_item.beats} beats"
+    melody_prompt = (
+        f"You are an expert music assistant reading Jianpu (numbered musical notation) in {m_meter} meter. "
+        f"Transcribe the melody for this single measure. "
+        f"Group notes into exactly {int(m_item.beats)} space-separated beat groups so the measure has {m_item.beats:.1f} beats in total. "
+        f"For example: '2323 35. 2321 12.' or '1 2 3 4'."
+    )
+    try:
+        resp = ask_json(
+            prompt=melody_prompt,
+            schema=MeasureMelodyCropReading,
+            images=[c_bytes],
+            role="reader",
+            timeout_s=min(8.0, PAGE_MELODY_BUDGET_S),
+        )
+        if resp and resp.melody:
+            return m_item.index, resp.melody
+    except Exception as exc:
+        logger.warning(
+            "Measure %d melody crop re-read failed (%s): %r",
+            m_item.index + 1,
+            type(exc).__name__,
+            exc,
+        )
+    return m_item.index, None
 
 
 def detect_song_end_evidence(
@@ -1260,7 +1294,13 @@ def verify_sheet(
                             severity="needs_review",
                             code="barline_count_mismatch",
                             message=f"第{p_idx + 1}页第{s_idx + 1}行小节线检测数量不符，请核对小节划分",
-                            detail={"warning": w, "parsed_count": parsed_count, "transcribed_count": transcribed_count},
+                            detail={
+                                "warning": w,
+                                "parsed_count": parsed_count,
+                                "transcribed_count": transcribed_count,
+                                "page": p_idx,
+                                "system": s_idx,
+                            },
                         )
                     )
 
@@ -1473,66 +1513,96 @@ def verify_sheet(
                         retained_chords.append(c)
                 m.chords = retained_chords
 
-    # 2a-2. Melody Beat-Sum Check (info unless >=2 chords and beat disagreement)
-    for m in all_measures:
-        pm = parsed_melodies.get(m.index)
-        if pm and pm.notes and abs(pm.beat_sum - m.beats) >= 1.0:
-            if can_use_llm and m.bbox:
+    # 2a-2. Melody Beat-Sum Check (bounded concurrent re-read with per-page budget, skip if barline mismatch)
+    systems_with_barline_mismatch: set[tuple[int, int]] = set()
+    for iss in new_issues:
+        if iss.code == "barline_count_mismatch":
+            p = iss.detail.get("page")
+            s = iss.detail.get("system")
+            if p is not None and s is not None:
+                systems_with_barline_mismatch.add((p, s))
+            if iss.measure_index is not None:
+                for s_obj in verified.systems:
+                    if any(m.index == iss.measure_index for m in s_obj.measures):
+                        p_obj = s_obj.page
+                        p_sys = [sys for sys in verified.systems if sys.page == p_obj]
+                        s_obj_idx = next((i for i, sys in enumerate(p_sys) if sys is s_obj), 0)
+                        systems_with_barline_mismatch.add((p_obj, s_obj_idx))
+
+    melody_reread_candidates_by_page: dict[int, list[tuple[Measure, System, bytes]]] = {}
+    total_candidates = 0
+
+    if can_use_llm:
+        for m in all_measures:
+            if total_candidates >= MAX_MELODY_REREADS_TOTAL:
+                break
+            pm = parsed_melodies.get(m.index)
+            if pm and pm.notes and abs(pm.beat_sum - m.beats) >= 1.0 and m.bbox:
                 m_sys = next(
                     (s for s in verified.systems if any(meas.index == m.index for meas in s.measures)),
                     None,
                 )
-                p_idx = m_sys.page if m_sys else 0
+                if m_sys is None:
+                    continue
+                p_idx = m_sys.page
+                p_sys = [sys for sys in verified.systems if sys.page == p_idx]
+                s_idx = next((i for i, sys in enumerate(p_sys) if sys is m_sys), 0)
+                if (p_idx, s_idx) in systems_with_barline_mismatch:
+                    continue
+                page_cands = melody_reread_candidates_by_page.setdefault(p_idx, [])
+                if len(page_cands) >= MAX_MELODY_REREADS_PER_PAGE:
+                    continue
                 img_bgr = cv2_pages[p_idx] if p_idx < len(cv2_pages) else None
-                if img_bgr is not None and m_sys is not None:
+                if img_bgr is not None:
                     crop_bytes = _crop_measure(img_bgr, m_sys, m)
                     if crop_bytes:
-                        try:
-                            m_meter = f"{int(m.beats)}/4" if m.beats.is_integer() else f"{m.beats} beats"
-                            melody_prompt = (
-                                f"You are an expert music assistant reading Jianpu (numbered musical notation) in {m_meter} meter. "
-                                f"Transcribe the melody for this single measure. "
-                                f"Group notes into exactly {int(m.beats)} space-separated beat groups so the measure has {m.beats:.1f} beats in total. "
-                                f"For example: '2323 35. 2321 12.' or '1 2 3 4'."
-                            )
-                            m_exec = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-                            try:
-                                m_fut = m_exec.submit(
-                                    ask_json,
-                                    prompt=melody_prompt,
-                                    schema=MeasureMelodyCropReading,
-                                    images=[crop_bytes],
-                                    role="reader",
-                                    timeout_s=10.0,
-                                )
-                                crop_resp = m_fut.result(timeout=10.0)
-                            finally:
-                                m_exec.shutdown(wait=False, cancel_futures=True)
-                            if crop_resp and crop_resp.melody:
-                                new_pm = parse_melody(crop_resp.melody, beats=m.beats)
-                                if abs(new_pm.beat_sum - m.beats) < 1.0:
-                                    orig_melody = m.melody
-                                    m.melody = crop_resp.melody
-                                    parsed_melodies[m.index] = new_pm
-                                    pm = new_pm
-                                    new_issues.append(
-                                        QualityIssue(
-                                            stage="omr",
-                                            measure_index=m.index,
-                                            severity="auto_fixed",
-                                            code="melody_corrected",
-                                            message=f"第{m.index + 1}小节旋律拍数经单小节重读更正（{new_pm.beat_sum:.1f}拍，原={orig_melody}，更正后={crop_resp.melody}）",
-                                            detail={
-                                                "original": orig_melody,
-                                                "corrected": crop_resp.melody,
-                                                "beat_sum": new_pm.beat_sum,
-                                            },
-                                        )
-                                    )
-                        except Exception as exc:
-                            logger.warning("Measure %d melody crop re-read failed: %s", m.index + 1, exc)
+                        page_cands.append((m, m_sys, crop_bytes))
+                        total_candidates += 1
 
-            if abs(pm.beat_sum - m.beats) >= 1.0:
+    for p_idx, cands in melody_reread_candidates_by_page.items():
+        if not cands:
+            continue
+        m_pool = concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(cands)))
+        try:
+            futs = {m_pool.submit(_execute_single_melody_reread, c): c[0] for c in cands}
+            done, not_done = concurrent.futures.wait(futs.keys(), timeout=PAGE_MELODY_BUDGET_S)
+            for f in done:
+                try:
+                    m_idx, new_mel = f.result(timeout=0.1)
+                    if new_mel:
+                        target_m = next((m for m in all_measures if m.index == m_idx), None)
+                        if target_m:
+                            new_pm = parse_melody(new_mel, beats=target_m.beats)
+                            if abs(new_pm.beat_sum - target_m.beats) < 1.0:
+                                orig_melody = target_m.melody
+                                target_m.melody = new_mel
+                                parsed_melodies[target_m.index] = new_pm
+                                new_issues.append(
+                                    QualityIssue(
+                                        stage="omr",
+                                        measure_index=target_m.index,
+                                        severity="auto_fixed",
+                                        code="melody_corrected",
+                                        message=f"第{target_m.index + 1}小节旋律拍数经单小节重读更正（{new_pm.beat_sum:.1f}拍，原={orig_melody}，更正后={new_mel}）",
+                                        detail={
+                                            "original": orig_melody,
+                                            "corrected": new_mel,
+                                            "beat_sum": new_pm.beat_sum,
+                                        },
+                                    )
+                                )
+                except Exception as exc:
+                    m_obj = futs[f]
+                    logger.warning("Measure %d melody crop re-read result error (%s): %r", m_obj.index + 1, type(exc).__name__, exc)
+            for f in not_done:
+                m_obj = futs[f]
+                logger.warning("Measure %d melody crop re-read timed out (page budget %.1fs exceeded)", m_obj.index + 1, PAGE_MELODY_BUDGET_S)
+        finally:
+            m_pool.shutdown(wait=False, cancel_futures=True)
+
+    for m in all_measures:
+        pm = parsed_melodies.get(m.index)
+        if pm and pm.notes and abs(pm.beat_sum - m.beats) >= 1.0:
                 has_unresolved_beat_disagreement = False
                 if len(m.chords) >= 2:
                     beats = [c.beat for c in m.chords]

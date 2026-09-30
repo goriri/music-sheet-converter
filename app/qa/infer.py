@@ -19,6 +19,7 @@ Acceptance rules for auto-fixing:
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import os
 import re
@@ -465,6 +466,106 @@ def run_system_row_inference(
         return {}
 
 
+def build_page_inference_prompt(
+    sheet: ParsedSheet,
+    page_idx: int,
+    systems_with_items: list[tuple[System, list[AmbiguousItem]]],
+) -> str:
+    """Build a contextual prompt for Opus inference for all ambiguous items on a page."""
+    header = sheet.header
+    lines = [
+        "You are an expert music theorist and Taiwanese band chart (台湾流行简谱) specialist.",
+        f"Perform context-aware musical inference to resolve ambiguous readings on page {page_idx + 1} of this music sheet.",
+        "",
+        "Chart Metadata:",
+        f"- Title: '{header.title or 'Unknown'}'",
+        f"- Meter: {header.time_signature}, Start Key: {header.original_key or 'Unknown'}",
+        "",
+        "Instructions:",
+        "1. Each attached image corresponds to a system row crop on this page (Image #0 = first system below, Image #1 = second, etc.).",
+        "2. For each ambiguous item listed below, examine its system crop and surrounding measures to determine the most musically and harmonically plausible reading.",
+        "3. Chord symbols MUST use Taiwanese scale-degree number notation (e.g. 1(2), 5/7, 2m7, 4M7, 57sus, 6m7-5).",
+        "4. Provide a confidence score (0.0 to 1.0) and a concise musical justification (e.g. '配合旋律主音 5 构成属和弦进行').",
+        "",
+        "Ambiguous Items to Resolve by System Row:",
+    ]
+
+    for img_idx, (sys, items) in enumerate(systems_with_items):
+        lines.append(f"\n=== System Row Image #{img_idx} (Section: '{sys.section_label or 'None'}') ===")
+        for it in items:
+            lines.append(f"\nItem ID: '{it.item_id}' (Target: {it.target_type}, Measure {it.measure_index + 1}):")
+            lines.append(f"- Original Reading: '{it.original_value}'")
+            if it.candidate_set:
+                lines.append(f"- Candidate Pool: {it.candidate_set}")
+            if it.crop_reading:
+                lines.append(f"- Crop Re-Read: '{it.crop_reading}' (valid={it.crop_valid})")
+            if it.prior_scores:
+                p_str = ", ".join(f"{k}:{v:.2f}" for k, v in sorted(it.prior_scores.items(), key=lambda x: -x[1])[:5])
+                lines.append(f"- Melody Prior Scores: {p_str}")
+
+            lines.append("- Context Measures (flagged measure ±2):")
+            for ctx in it.context_measures:
+                c_str = ", ".join(f"{c['raw']}@beat{c['beat']:.1f}" for c in ctx.get("chords", [])) or "None"
+                lines.append(
+                    f"  * m{ctx['measure_index'] + 1}: melody='{ctx.get('melody', '')}', "
+                    f"beat_sum={ctx.get('beat_sum', 4.0):.1f}/{ctx.get('beats', 4.0):.1f}, chords=[{c_str}]"
+                )
+
+    return "\n".join(lines)
+
+
+def run_page_inference(
+    cv2_page: Optional[np.ndarray],
+    sheet: ParsedSheet,
+    page_idx: int,
+    systems_with_items: list[tuple[System, list[AmbiguousItem]]],
+    can_use_llm: bool = True,
+    timeout_s: float = 60.0,
+) -> dict[str, ItemInference]:
+    """Execute Opus structured inference for all ambiguous items on a page in a single call."""
+    if not can_use_llm or cv2_page is None or not systems_with_items:
+        return {}
+
+    h, w = cv2_page.shape[:2]
+    images: list[bytes] = []
+    valid_systems_with_items: list[tuple[System, list[AmbiguousItem]]] = []
+
+    for sys, items in systems_with_items:
+        y0 = max(0, int(sys.bbox[1] * h))
+        y1 = min(h, int(sys.bbox[3] * h))
+        x0 = max(0, int(sys.bbox[0] * w))
+        x1 = min(w, int(sys.bbox[2] * w))
+        if y1 <= y0 or x1 <= x0:
+            continue
+        crop = cv2_page[y0:y1, x0:x1]
+        cw = x1 - x0
+        scale = min(1.25, max(1.0, 1200.0 / float(max(cw, 1))))
+        new_w = int(cw * scale)
+        new_h = int((y1 - y0) * scale)
+        upscaled = cv2.resize(crop, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        ret, buf = cv2.imencode(".jpg", upscaled, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        if ret:
+            images.append(buf.tobytes())
+            valid_systems_with_items.append((sys, items))
+
+    if not images or not valid_systems_with_items:
+        return {}
+
+    prompt = build_page_inference_prompt(sheet, page_idx, valid_systems_with_items)
+    try:
+        resp = ask_json(
+            prompt=prompt,
+            schema=SystemInferenceResponse,
+            images=images,
+            role="arbiter",
+            timeout_s=timeout_s,
+        )
+        return {inf.item_id: inf for inf in resp.inferences}
+    except Exception as exc:
+        logger.warning("Page %d inference failed: %s", page_idx + 1, exc)
+        return {}
+
+
 def run_escalation_ladder(
     sheet: ParsedSheet,
     cv2_pages: list[Optional[np.ndarray]],
@@ -476,8 +577,8 @@ def run_escalation_ladder(
 
     Ladder stages:
     1. Existing crop re-read.
-    2. Context inference with Opus (batch per row with upscaled row crop + ±2 measures context).
-    3. Web evidence (aligned reference candidate chords).
+    2. Context inference with Opus (batched per page into one call, run concurrently).
+    3. Web evidence (aligned reference candidate chords, run concurrently).
     4. needs_review only if still unresolved or conflicting.
     """
     review_indices = [
@@ -491,22 +592,8 @@ def run_escalation_ladder(
     meas_map: dict[int, Measure] = {m.index: m for m in all_measures}
     meas_to_sys: dict[int, System] = {m.index: s for s in sheet.systems for m in s.measures}
 
-    # Fetch web evidence if not provided
-    if web_candidates_map is None:
-        start_pc = 0
-        if sheet.header.original_key:
-            try:
-                start_pc = key_name_to_pc(sheet.header.original_key)
-            except Exception:
-                start_pc = 0
-        web_candidates_map = get_web_reference_candidates(
-            sheet.header.title,
-            sheet=sheet,
-            start_key_pc=start_pc,
-        )
-
     # Build AmbiguousItems for eligible review issues
-    items_by_row: dict[tuple[int, int], list[tuple[int, AmbiguousItem]]] = {}
+    items_by_page: dict[int, dict[int, list[tuple[int, AmbiguousItem]]]] = {}
 
     for r_idx in review_indices:
         iss = issues[r_idx]
@@ -578,58 +665,106 @@ def run_escalation_ladder(
             chord_beat=c_beat,
         )
 
-        row_key = (s.page, s_idx)
-        items_by_row.setdefault(row_key, []).append((r_idx, item))
+        items_by_page.setdefault(s.page, {}).setdefault(s_idx, []).append((r_idx, item))
 
-    # Process row batches
-    for (p_idx, s_idx), row_item_pairs in items_by_row.items():
-        sys = next((s for s in sheet.systems if s.page == p_idx and sheet.systems.index(s) == s_idx), None)
-        if not sys:
-            continue
+    # Concurrently execute rungs:
+    # Rung 3 (web evidence) + Rung 2 (batched per-page Opus inference)
+    all_inferences: dict[str, ItemInference] = {}
+    ladder_exec = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(items_by_page) + 1))
+    try:
+        web_fut = None
+        if web_candidates_map is None:
+            start_pc = 0
+            if sheet.header.original_key:
+                try:
+                    start_pc = key_name_to_pc(sheet.header.original_key)
+                except Exception:
+                    start_pc = 0
+            web_fut = ladder_exec.submit(
+                get_web_reference_candidates,
+                sheet.header.title,
+                sheet=sheet,
+                start_key_pc=start_pc,
+            )
+
+        page_futs = {}
+        for p_idx, s_dict in items_by_page.items():
+            p_img = cv2_pages[p_idx] if p_idx < len(cv2_pages) else None
+            systems_with_items = []
+            for s_idx, pairs in s_dict.items():
+                sys = next((s for s in sheet.systems if s.page == p_idx and sheet.systems.index(s) == s_idx), None)
+                if sys:
+                    systems_with_items.append((sys, [it for _, it in pairs]))
+
+            if systems_with_items:
+                page_futs[p_idx] = ladder_exec.submit(
+                    run_page_inference,
+                    p_img,
+                    sheet,
+                    p_idx,
+                    systems_with_items,
+                    can_use_llm=can_use_llm,
+                )
+
+        if web_fut is not None:
+            try:
+                web_candidates_map = web_fut.result(timeout=10.0)
+            except Exception as exc:
+                logger.debug("Web evidence fetch error: %s", exc)
+                web_candidates_map = {}
+        if web_candidates_map is None:
+            web_candidates_map = {}
+
+        for p_idx, f in page_futs.items():
+            try:
+                all_inferences.update(f.result(timeout=60.0))
+            except Exception as exc:
+                logger.warning("Page %d inference error: %s", p_idx, exc)
+    finally:
+        ladder_exec.shutdown(wait=False, cancel_futures=True)
+
+    # Evaluate decisions and apply to sheet
+    for p_idx, s_dict in items_by_page.items():
         p_img = cv2_pages[p_idx] if p_idx < len(cv2_pages) else None
-        items = [it for _, it in row_item_pairs]
+        for s_idx, pairs in s_dict.items():
+            for iss_idx, item in pairs:
+                inf = all_inferences.get(item.item_id)
+                web_cands = web_candidates_map.get(item.measure_index, [])
+                dec = evaluate_ladder_decision(item, inf, web_cands, img_bgr=p_img)
 
-        prompt = build_system_inference_prompt(sheet, sys, items)
-        inferences = run_system_row_inference(p_img, sys, items, prompt, can_use_llm=can_use_llm)
-
-        for iss_idx, item in row_item_pairs:
-            inf = inferences.get(item.item_id)
-            web_cands = web_candidates_map.get(item.measure_index, [])
-            dec = evaluate_ladder_decision(item, inf, web_cands, img_bgr=p_img)
-
-            if dec.accepted:
-                # Apply decision to the sheet
-                target_m = meas_map[item.measure_index]
-                if dec.target_type == "missing_chord":
-                    target_m.chords.append(
-                        ChordSymbol(
-                            raw=dec.new_value,
-                            beat=item.chord_beat,
-                            confidence=dec.detail.get("confidence", 0.85),
-                        )
-                    )
-                    target_m.chords.sort(key=lambda c: c.beat)
-                elif dec.target_type == "chord":
-                    if target_m.chords:
-                        target_m.chords[0].raw = dec.new_value
-                        target_m.chords[0].confidence = dec.detail.get("confidence", 0.88)
-                    else:
+                if dec.accepted:
+                    # Apply decision to the sheet
+                    target_m = meas_map[item.measure_index]
+                    if dec.target_type == "missing_chord":
                         target_m.chords.append(
                             ChordSymbol(
                                 raw=dec.new_value,
-                                beat=1.0,
-                                confidence=dec.detail.get("confidence", 0.88),
+                                beat=item.chord_beat,
+                                confidence=dec.detail.get("confidence", 0.85),
                             )
                         )
+                        target_m.chords.sort(key=lambda c: c.beat)
+                    elif dec.target_type == "chord":
+                        if target_m.chords:
+                            target_m.chords[0].raw = dec.new_value
+                            target_m.chords[0].confidence = dec.detail.get("confidence", 0.88)
+                        else:
+                            target_m.chords.append(
+                                ChordSymbol(
+                                    raw=dec.new_value,
+                                    beat=1.0,
+                                    confidence=dec.detail.get("confidence", 0.88),
+                                )
+                            )
 
-                # Upgrade issue to auto_fixed
-                issues[iss_idx] = QualityIssue(
-                    stage="omr",
-                    measure_index=item.measure_index,
-                    severity="auto_fixed",
-                    code="chord_inferred" if dec.target_type in ("chord", "missing_chord") else "measure_boundary_resolved",
-                    message=dec.message,
-                    detail=dec.detail,
-                )
+                    # Upgrade issue to auto_fixed
+                    issues[iss_idx] = QualityIssue(
+                        stage="omr",
+                        measure_index=item.measure_index,
+                        severity="auto_fixed",
+                        code="chord_inferred" if dec.target_type in ("chord", "missing_chord") else "measure_boundary_resolved",
+                        message=dec.message,
+                        detail=dec.detail,
+                    )
 
     return issues

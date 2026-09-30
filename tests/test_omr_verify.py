@@ -1231,6 +1231,85 @@ def test_key_change_targeted_row_rescan_restores_key(monkeypatch, clean_sheet):
     assert not any(i.code == "key_change_unlocated" for i in verified.issues)
 
 
+_melody_slow_or_failing_call_count = 0
 
 
+def _mock_slow_or_failing_melody(prompt: str, schema: Any, images=None, role: str = "reader", timeout_s: float = 30.0):
+    global _melody_slow_or_failing_call_count
+    _melody_slow_or_failing_call_count += 1
+    from app.qa.omr_verify import MeasureMelodyCropReading
+    if schema == MeasureMelodyCropReading:
+        if _melody_slow_or_failing_call_count % 2 == 1:
+            raise ValueError("Simulated LLM JSON decode failure")
+        else:
+            import time
+            time.sleep(1.0)
+            return MeasureMelodyCropReading(melody="1 2 3 4")
+    return _mock_ask_no_row_transcription(prompt, schema, images=images, role=role, timeout_s=timeout_s)
+
+
+_melody_reread_called = False
+
+
+def _mock_ask_check_called(prompt: str, schema: Any, images=None, role: str = "reader", timeout_s: float = 30.0):
+    global _melody_reread_called
+    from app.qa.omr_verify import MeasureMelodyCropReading
+    if schema == MeasureMelodyCropReading:
+        _melody_reread_called = True
+        return MeasureMelodyCropReading(melody="1 2 3 4")
+    return _mock_ask_no_row_transcription(prompt, schema, images=images, role=role, timeout_s=timeout_s)
+
+
+def test_melody_crop_reread_bounded_budget_and_exceptions(monkeypatch, clean_sheet, dummy_images):
+    """Verify that slow/failing melody re-reads terminate cleanly under budget and log errors without crashing."""
+    import time
+    global _melody_slow_or_failing_call_count
+    _melody_slow_or_failing_call_count = 0
+
+    sheet = clean_sheet.model_copy(deep=True)
+    for m in sheet.systems[0].measures:
+        m.melody = "23 23 35. 23 21 12."
+        m.beats = 4.0
+        if not m.bbox:
+            m.bbox = (0.1, 0.1, 0.9, 0.2)
+
+    # Monkeypatch a tiny budget so the test runs in < 1 second
+    monkeypatch.setattr("app.qa.omr_verify.PAGE_MELODY_BUDGET_S", 0.3)
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_slow_or_failing_melody)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    t0 = time.perf_counter()
+    verified = verify_sheet(dummy_images, sheet, use_llm=True)
+    elapsed = time.perf_counter() - t0
+
+    # Ensure it terminated under a tight budget (< 2.5s even with sleeping threads)
+    assert elapsed < 2.5, f"Melody re-read did not terminate under budget: took {elapsed:.2f}s"
+    assert isinstance(verified, ParsedSheet)
+    assert any(i.code == "melody_beat_sum_mismatch" for i in verified.issues)
+
+
+def test_melody_crop_reread_skips_barline_mismatch_systems(monkeypatch, clean_sheet, dummy_images):
+    """Verify that measures on systems with barline_count_mismatch are skipped from melody re-reads."""
+    global _melody_reread_called
+    _melody_reread_called = False
+
+    sheet = clean_sheet.model_copy(deep=True)
+    sheet.layout_source = "cv"
+    sheet.layout_confidence = 0.95
+    sheet.warnings = ["[v2_geometry] Classical CV layout authoritative boundaries"]
+
+    # System 0 has a barline count mismatch (simulate merged measure with 8 beats)
+    target_m = sheet.systems[0].measures[1]
+    target_m.melody = "1 - - - 1 - - -"
+    target_m.beats = 4.0
+    if not target_m.bbox:
+        target_m.bbox = (0.1, 0.1, 0.5, 0.2)
+
+    monkeypatch.setattr("app.qa.omr_verify.ask_json", _mock_ask_check_called)
+    monkeypatch.setattr("app.qa.omr_verify.llm_available", lambda: True)
+
+    verified = verify_sheet(dummy_images, sheet, use_llm=True)
+    # System 0 has barline mismatch, so melody re-read should NOT have been called for it
+    assert not _melody_reread_called
+    assert any(i.code == "barline_count_mismatch" for i in verified.issues)
 
