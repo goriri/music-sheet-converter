@@ -13,6 +13,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import time
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
@@ -92,6 +93,113 @@ class DegreeChord:
     root_semitone: int  # 0..11 relative to tonic
     bass_semitone: int  # 0..11 relative to tonic
     number_str: str  # canonical Taiwanese number chord string, e.g. "1", "5/7", "6m"
+
+
+# --------------------------------------------------------------------------- Tolerant JSON Salvage
+def salvage_json_dict(text: str) -> Optional[dict[str, Any]]:
+    """Tolerantly parse JSON, salvaging complete structures if truncated/cut off."""
+    if not text or not isinstance(text, str):
+        return None
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[-1]
+    if cleaned.endswith("```"):
+        cleaned = cleaned.rsplit("\n", 1)[0]
+    cleaned = cleaned.strip()
+
+    # 1. Try standard parse first
+    try:
+        data = json.loads(cleaned)
+        if isinstance(data, dict) and ("sources" in data or "title" in data):
+            return data
+    except Exception:
+        pass
+
+    # 2. Try trimming back to last closing bracket/brace and closing outer structures
+    for r_idx in range(len(cleaned) - 1, -1, -1):
+        ch = cleaned[r_idx]
+        if ch in ("]", "}"):
+            candidate = cleaned[:r_idx + 1].rstrip(", \t\r\n")
+            stack: list[str] = []
+            in_str = False
+            escape = False
+            for c in candidate:
+                if escape:
+                    escape = False
+                    continue
+                if c == "\\":
+                    escape = True
+                    continue
+                if c == "\"":
+                    in_str = not in_str
+                    continue
+                if not in_str:
+                    if c in ("{", "["):
+                        stack.append(c)
+                    elif c == "}" and stack and stack[-1] == "{":
+                        stack.pop()
+                    elif c == "]" and stack and stack[-1] == "[":
+                        stack.pop()
+
+            if not in_str:
+                closing = "".join("}" if b == "{" else "]" for b in reversed(stack))
+                try:
+                    data = json.loads(candidate + closing)
+                    if isinstance(data, dict) and ("sources" in data or "title" in data):
+                        return data
+                except Exception:
+                    pass
+
+    # 3. Try trimming unclosed string literal and closing remaining open brackets
+    last_quote = cleaned.rfind("\"")
+    if last_quote != -1:
+        quote_count = 0
+        escape = False
+        for c in cleaned:
+            if escape:
+                escape = False
+                continue
+            if c == "\\":
+                escape = True
+                continue
+            if c == "\"":
+                quote_count += 1
+
+        trimmed = cleaned
+        if quote_count % 2 != 0:
+            trimmed = cleaned[:last_quote].rstrip(", \t\r\n")
+
+        stack = []
+        in_str = False
+        escape = False
+        for c in trimmed:
+            if escape:
+                escape = False
+                continue
+            if c == "\\":
+                escape = True
+                continue
+            if c == "\"":
+                in_str = not in_str
+                continue
+            if not in_str:
+                if c in ("{", "["):
+                    stack.append(c)
+                elif c == "}" and stack and stack[-1] == "{":
+                    stack.pop()
+                elif c == "]" and stack and stack[-1] == "[":
+                    stack.pop()
+
+        if not in_str and stack:
+            closing = "".join("}" if b == "{" else "]" for b in reversed(stack))
+            try:
+                data = json.loads(trimmed + closing)
+                if isinstance(data, dict) and ("sources" in data or "title" in data):
+                    return data
+            except Exception:
+                pass
+
+    return None
 
 
 # --------------------------------------------------------------------------- Caching
@@ -431,21 +539,67 @@ def needleman_wunsch(
 
 
 # --------------------------------------------------------------------------- Gemini Grounding Implementation
-def _query_gemini_search(title: str, artist: Optional[str]) -> Optional[ReferenceChart]:
-    """Execute two-step Gemini grounding search and structuring."""
+def _clean_and_filter_sources(
+    raw_sources: list[Any],
+    fallback_urls: list[str],
+) -> list[ReferenceSource]:
+    """Clean and validate sources, keeping only fully parsed lines with string tokens."""
+    valid_sources: list[ReferenceSource] = []
+    for s_item in raw_sources:
+        if not isinstance(s_item, (dict, ReferenceSource)):
+            continue
+        if isinstance(s_item, ReferenceSource):
+            s_dict = s_item.model_dump()
+        else:
+            s_dict = s_item
+
+        raw_lines = s_dict.get("lines", [])
+        clean_lines: list[list[str]] = []
+        if isinstance(raw_lines, list):
+            for line in raw_lines:
+                if isinstance(line, list):
+                    clean_line = [str(c).strip() for c in line if isinstance(c, str) and str(c).strip()]
+                    if clean_line:
+                        clean_lines.append(clean_line)
+
+        if clean_lines:
+            url_str = str(s_dict.get("url", ""))
+            final_url = url_str if url_str.startswith("http") else (fallback_urls[0] if fallback_urls else "web")
+            capo_val = 0
+            try:
+                capo_val = int(s_dict.get("capo", 0))
+            except Exception:
+                pass
+            valid_sources.append(
+                ReferenceSource(
+                    url=final_url,
+                    key=s_dict.get("key"),
+                    capo=capo_val,
+                    lines=clean_lines,
+                    section_labels=s_dict.get("section_labels", []),
+                )
+            )
+    return valid_sources
+
+
+def _query_gemini_search(
+    title: str,
+    artist: Optional[str],
+    lang_hint: str = "zh",
+) -> Optional[ReferenceChart]:
+    """Execute two-step Gemini grounding search with tolerant salvage and retry."""
     from google import genai
     from google.genai import types
 
+    t_start = time.time()
     project = os.environ.get("GOOGLE_CLOUD_PROJECT", DEFAULT_PROJECT)
     location = os.environ.get("WEB_EVIDENCE_LOCATION", DEFAULT_LOCATION)
     model = os.environ.get("WEB_EVIDENCE_MODEL", DEFAULT_MODEL)
 
     client = genai.Client(vertexai=True, project=project, location=location)
 
-    search_prompt = (
-        f"和弦谱 吉他谱: {title} {artist or ''}. Provide the full chord progression for all sections "
-        f"(Intro, Verse, Chorus, Bridge, Outro), key, and capo. Output chord tokens in sequential order without lyrics."
-    )
+    # Step 1: Concise targeted search
+    search_prompt = f"和弦谱 吉他谱: {title} {artist or ''} 前奏 主歌 副歌 和弦走向. Only chords, no commentary."
 
     resp1 = client.models.generate_content(
         model=model,
@@ -470,11 +624,13 @@ def _query_gemini_search(title: str, artist: Optional[str]) -> Optional[Referenc
     if not raw_text.strip():
         return None
 
+    # Step 2: Structure extraction into ReferenceChart (capped to <= 2 sources, <= 40 lines each)
     structure_prompt = (
-        f"Extract 1 to 2 structured chord charts for '{title}' by '{artist or ''}' from:\n"
-        f"Grounding URLs: {json.dumps(extracted_urls[:3])}\n"
-        f"Text:\n{raw_text}\n"
-        f"Include key, capo, section_labels, and lines of chord tokens."
+        f"Extract 1 to 2 structured chord charts for '{title}' by '{artist or ''}' from the text below.\n"
+        f"Constraints: <= 2 sources, <= 40 lines per source, <= 8 chords per line.\n"
+        f"Format into lines of chord tokens (e.g. [[\"C\", \"G/B\", \"Am\", \"Em\"]]).\n"
+        f"Use \"web\" for url if url is unknown.\n\n"
+        f"Text:\n{raw_text[:2500]}"
     )
 
     resp2 = client.models.generate_content(
@@ -484,31 +640,57 @@ def _query_gemini_search(title: str, artist: Optional[str]) -> Optional[Referenc
             response_mime_type="application/json",
             response_schema=ReferenceChart,
             temperature=0.0,
-            max_output_tokens=1000,
+            max_output_tokens=2500,
         ),
     )
 
     raw_json = resp2.text or "{}"
-    chart = ReferenceChart.model_validate_json(raw_json)
+    parsed_chart: Optional[ReferenceChart] = None
+
+    # 1. Try standard validation
+    try:
+        parsed_chart = ReferenceChart.model_validate_json(raw_json)
+    except Exception:
+        # 2. Tolerant parse: salvage truncated/cut-off JSON
+        salvaged_dict = salvage_json_dict(raw_json)
+        if salvaged_dict:
+            try:
+                parsed_chart = ReferenceChart.model_validate(salvaged_dict)
+            except Exception as exc:
+                logger.debug("Validation of salvaged dict failed: %s", exc)
 
     valid_sources: list[ReferenceSource] = []
-    for s in chart.sources:
-        clean_lines: list[list[str]] = []
-        for line in s.lines:
-            chords_in_line = [c.strip() for c in line if c.strip()]
-            if chords_in_line:
-                clean_lines.append(chords_in_line)
-        if clean_lines:
-            url = s.url if s.url and s.url.startswith("http") else (extracted_urls[0] if extracted_urls else "web")
-            valid_sources.append(
-                ReferenceSource(
-                    url=url,
-                    key=s.key,
-                    capo=s.capo,
-                    lines=clean_lines,
-                    section_labels=s.section_labels,
-                )
+    if parsed_chart and parsed_chart.sources:
+        valid_sources = _clean_and_filter_sources(parsed_chart.sources, extracted_urls)
+
+    # 3. Retry once with a stricter/shorter prompt if first attempt yielded 0 valid sources
+    time_left = HARD_TIMEOUT_SECONDS - (time.time() - t_start)
+    if not valid_sources and time_left >= 4.0:
+        logger.info("Structuring yielded 0 sources; retrying with stricter prompt (%0.1fs remaining)", time_left)
+        try:
+            retry_prompt = (
+                f"从以下文本中提取歌曲《{title}》的1份简明和弦谱。\n"
+                f"要求：最多1个source，最多20行和弦，每行4-6个和弦（如 [[\"C\", \"G\", \"Am\", \"F\"]]）。\n"
+                f"只返回符合schema的JSON，不要返回歌词。\n\n"
+                f"文本：\n{raw_text[:1800]}"
             )
+            resp_retry = client.models.generate_content(
+                model=model,
+                contents=retry_prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=ReferenceChart,
+                    temperature=0.0,
+                    max_output_tokens=1500,
+                ),
+            )
+            retry_raw = resp_retry.text or "{}"
+            retry_dict = salvage_json_dict(retry_raw)
+            if retry_dict:
+                retry_chart = ReferenceChart.model_validate(retry_dict)
+                valid_sources = _clean_and_filter_sources(retry_chart.sources, extracted_urls)
+        except Exception as retry_exc:
+            logger.debug("Retry structuring failed: %s", retry_exc)
 
     if not valid_sources:
         return None
@@ -553,7 +735,7 @@ def find_reference(
 
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_query_gemini_search, title, artist)
+            future = executor.submit(_query_gemini_search, title, artist, lang_hint)
             return future.result(timeout=HARD_TIMEOUT_SECONDS)
     except Exception as exc:
         logger.warning("find_reference failed for %s (%s): %s", title, artist, exc)

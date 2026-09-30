@@ -251,3 +251,70 @@ def test_web_evidence_disabled_by_env(monkeypatch):
     monkeypatch.setenv("WEB_EVIDENCE", "0")
     result = find_reference("Any Song", "Any Artist")
     assert result is None
+
+
+def test_salvage_truncated_json_mid_line():
+    """Verify a JSON cut off mid-line gets salvaged and recovers complete lines."""
+    from app.qa.web_evidence import _clean_and_filter_sources, salvage_json_dict
+
+    truncated_raw = """{
+      "title": "听妈妈的话",
+      "artist": "周杰伦",
+      "sources": [
+        {
+          "url": "http://tab.com",
+          "key": "Bb",
+          "capo": 3,
+          "lines": [
+            ["G", "D/F#", "Em", "C"],
+            ["G", "D/F#", "Em", "C", "G/B", "Am7", "D"],
+            ["G", "B7/Eb", "Em", "Em/D
+    """
+    salvaged = salvage_json_dict(truncated_raw)
+    assert salvaged is not None
+    chart = ReferenceChart.model_validate(salvaged)
+    assert chart.title == "听妈妈的话"
+    assert len(chart.sources) == 1
+
+    clean_sources = _clean_and_filter_sources(chart.sources, ["http://fallback.com"])
+    assert len(clean_sources) == 1
+    # Only the first 2 complete lines must be kept; the incomplete 3rd line is dropped
+    assert len(clean_sources[0].lines) == 2
+    assert clean_sources[0].lines[0] == ["G", "D/F#", "Em", "C"]
+    assert clean_sources[0].lines[1] == ["G", "D/F#", "Em", "C", "G/B", "Am7", "D"]
+
+
+def test_salvage_truncated_json_mid_source():
+    """Verify a JSON cut off during second source recovers the first source."""
+    from app.qa.web_evidence import salvage_json_dict
+
+    truncated_raw = """{
+      "title": "听妈妈的话",
+      "artist": "周杰伦",
+      "sources": [
+        {
+          "url": "http://src1.com",
+          "key": "Bb",
+          "lines": [["G", "D", "Em", "C"]]
+        },
+        {
+          "url": "http://src2.com",
+          "lines": [["G", "D"
+    """
+    salvaged = salvage_json_dict(truncated_raw)
+    assert salvaged is not None
+    chart = ReferenceChart.model_validate(salvaged)
+    assert len(chart.sources) == 1
+    assert chart.sources[0].url == "http://src1.com"
+    assert chart.sources[0].lines == [["G", "D", "Em", "C"]]
+
+
+def test_salvage_completely_broken_json_returns_none():
+    """Verify completely broken non-JSON text returns None without raising any error."""
+    from app.qa.web_evidence import salvage_json_dict
+
+    assert salvage_json_dict("This is completely arbitrary text with no json <<>>") is None
+    assert salvage_json_dict("") is None
+    assert salvage_json_dict("{}{}{}") is None
+    assert salvage_json_dict("[1, 2, 3]") is None  # not a dict
+
