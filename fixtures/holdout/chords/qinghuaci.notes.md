@@ -4,7 +4,7 @@
 - **Pages**: 1
 - **Rows**: 10
 - **Measures**: 31
-- **Chords**: 53
+- **Chords**: 52
 - **Key**: A-Bb
 - **Time Signature**: 4/4
 - **Chord Notation**: Taiwanese boxed chords with slash bass and altered degrees (`number`)
@@ -20,7 +20,7 @@ All disagreements between models were reviewed against 3x resolution crops of ea
 - Row 4 M3: Gemini transcribed cue text notes '43' as chord; Opus correctly extracted [1], [5m7], [1/3].
 - Row 5 M2-M3: Beat index disagreement (Gemini beats 4.0/6.0 vs Opus beat 3.0). Harmonic rhythm is 2 beats per chord (beats 1.0, 3.0).
 - Row 6 M1: Gemini missed [17] above note 235. Opus captured both [1] and [17].
-- Row 7 M2: Gemini transcribed '1/2'; Opus transcribed '1(2)'. In Taiwanese notation, (2) represents add9 / sus2 alteration.
+- Row 7 M2: Verified against 4x high-res crop that the note '5' with `<>` harmonic marking is an instrumental fill note for `Vio+(筝)`, not a chord. The sole chord in M2 is `[1(2)]` (annotated EG above). Row 7 has 5 chords: `[2m7]`, `[5sus7]`, `[1(2)]`, `[4]`, `[4m6]`.
 - Row 8 M3: Minor beat alignment disagreement on 57 (beat 2.0 vs 3.0).
 - Row 10 M2: Minor beat alignment disagreement on 1 (beat 2.0 vs 1.0).
 

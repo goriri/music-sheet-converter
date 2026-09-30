@@ -287,6 +287,44 @@
         {
           "chords": [
             {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "3",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "3",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 9,
+      "measures": [
+        {
+          "chords": [
+            {
               "raw": "1",
               "beat": 1.0
             }
@@ -320,7 +358,7 @@
     },
     {
       "page": 1,
-      "row": 9,
+      "row": 10,
       "measures": [
         {
           "chords": [
@@ -350,44 +388,6 @@
           "chords": [
             {
               "raw": "6madd9",
-              "beat": 1.0
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "page": 1,
-      "row": 10,
-      "measures": [
-        {
-          "chords": [
-            {
-              "raw": "b7m",
-              "beat": 1.0
-            }
-          ]
-        },
-        {
-          "chords": [
-            {
-              "raw": "7m",
-              "beat": 1.0
-            }
-          ]
-        },
-        {
-          "chords": [
-            {
-              "raw": "1madd9",
-              "beat": 1.0
-            }
-          ]
-        },
-        {
-          "chords": [
-            {
-              "raw": "1madd9",
               "beat": 1.0
             }
           ]
