@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import io
+import logging
+import re
 import threading
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import quote
@@ -12,6 +15,8 @@ from PIL import Image, ImageOps
 
 from app.models import Arrangement, Difficulty, ParsedSheet, QualityIssue
 from app.storage import Storage, get_storage
+
+logger = logging.getLogger(__name__)
 
 
 def extract_pages_from_upload(filename: str, file_bytes: bytes) -> list[bytes]:
@@ -301,6 +306,223 @@ def _is_structural(iss: QualityIssue | dict) -> bool:
     )
 
 
+def parse_unparseable_note(note: str) -> tuple[int, str, str] | None:
+    """Parse measure index, raw chord string, and failure reason from an UNPARSEABLE note."""
+    if not note.startswith("UNPARSEABLE:"):
+        return None
+    m_meas = re.search(r"measure=(\d+)", note)
+    if not m_meas:
+        return None
+    m_idx = int(m_meas.group(1))
+
+    m_raw = re.search(r"raw=('(?:\\.|[^'])*'|\"(?:\\.|[^\"])*\"|\S+)", note)
+    if m_raw:
+        raw_token = m_raw.group(1)
+        if (raw_token.startswith("'") and raw_token.endswith("'")) or (
+            raw_token.startswith('"') and raw_token.endswith('"')
+        ):
+            try:
+                import ast
+                raw_val = ast.literal_eval(raw_token)
+            except Exception:
+                raw_val = raw_token[1:-1]
+        else:
+            raw_val = raw_token
+    else:
+        raw_val = ""
+
+    m_reason = re.search(r"reason=(.*)", note)
+    reason = m_reason.group(1).strip() if m_reason else ""
+    return m_idx, raw_val, reason
+
+
+def check_output_sanity(
+    sheet: ParsedSheet,
+    arrangement: Arrangement,
+    start_key: str,
+    sheet_id: str,
+    store: Storage,
+    trace_id: str,
+) -> None:
+    """Validate arrangement output sanity against the parsed sheet.
+
+    1. Any UNPARSEABLE note in Arrangement.notes becomes a 'chord_unresolvable'
+       needs_review issue on ParsedSheet, blocking render until fixed or confirmed.
+    2. Global sanity gate: if >= 20% of measures with printed chords resolve to
+       a chord with a different root than the printed chord implies, OR if >= 3
+       UNPARSEABLE notes exist, intercept with HTTP 409 and log an error.
+    """
+    from app.theory.chords import resolve_chord
+    from app.theory.keys import canonical_key_for_pc, key_name_to_pc
+    from app.theory.stacked import infer_stacked_orientation
+
+    # 1. Collect UNPARSEABLE notes
+    unparseable_records: list[tuple[int, str, str]] = []
+    if arrangement.notes:
+        for n in arrangement.notes:
+            if isinstance(n, str) and n.startswith("UNPARSEABLE:"):
+                parsed = parse_unparseable_note(n)
+                if parsed:
+                    unparseable_records.append(parsed)
+
+    # 2. Check root mismatches for measures carrying printed chords
+    start_pc = key_name_to_pc(start_key)
+    current_tonic_pc = start_pc
+    current_key_name = canonical_key_for_pc(current_tonic_pc, start_key)
+    notation = sheet.header.chord_notation if (sheet.header and sheet.header.chord_notation) else "number"
+    printed_tonic_pc: Optional[int] = None
+
+    if notation == "letter":
+        orig_key = sheet.header.original_key if sheet.header else None
+        if orig_key:
+            try:
+                printed_tonic_pc = key_name_to_pc(orig_key)
+            except ValueError:
+                printed_tonic_pc = start_pc
+        else:
+            printed_tonic_pc = start_pc
+
+    key_changes_by_m: dict[int, list[int]] = {}
+    for kc in sheet.key_changes:
+        key_changes_by_m.setdefault(kc.at_measure, []).append(kc.semitones)
+
+    stacked_res = infer_stacked_orientation(sheet)
+    stacked_orientation = stacked_res.orientation
+
+    arr_measures_by_idx = {
+        m.measure_index: m
+        for m in (arrangement.measures or [])
+    }
+
+    total_printed_measures = 0
+    mismatched_measures = 0
+
+    for m in sheet.measures():
+        if m.index in key_changes_by_m:
+            for shift in key_changes_by_m[m.index]:
+                current_tonic_pc = (current_tonic_pc + shift) % 12
+                current_key_name = canonical_key_for_pc(current_tonic_pc, start_key)
+
+        if not m.chords:
+            continue
+
+        total_printed_measures += 1
+        m_arr = arr_measures_by_idx.get(m.index)
+
+        if not m_arr or not m_arr.chords:
+            mismatched_measures += 1
+            continue
+
+        has_root_mismatch = False
+        for cs in m.chords:
+            try:
+                expected_rc = resolve_chord(
+                    cs.raw,
+                    current_tonic_pc,
+                    cs.beat,
+                    current_key_name,
+                    notation=notation,
+                    printed_tonic_pc=printed_tonic_pc,
+                    stacked=cs.stacked,
+                    stacked_orientation=stacked_orientation,
+                )
+            except ValueError:
+                # Unparseable chord, handled via unparseable_records
+                continue
+
+            arranged_c = next((c for c in m_arr.chords if abs(c.beat - cs.beat) < 0.01), None)
+            if arranged_c is None:
+                candidates = [c for c in m_arr.chords if c.beat <= cs.beat + 0.01]
+                arranged_c = candidates[-1] if candidates else m_arr.chords[0]
+
+            if expected_rc.root_pc != arranged_c.root_pc:
+                has_root_mismatch = True
+                break
+
+        if has_root_mismatch:
+            mismatched_measures += 1
+
+    mismatch_ratio = (mismatched_measures / total_printed_measures) if total_printed_measures > 0 else 0.0
+
+    # 3. Global sanity check: >= 20% root mismatch OR >= 3 unparseable notes
+    if mismatch_ratio >= 0.20 or len(unparseable_records) >= 3:
+        if unparseable_records:
+            sheet_updated = False
+            for m_idx, raw_val, reason in unparseable_records:
+                exists = any(
+                    iss.severity == "needs_review"
+                    and iss.code == "chord_unresolvable"
+                    and iss.measure_index == m_idx
+                    for iss in sheet.issues
+                )
+                if not exists:
+                    sheet.issues.append(
+                        QualityIssue(
+                            stage="arrange",
+                            measure_index=m_idx,
+                            severity="needs_review",
+                            code="chord_unresolvable",
+                            message=f"第{m_idx + 1}小节和弦「{raw_val}」无法识别，请修改",
+                            detail={"raw": raw_val, "reason": reason, "measure_index": m_idx},
+                        )
+                    )
+                    sheet_updated = True
+            if sheet_updated:
+                store.put_json(f"sheets/{sheet_id}/parsed.json", sheet.model_dump())
+
+        logger.error(
+            f"[{trace_id}] Global sanity check failed: mismatch_ratio={mismatch_ratio:.1%} "
+            f"({mismatched_measures}/{total_printed_measures}), unparseable_count={len(unparseable_records)}"
+        )
+        raise HTTPException(status_code=409, detail="伴奏生成异常，已拦截")
+
+    # 4. Handle unconfirmed unparseable notes (< 3)
+    if unparseable_records:
+        state_path = f"sheets/{sheet_id}/state.json"
+        state_data = store.get_json(state_path) if store.exists(state_path) else {}
+        confirmed_unres = set(state_data.get("confirmed_unresolvable", []))
+
+        unconfirmed = []
+        sheet_updated = False
+        for m_idx, raw_val, reason in unparseable_records:
+            is_confirmed = (m_idx in confirmed_unres) or any(
+                f"第{m_idx + 1}小节和弦沿用前一和弦" in w for w in sheet.warnings
+            )
+            if not is_confirmed:
+                unconfirmed.append((m_idx, raw_val, reason))
+                exists = any(
+                    iss.severity == "needs_review"
+                    and iss.code == "chord_unresolvable"
+                    and iss.measure_index == m_idx
+                    for iss in sheet.issues
+                )
+                if not exists:
+                    sheet.issues.append(
+                        QualityIssue(
+                            stage="arrange",
+                            measure_index=m_idx,
+                            severity="needs_review",
+                            code="chord_unresolvable",
+                            message=f"第{m_idx + 1}小节和弦「{raw_val}」无法识别，请修改",
+                            detail={"raw": raw_val, "reason": reason, "measure_index": m_idx},
+                        )
+                    )
+                    sheet_updated = True
+
+        if sheet_updated:
+            store.put_json(f"sheets/{sheet_id}/parsed.json", sheet.model_dump())
+
+        if unconfirmed:
+            first_m, first_raw, _ = unconfirmed[0]
+            logger.warning(
+                f"[{trace_id}] Output sanity check blocked: unconfirmed unresolvable chord at measure {first_m + 1} ({first_raw})"
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=f"伴奏生成异常，已拦截：第{first_m + 1}小节和弦「{first_raw}」无法识别，请修改",
+            )
+
+
 def render(
     sheet_id: str,
     start_key: str,
@@ -383,95 +605,117 @@ def render(
 
     page_images = [store.get_bytes(p) for p in page_paths]
 
-    # Lazy import arrangement & render modules
-    from app.arrange.piano import arrange
-    from app.render.overlay import render_pages, render_pdf
+    trace_id = uuid.uuid4().hex[:12]
 
-    arrangement = arrange(sheet, start_key, difficulty)
-
-    # QA arrangement check & repair
-    import os
     try:
-        from app.qa.arrange_check import ArrangementQAError, check_and_repair
+        # Lazy import arrangement & render modules
+        from app.arrange.piano import arrange
+        from app.render.overlay import render_pages, render_pdf
+
+        arrangement = arrange(sheet, start_key, difficulty)
+
+        # QA arrangement check & repair
+        import os
         try:
-            arrangement = check_and_repair(
-                sheet,
-                arrangement,
-                use_llm=os.environ.get("QA_LLM_REVIEW") == "1",
-            )
-        except ArrangementQAError as qa_err:
-            raise HTTPException(status_code=500, detail=f"编配自动修复失败：{qa_err}")
+            from app.qa.arrange_check import ArrangementQAError, check_and_repair
+            try:
+                arrangement = check_and_repair(
+                    sheet,
+                    arrangement,
+                    use_llm=os.environ.get("QA_LLM_REVIEW") == "1",
+                )
+            except ArrangementQAError as qa_err:
+                raise HTTPException(status_code=500, detail=f"编配自动修复失败：{qa_err}")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if isinstance(arrangement, Arrangement):
+                arrangement.issues.append(
+                    QualityIssue(
+                        stage="arrange",
+                        severity="info",
+                        code="arrange_qa_unavailable",
+                        message="编配自动校验服务暂不可用",
+                        detail={"error": str(exc)},
+                    )
+                )
+
+        # Output sanity check gate
+        check_output_sanity(
+            sheet=sheet,
+            arrangement=arrangement,
+            start_key=start_key,
+            sheet_id=sheet_id,
+            store=store,
+            trace_id=trace_id,
+        )
+
+        pdf_bytes = render_pdf(page_images, sheet, arrangement)
+        preview_pages = render_pages(page_images, sheet, arrangement)
+
+        # Append QA appendix page iff needs_review or auto_fixed issues exist
+        all_issues = []
+        if isinstance(sheet, ParsedSheet):
+            all_issues.extend(sheet.issues)
+        if isinstance(arrangement, Arrangement):
+            all_issues.extend(arrangement.issues)
+
+        relevant_issues = [
+            i for i in all_issues
+            if (i.severity if isinstance(i, QualityIssue) else i.get("severity", "")) in ("needs_review", "auto_fixed")
+        ]
+        if relevant_issues:
+            try:
+                pdf_bytes = append_qa_appendix_pdf(pdf_bytes, relevant_issues)
+            except Exception:
+                pass
+
+        render_folder = f"sheets/{sheet_id}/renders/{start_key}_{difficulty}_{instrument}"
+
+        # Store PDF
+        pdf_path = f"{render_folder}/score.pdf"
+        store.put_bytes(pdf_path, pdf_bytes, content_type="application/pdf")
+
+        # Store preview images
+        preview_urls: list[str] = []
+        for idx, page in enumerate(preview_pages):
+            if isinstance(page, Image.Image):
+                buf = io.BytesIO()
+                page.save(buf, format="PNG")
+                img_bytes = buf.getvalue()
+            elif isinstance(page, bytes):
+                img_bytes = page
+            else:
+                raise TypeError(f"Unsupported preview image type: {type(page)}")
+
+            preview_path = f"{render_folder}/preview_{idx}.png"
+            store.put_bytes(preview_path, img_bytes, content_type="image/png")
+            preview_urls.append(f"/api/files/{quote(preview_path, safe='/')}")
+
+        # Store arrangement JSON
+        if isinstance(arrangement, dict):
+            arr_dict = arrangement
+        else:
+            arr_dict = arrangement.model_dump()
+        store.put_json(f"{render_folder}/arrangement.json", arr_dict)
+
+        issues_data = [
+            i.model_dump() if isinstance(i, QualityIssue) else i
+            for i in all_issues
+        ]
+
+        return {
+            "pdf_url": f"/api/files/{quote(pdf_path, safe='/')}",
+            "preview_urls": preview_urls,
+            "arrangement": arr_dict,
+            "issues": issues_data,
+        }
     except HTTPException:
         raise
     except Exception as exc:
-        if isinstance(arrangement, Arrangement):
-            arrangement.issues.append(
-                QualityIssue(
-                    stage="arrange",
-                    severity="info",
-                    code="arrange_qa_unavailable",
-                    message="编配自动校验服务暂不可用",
-                    detail={"error": str(exc)},
-                )
-            )
+        logger.error(f"[{trace_id}] 伴奏生成处理异常: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"伴奏生成处理失败，请稍后重试或调整设置（错误跟踪号: {trace_id}）",
+        )
 
-    pdf_bytes = render_pdf(page_images, sheet, arrangement)
-    preview_pages = render_pages(page_images, sheet, arrangement)
-
-    # Append QA appendix page iff needs_review or auto_fixed issues exist
-    all_issues = []
-    if isinstance(sheet, ParsedSheet):
-        all_issues.extend(sheet.issues)
-    if isinstance(arrangement, Arrangement):
-        all_issues.extend(arrangement.issues)
-
-    relevant_issues = [
-        i for i in all_issues
-        if (i.severity if isinstance(i, QualityIssue) else i.get("severity", "")) in ("needs_review", "auto_fixed")
-    ]
-    if relevant_issues:
-        try:
-            pdf_bytes = append_qa_appendix_pdf(pdf_bytes, relevant_issues)
-        except Exception:
-            pass
-
-    render_folder = f"sheets/{sheet_id}/renders/{start_key}_{difficulty}_{instrument}"
-
-    # Store PDF
-    pdf_path = f"{render_folder}/score.pdf"
-    store.put_bytes(pdf_path, pdf_bytes, content_type="application/pdf")
-
-    # Store preview images
-    preview_urls: list[str] = []
-    for idx, page in enumerate(preview_pages):
-        if isinstance(page, Image.Image):
-            buf = io.BytesIO()
-            page.save(buf, format="PNG")
-            img_bytes = buf.getvalue()
-        elif isinstance(page, bytes):
-            img_bytes = page
-        else:
-            raise TypeError(f"Unsupported preview image type: {type(page)}")
-
-        preview_path = f"{render_folder}/preview_{idx}.png"
-        store.put_bytes(preview_path, img_bytes, content_type="image/png")
-        preview_urls.append(f"/api/files/{quote(preview_path, safe='/')}")
-
-    # Store arrangement JSON
-    if isinstance(arrangement, dict):
-        arr_dict = arrangement
-    else:
-        arr_dict = arrangement.model_dump()
-    store.put_json(f"{render_folder}/arrangement.json", arr_dict)
-
-    issues_data = [
-        i.model_dump() if isinstance(i, QualityIssue) else i
-        for i in all_issues
-    ]
-
-    return {
-        "pdf_url": f"/api/files/{quote(pdf_path, safe='/')}",
-        "preview_urls": preview_urls,
-        "arrangement": arr_dict,
-        "issues": issues_data,
-    }

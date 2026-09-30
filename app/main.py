@@ -217,9 +217,6 @@ def update_parsed_sheet(sheet_id: str, parsed: ParsedSheet):
         )
     ]
 
-    parsed_dict = parsed.model_dump()
-    storage.put_json(parsed_path, parsed_dict)
-
     # Check unconfirmed structural issues to update state.json
     has_unconfirmed_structural = any(
         i.severity == "needs_review" and _is_structural_issue(i)
@@ -227,6 +224,16 @@ def update_parsed_sheet(sheet_id: str, parsed: ParsedSheet):
     )
     state = storage.get_json(state_path) if storage.exists(state_path) else {}
     state["structural_confirmed"] = not has_unconfirmed_structural
+    if "confirmed_unresolvable" in state:
+        state["confirmed_unresolvable"] = [
+            idx for idx in state["confirmed_unresolvable"] if idx not in measures_edited
+        ]
+        parsed.warnings = [
+            w for w in parsed.warnings
+            if not any(f"第{idx + 1}小节和弦沿用前一和弦" in w for idx in measures_edited)
+        ]
+    parsed_dict = parsed.model_dump()
+    storage.put_json(parsed_path, parsed_dict)
     storage.put_json(state_path, state)
 
     return {"status": "ok", "parsed": parsed_dict}
@@ -243,7 +250,7 @@ def confirm_sheet_issue(sheet_id: str, request: ConfirmRequest):
         raise HTTPException(status_code=404, detail=f"Sheet '{sheet_id}' not found")
 
     from app.theory.chords import parse_chord
-    if request.chord is not None:
+    if request.chord is not None and not (request.issue_code == "chord_unresolvable" and request.action == "confirm"):
         try:
             parse_chord(request.chord)
         except Exception as err:
@@ -300,7 +307,7 @@ def confirm_sheet_issue(sheet_id: str, request: ConfirmRequest):
                 iss.detail["confirmed"] = True
         # 2. Chord issues
         elif code in ("chord_ambiguous", "chord_disagreement", "invalid_chord_grammar", "missing_chord_suspected") or "chord" in code:
-            if request.chord is not None and iss.measure_index is not None:
+            if request.chord is not None and iss.measure_index is not None and not (code == "chord_unresolvable" and request.action == "confirm"):
                 for m in sheet.measures():
                     if m.index == iss.measure_index:
                         if m.chords:
@@ -315,6 +322,15 @@ def confirm_sheet_issue(sheet_id: str, request: ConfirmRequest):
                     if m.index == iss.measure_index:
                         for c in m.chords:
                             c.confidence = 1.0
+
+            if code == "chord_unresolvable" and iss.measure_index is not None:
+                confirmed_unres = state.setdefault("confirmed_unresolvable", [])
+                if iss.measure_index not in confirmed_unres:
+                    confirmed_unres.append(iss.measure_index)
+                warn_msg = f"第{iss.measure_index + 1}小节和弦沿用前一和弦"
+                if warn_msg not in sheet.warnings:
+                    sheet.warnings.append(warn_msg)
+
             iss.severity = "info"
             iss.detail["confirmed"] = True
         # 3. Key change issues

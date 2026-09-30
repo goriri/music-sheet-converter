@@ -711,10 +711,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const header = document.createElement("div");
     header.className = "qa-review-header";
+    const titleText = (issue.message && issue.message.startsWith("第"))
+      ? issue.message
+      : `第 ${mIdx !== null && mIdx !== undefined ? mIdx + 1 : '—'} 小节：${issue.message}`;
     header.innerHTML = `
       <div class="qa-review-title">
         <span class="qa-badge qa-badge-chord">和弦核对</span>
-        <span>第 ${mIdx !== null && mIdx !== undefined ? mIdx + 1 : '—'} 小节：${issue.message}</span>
+        <span>${titleText}</span>
       </div>
     `;
     card.appendChild(header);
@@ -875,13 +878,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const confirmBtn = document.createElement("button");
     confirmBtn.type = "button";
     confirmBtn.className = "btn btn-secondary btn-sm qa-confirm-chord-btn";
-    confirmBtn.textContent = `确认 "${curChord}" 正确`;
+    if (issue.code === "chord_unresolvable") {
+      confirmBtn.textContent = "沿用前一和弦 (确认)";
+    } else {
+      confirmBtn.textContent = `确认 "${curChord}" 正确`;
+    }
     confirmBtn.onclick = async () => {
       await confirmIssue({
         issue_code: issue.code,
         measure_index: mIdx,
         action: "confirm",
-        chord: targetChord ? targetChord.raw : undefined,
+        chord: issue.code === "chord_unresolvable" ? undefined : (targetChord ? targetChord.raw : undefined),
       });
     };
     actionsBar.appendChild(confirmBtn);
@@ -1794,6 +1801,18 @@ document.addEventListener("DOMContentLoaded", () => {
         const err = await resp.json().catch(() => ({}));
         const msg = err.detail || `生成伴奏失败 (HTTP ${resp.status})`;
         showRenderError(msg);
+        if (resp.status === 409) {
+          try {
+            const sheetResp = await fetch(`/api/sheets/${currentSheetId}`);
+            if (sheetResp.ok) {
+              const state = await sheetResp.json();
+              if (state.parsed) {
+                currentParsedSheet = state.parsed;
+                renderStep3(state.parsed);
+              }
+            }
+          } catch (_) {}
+        }
         throw new Error(msg);
       }
 

@@ -150,11 +150,6 @@ def setup_test_environment(tmp_path, monkeypatch):
     omr_mod.parse_pages = lambda images: sample_sheet
     monkeypatch.setitem(sys.modules, "app.omr.gemini_omr", omr_mod)
 
-    # Mock app.arrange.piano module
-    arrange_mod = types.ModuleType("app.arrange.piano")
-    arrange_mod.arrange = lambda sheet, start_key, difficulty: sample_arr
-    monkeypatch.setitem(sys.modules, "app.arrange.piano", arrange_mod)
-
     # Mock app.render.overlay module
     render_mod = types.ModuleType("app.render.overlay")
     render_mod.render_pdf = lambda pages, sheet, arrangement: make_valid_pdf_bytes()
@@ -919,5 +914,221 @@ def test_sheet_with_only_warnings_renders_without_409(client, setup_test_environ
     warn_codes_put = [i["code"] for i in p_after_put["issues"] if i["severity"] == "warning"]
     assert "key_change_unlocated_warning" in warn_codes_put
     assert "bass_only_without_context" in warn_codes_put
+
+
+_ORIGINAL_PIANO_ARRANGE = None
+
+
+def mock_all_tonic_arrange(sheet_obj, start_k, diff):
+    from app.arrange.piano import arrange as orig_arrange
+    orig = _ORIGINAL_PIANO_ARRANGE if _ORIGINAL_PIANO_ARRANGE is not None else orig_arrange
+    arr = orig(sheet_obj, start_k, diff)
+    for m_arr in arr.measures:
+        for c in m_arr.chords:
+            c.root_pc = m_arr.tonic_pc
+            c.name = m_arr.key_name
+    return arr
+
+
+def mock_fail_render(*args, **kwargs):
+    raise RuntimeError("Simulated render engine crash")
+
+
+def test_output_sanity_gate_unparseable_note_blocks_render_with_409(client, setup_test_environment):
+    """UNPARSEABLE note in Arrangement.notes creates chord_unresolvable needs_review issue and blocks render with 409 until confirmed."""
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    parsed = get_resp.json()["parsed"]
+    # Introduce an unparseable chord in measure 0
+    parsed["systems"][0]["measures"][0]["chords"] = [
+        {"raw": "UNKNOWN_CHORD", "beat": 1.0, "confidence": 0.9}
+    ]
+    store.put_json(f"sheets/{sheet_id}/parsed.json", parsed)
+
+    # 1. Render must be blocked with HTTP 409
+    render_resp = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "C", "difficulty": "intermediate", "instrument": "piano"},
+    )
+    assert render_resp.status_code == 409
+    detail = render_resp.json()["detail"]
+    assert "伴奏生成异常，已拦截" in detail
+    assert "第1小节和弦「UNKNOWN_CHORD」无法识别" in detail
+
+    # 2. Verify ParsedSheet now carries needs_review chord_unresolvable issue
+    get_sheet = client.get(f"/api/sheets/{sheet_id}")
+    p_data = get_sheet.json()["parsed"]
+    unres_issues = [
+        i for i in p_data["issues"]
+        if i["code"] == "chord_unresolvable" and i["severity"] == "needs_review"
+    ]
+    assert len(unres_issues) == 1
+    assert unres_issues[0]["measure_index"] == 0
+    assert "第1小节和弦「UNKNOWN_CHORD」无法识别，请修改" in unres_issues[0]["message"]
+
+    # 3. Confirming the issue (accepting 'hold previous chord')
+    conf_resp = client.post(
+        f"/api/sheets/{sheet_id}/confirm",
+        json={
+            "issue_code": "chord_unresolvable",
+            "measure_index": 0,
+            "action": "confirm",
+        },
+    )
+    assert conf_resp.status_code == 200
+    p_after_conf = conf_resp.json()["parsed"]
+    assert not any(
+        i["code"] == "chord_unresolvable" and i["severity"] == "needs_review"
+        for i in p_after_conf["issues"]
+    )
+    assert any("第1小节和弦沿用前一和弦" in w for w in p_after_conf["warnings"])
+
+    # 4. Now render succeeds with 200
+    render_resp2 = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "C", "difficulty": "intermediate", "instrument": "piano"},
+    )
+    assert render_resp2.status_code == 200
+    assert "pdf_url" in render_resp2.json()
+
+
+def test_output_sanity_gate_all_tonic_anomaly_blocks_render_with_409(client, setup_test_environment, monkeypatch):
+    """If >= 20% of measures resolve to different roots than printed, global sanity intercepts with 409."""
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    parsed = get_resp.json()["parsed"]
+    from app.models import ChordSymbol, Measure, System
+    measures = [
+        Measure(index=0, bbox=(0.0, 0.0, 0.2, 0.2), beats=4.0, chords=[ChordSymbol(raw="1", beat=1.0)], melody="1 2 3 4"),
+        Measure(index=1, bbox=(0.2, 0.0, 0.4, 0.2), beats=4.0, chords=[ChordSymbol(raw="4", beat=1.0)], melody="4 5 6 7"),
+        Measure(index=2, bbox=(0.4, 0.0, 0.6, 0.2), beats=4.0, chords=[ChordSymbol(raw="5", beat=1.0)], melody="5 6 7 1"),
+        Measure(index=3, bbox=(0.6, 0.0, 0.8, 0.2), beats=4.0, chords=[ChordSymbol(raw="6m", beat=1.0)], melody="6 7 1 2"),
+        Measure(index=4, bbox=(0.8, 0.0, 1.0, 0.2), beats=4.0, chords=[ChordSymbol(raw="2m", beat=1.0)], melody="2 3 4 5"),
+    ]
+    parsed["systems"] = [
+        System(page=0, bbox=(0.05, 0.1, 0.95, 0.8), measures=measures).model_dump()
+    ]
+    store.put_json(f"sheets/{sheet_id}/parsed.json", parsed)
+
+    global _ORIGINAL_PIANO_ARRANGE
+    import app.arrange.piano
+    _ORIGINAL_PIANO_ARRANGE = app.arrange.piano.arrange
+    monkeypatch.setattr("app.arrange.piano.arrange", mock_all_tonic_arrange)
+
+    # Render must be intercepted by global sanity check with HTTP 409
+    render_resp = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "C", "difficulty": "intermediate", "instrument": "piano"},
+    )
+    assert render_resp.status_code == 409
+    assert render_resp.json()["detail"] == "伴奏生成异常，已拦截"
+
+
+def test_output_sanity_gate_normal_sheet_renders_200(client, setup_test_environment):
+    """Normal parsed sheet passes output sanity check and renders 200."""
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    render_resp = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "C", "difficulty": "intermediate", "instrument": "piano"},
+    )
+    assert render_resp.status_code == 200
+    assert "pdf_url" in render_resp.json()
+    assert len(render_resp.json()["preview_urls"]) > 0
+
+
+def test_pipeline_render_exception_returns_500_with_trace_id(client, setup_test_environment, monkeypatch):
+    """Unexpected exception during arrange/render returns HTTP 500 with friendly message and trace_id."""
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    monkeypatch.setattr(sys.modules["app.render.overlay"], "render_pdf", mock_fail_render)
+
+    render_resp = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "C", "difficulty": "intermediate", "instrument": "piano"},
+    )
+    assert render_resp.status_code == 500
+    detail = render_resp.json()["detail"]
+    assert "伴奏生成处理失败，请稍后重试或调整设置" in detail
+    assert "错误跟踪号:" in detail
+    # Verify no partial PDF was saved
+    render_folder = f"sheets/{sheet_id}/renders/C_intermediate_piano"
+    assert not store.exists(f"{render_folder}/score.pdf")
+
+
+def test_output_sanity_gate_three_unparseable_notes_intercepted_with_409(client, setup_test_environment):
+    """>= 3 UNPARSEABLE notes triggers global sanity check with HTTP 409 '伴奏生成异常，已拦截'."""
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    parsed = get_resp.json()["parsed"]
+    from app.models import ChordSymbol, Measure, System
+    measures = [
+        Measure(index=0, bbox=(0.0, 0.0, 0.25, 0.2), beats=4.0, chords=[ChordSymbol(raw="BAD1", beat=1.0)], melody="1 2 3 4"),
+        Measure(index=1, bbox=(0.25, 0.0, 0.5, 0.2), beats=4.0, chords=[ChordSymbol(raw="BAD2", beat=1.0)], melody="4 5 6 7"),
+        Measure(index=2, bbox=(0.5, 0.0, 0.75, 0.2), beats=4.0, chords=[ChordSymbol(raw="BAD3", beat=1.0)], melody="5 6 7 1"),
+        Measure(index=3, bbox=(0.75, 0.0, 1.0, 0.2), beats=4.0, chords=[ChordSymbol(raw="1", beat=1.0)], melody="1 2 3 4"),
+    ]
+    parsed["systems"] = [
+        System(page=0, bbox=(0.05, 0.1, 0.95, 0.8), measures=measures).model_dump()
+    ]
+    store.put_json(f"sheets/{sheet_id}/parsed.json", parsed)
+
+    render_resp = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "C", "difficulty": "intermediate", "instrument": "piano"},
+    )
+    assert render_resp.status_code == 409
+    assert render_resp.json()["detail"] == "伴奏生成异常，已拦截"
+
 
 
