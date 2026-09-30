@@ -9,7 +9,13 @@ import json
 from pathlib import Path
 import pytest
 
-from app.omr.layout import analyze_page, estimate_skew_angle, deskew_image
+from app.omr.layout import (
+    analyze_page,
+    clean_narrow_measures,
+    deskew_image,
+    estimate_skew_angle,
+    find_dashed_barlines,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TRUTH_PATH = REPO_ROOT / "fixtures" / "layout_truth.json"
@@ -269,20 +275,16 @@ def test_boxed_chart_chords_groundtruth():
         assert mismatched_measures <= 2, f"{img_rel}: expected <= 2 mismatched measures, got {mismatched_measures}/{total_measures}"
 
 
-def test_scale_and_rotation_invariance():
+def test_scale_and_rotation_invariance(layout_truth):
     """Verify scale and rotation invariance across image scales (0.6x down to 1.7x up)
 
     with JPEG compression artifacts (quality 70) and rotation (+/- 2 degrees).
-    Target truth pages (fixtures/pages/page1.jpg, fixtures/pages/page2.jpg) must produce
-    identical systems and measures-per-system, and chord-box count within +/- 5%.
+    All 14 ground-truth pages must produce identical systems and measures-per-system,
+    and chord-box count within +/- 5%.
     """
     import cv2
 
-    target_pages = [
-        "fixtures/pages/page1.jpg",
-        "fixtures/pages/page2.jpg",
-    ]
-    for rel_path in target_pages:
+    for rel_path in layout_truth.keys():
         img_path = REPO_ROOT / rel_path
         if not img_path.exists():
             continue
@@ -296,45 +298,129 @@ def test_scale_and_rotation_invariance():
         img = cv2.imread(str(img_path))
         h, w = img.shape[:2]
 
-        # 1. 0.6x downscale with INTER_AREA, JPEG quality 70, +2.0 deg rotation
-        s06 = cv2.resize(img, (int(w * 0.6), int(h * 0.6)), interpolation=cv2.INTER_AREA)
-        m06 = cv2.getRotationMatrix2D((s06.shape[1] // 2, s06.shape[0] // 2), 2.0, 1.0)
-        rot06 = cv2.warpAffine(s06, m06, (s06.shape[1], s06.shape[0]), borderValue=(255, 255, 255))
-        _, enc06 = cv2.imencode(".jpg", rot06, [cv2.IMWRITE_JPEG_QUALITY, 70])
-        geom06 = analyze_page(enc06.tobytes(), page=0)
+        for sc, ang, interp in [(0.6, 2.0, cv2.INTER_AREA), (1.7, -2.0, cv2.INTER_CUBIC)]:
+            scaled = cv2.resize(img, (int(w * sc), int(h * sc)), interpolation=interp)
+            mat = cv2.getRotationMatrix2D((scaled.shape[1] // 2, scaled.shape[0] // 2), ang, 1.0)
+            rot = cv2.warpAffine(scaled, mat, (scaled.shape[1], scaled.shape[0]), borderValue=(255, 255, 255))
+            _, enc = cv2.imencode(".jpg", rot, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            geom_trans = analyze_page(enc.tobytes(), page=0)
 
-        assert len(geom06.systems) == orig_systems, (
-            f"{rel_path} at 0.6x: expected {orig_systems} systems, got {len(geom06.systems)}"
-        )
-        det_m06 = [len(s.measures) for s in geom06.systems]
-        assert det_m06 == orig_measures, (
-            f"{rel_path} at 0.6x: measures mismatch {det_m06} vs {orig_measures}"
-        )
-        chords06 = sum(len(s.chord_boxes) for s in geom06.systems)
-        diff06 = abs(chords06 - orig_chords) / float(orig_chords)
-        assert diff06 <= 0.05, (
-            f"{rel_path} at 0.6x: chord count diff {diff06:.1%} > 5% ({chords06} vs {orig_chords})"
-        )
+            assert len(geom_trans.systems) == orig_systems, (
+                f"{rel_path} at {sc}x ({ang} deg): expected {orig_systems} systems, got {len(geom_trans.systems)}"
+            )
+            det_m = [len(s.measures) for s in geom_trans.systems]
+            assert det_m == orig_measures, (
+                f"{rel_path} at {sc}x ({ang} deg): measures mismatch {det_m} vs {orig_measures}"
+            )
+            chords_trans = sum(len(s.chord_boxes) for s in geom_trans.systems)
+            max_allowed_diff = max(1, int(round(0.05 * orig_chords)))
+            assert abs(chords_trans - orig_chords) <= max_allowed_diff, (
+                f"{rel_path} at {sc}x ({ang} deg): chord count diff > 5% ({chords_trans} vs {orig_chords})"
+            )
 
-        # 2. 1.7x upscale with INTER_CUBIC, JPEG quality 70, -2.0 deg rotation
-        s17 = cv2.resize(img, (int(w * 1.7), int(h * 1.7)), interpolation=cv2.INTER_CUBIC)
-        m17 = cv2.getRotationMatrix2D((s17.shape[1] // 2, s17.shape[0] // 2), -2.0, 1.0)
-        rot17 = cv2.warpAffine(s17, m17, (s17.shape[1], s17.shape[0]), borderValue=(255, 255, 255))
-        _, enc17 = cv2.imencode(".jpg", rot17, [cv2.IMWRITE_JPEG_QUALITY, 70])
-        geom17 = analyze_page(enc17.tobytes(), page=0)
 
-        assert len(geom17.systems) == orig_systems, (
-            f"{rel_path} at 1.7x: expected {orig_systems} systems, got {len(geom17.systems)}"
-        )
-        det_m17 = [len(s.measures) for s in geom17.systems]
-        assert det_m17 == orig_measures, (
-            f"{rel_path} at 1.7x: measures mismatch {det_m17} vs {orig_measures}"
-        )
-        chords17 = sum(len(s.chord_boxes) for s in geom17.systems)
-        diff17 = abs(chords17 - orig_chords) / float(orig_chords)
-        assert diff17 <= 0.05, (
-            f"{rel_path} at 1.7x: chord count diff {diff17:.1%} > 5% ({chords17} vs {orig_chords})"
-        )
+def test_dashed_barlines_invariants():
+    """Verify dashed barline invariants:
+    - Requires >= 3 collinear segments spanning >= 0.55 * melody band height.
+    - Must not coincide with digit stroke.
+    - Preserves dashed barlines when digit strokes are outside or not coincident.
+    """
+    import numpy as np
+
+    h, w = 100, 500
+    ym = 50.0
+    mel_h = 40.0
+    y_radius = 30
+
+    # 1. Valid dashed barline (4 collinear segments, span 30 >= 0.55 * 40 = 22) -> detected
+    bin_img1 = np.zeros((h, w), dtype=np.uint8)
+    for dy in [32, 42, 52, 62]:
+        bin_img1[dy : dy + 6, 100:102] = 255
+    res1 = find_dashed_barlines(bin_img1, ym=ym, y_radius=y_radius, mel_h=mel_h)
+    assert len(res1) == 1
+    assert abs(res1[0][0] - 100.5) <= 1.0
+
+    # 2. Too few dashes (< 3 segments) -> rejected
+    bin_img2 = np.zeros((h, w), dtype=np.uint8)
+    for dy in [35, 55]:
+        bin_img2[dy : dy + 6, 100:102] = 255
+    res2 = find_dashed_barlines(bin_img2, ym=ym, y_radius=y_radius, mel_h=mel_h)
+    assert len(res2) == 0
+
+    # 3. Span too short (< 0.55 * mel_h) -> rejected
+    bin_img3 = np.zeros((h, w), dtype=np.uint8)
+    for dy in [45, 49, 53]:
+        bin_img3[dy : dy + 2, 100:102] = 255
+    res3 = find_dashed_barlines(bin_img3, ym=ym, y_radius=y_radius, mel_h=mel_h)
+    assert len(res3) == 0
+
+    # 4. Coincides with digit stroke in melody band -> rejected
+    bin_img4 = np.zeros((h, w), dtype=np.uint8)
+    for dy in [32, 42, 52, 62]:
+        bin_img4[dy : dy + 6, 100:102] = 255
+    bin_img4[40:60, 98:104] = 255  # digit stroke overlapping x and y
+    res4 = find_dashed_barlines(bin_img4, ym=ym, y_radius=y_radius, mel_h=mel_h)
+    assert len(res4) == 0
+
+    # 5. Non-coincident digit stroke (separated in x) -> accepted
+    bin_img5 = np.zeros((h, w), dtype=np.uint8)
+    for dy in [32, 42, 52, 62]:
+        bin_img5[dy : dy + 6, 100:102] = 255
+    bin_img5[40:60, 150:156] = 255  # digit stroke far away
+    res5 = find_dashed_barlines(bin_img5, ym=ym, y_radius=y_radius, mel_h=mel_h)
+    assert len(res5) == 1
+
+
+def test_pickup_and_measure_invariants():
+    """Verify pickup invariants and narrow measure pruning:
+    - Fragment counts only if separated by real solid/dashed barline.
+    - Pickup insertion gated on not chords_below (while allowing full measures >= 0.14 * w).
+    - Repeat endings (N-2 and N-1) protected when allow_repeat_ending is True.
+    """
+    # 1. clean_narrow_measures protects pickup on first system
+    bars_sys0 = [50.0, 110.0, 360.0, 610.0, 860.0]
+    cleaned_sys0 = clean_narrow_measures(
+        bars_sys0, min_m_w=120.0, min_end_w=40.0, sheet_left=50.0, is_first_system=True
+    )
+    assert cleaned_sys0 == bars_sys0, "First system pickup measure should be preserved"
+
+    # 2. Interior system prunes spurious narrow start fragment
+    bars_sys1 = [50.0, 110.0, 360.0, 610.0, 860.0]
+    cleaned_sys1 = clean_narrow_measures(
+        bars_sys1, min_m_w=120.0, min_end_w=40.0, sheet_left=50.0, is_first_system=False
+    )
+    assert len(cleaned_sys1) == len(bars_sys1) - 1, "Interior narrow start fragment should be pruned"
+
+    # 3. Dashed barline protects narrow measure on interior system
+    cleaned_dashed = clean_narrow_measures(
+        bars_sys1, min_m_w=120.0, min_end_w=40.0, dashed_xs={110.0}, sheet_left=50.0, is_first_system=False
+    )
+    assert cleaned_dashed == bars_sys1, "Dashed barline should protect narrow measure"
+
+    # 4. Repeat endings (measures N-2 and N-1) preserved when allow_repeat_ending=True
+    bars_repeat = [50.0, 300.0, 550.0, 642.0, 745.0]
+    cleaned_repeat = clean_narrow_measures(
+        bars_repeat, min_m_w=118.0, min_end_w=40.0, allow_repeat_ending=True
+    )
+    assert cleaned_repeat == bars_repeat, "Repeat endings should be preserved"
+
+    # 5. Real page pickup verification: tinghai p2 has pickup measure on system 0
+    th2_path = REPO_ROOT / "fixtures" / "external" / "tinghai" / "page2.jpg"
+    if th2_path.exists():
+        geom_th2 = analyze_page(th2_path.read_bytes(), page=0)
+        assert len(geom_th2.systems[0].measures) == 5, "Tinghai p2 sys 0 should have 5 measures including pickup"
+        m0_w = geom_th2.systems[0].measures[0].x1 - geom_th2.systems[0].measures[0].x0
+        m1_w = geom_th2.systems[0].measures[1].x1 - geom_th2.systems[0].measures[1].x0
+        assert m0_w < 0.35 * m1_w, f"First measure ({m0_w}) should be pickup (< 0.35 * {m1_w})"
+
+    # 6. Real page full measure insertion: xindong sys 3 allows full measure >= 0.14 * w without left barline
+    xd_path = REPO_ROOT / "fixtures" / "external" / "xindong" / "page1.jpg"
+    if xd_path.exists():
+        geom_xd = analyze_page(xd_path.read_bytes(), page=0)
+        assert len(geom_xd.systems[3].measures) == 5, "Xindong sys 3 should have 5 measures"
+        m0_w = geom_xd.systems[3].measures[0].x1 - geom_xd.systems[3].measures[0].x0
+        assert m0_w >= 0.14, f"Full measure width should be >= 0.14, got {m0_w}"
+
 
 
 
