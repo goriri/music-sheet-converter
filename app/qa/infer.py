@@ -746,8 +746,16 @@ def run_escalation_ladder(
                         target_m.chords.sort(key=lambda c: c.beat)
                     elif dec.target_type == "chord":
                         if target_m.chords:
-                            target_m.chords[0].raw = dec.new_value
-                            target_m.chords[0].confidence = dec.detail.get("confidence", 0.88)
+                            target_c = None
+                            if item.original_value:
+                                for c in target_m.chords:
+                                    if c.raw == item.original_value:
+                                        target_c = c
+                                        break
+                            if target_c is None:
+                                target_c = target_m.chords[0]
+                            target_c.raw = dec.new_value
+                            target_c.confidence = dec.detail.get("confidence", 0.88)
                         else:
                             target_m.chords.append(
                                 ChordSymbol(

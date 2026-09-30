@@ -85,12 +85,13 @@ from app.qa.priors import (
     progression_plausibility,
     score_candidate,
 )
-from app.theory.chords import parse_chord
+from app.theory.chords import clean_raw_chord, parse_chord, parse_letter_chord
 from app.theory.keys import key_name_to_pc
 
 logger = logging.getLogger(__name__)
 
 BASS_ONLY_PATTERN = re.compile(r"^/[#b♯♭]?[1-7]$")
+BASS_ONLY_LETTER_PATTERN = re.compile(r"^/[A-Ga-g][b#♭♯]?$")
 NON_CHORD_VOICING_PATTERN = re.compile(r"^(?:0|\d{3,})$")
 
 MAX_MELODY_REREADS_PER_PAGE: int = 4
@@ -98,15 +99,24 @@ MAX_MELODY_REREADS_TOTAL: int = 8
 PAGE_MELODY_BUDGET_S: float = 10.0
 
 
-def is_valid_chord_grammar(raw: str) -> bool:
+def is_valid_chord_grammar(raw: str, notation: str = "number") -> bool:
     """Check whether raw chord text is grammatically valid.
 
-    Supports standard Taiwanese chord notation via parse_chord,
-    as well as bass-only slash changes (e.g. '/5', '/#4', '/b7').
+    Supports standard Taiwanese chord notation via parse_chord for number notation,
+    parse_letter_chord for letter notation, as well as bass-only slash changes.
     """
     if not raw or not raw.strip():
         return False
     r = raw.strip()
+    if notation == "letter":
+        if BASS_ONLY_LETTER_PATTERN.match(r):
+            return True
+        try:
+            parse_letter_chord(r)
+            return True
+        except Exception:
+            return False
+
     if BASS_ONLY_PATTERN.match(r):
         return True
     try:
@@ -114,6 +124,128 @@ def is_valid_chord_grammar(raw: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def normalize_chord_accidental_prefix(raw: str) -> str:
+    """Normalize postfix accidental on root degree to prefix: '7badd9' -> 'b7add9', '6b/4m' -> 'b6/4m'."""
+    if not raw or not isinstance(raw, str):
+        return ""
+    r = raw.strip()
+    if r.startswith("b4m"):
+        r = "4m" + r[3:]
+    m = re.match(r"^([1-7])([b#♭♯])(.*)$", r)
+    if m:
+        deg, acc, rest = m.groups()
+        std_acc = "b" if acc in ("b", "♭") else "#"
+        return f"{std_acc}{deg}{rest}"
+    return r
+
+
+def is_non_diatonic_bare_degree(raw: str) -> bool:
+    """Check if chord has a non-diatonic major extension that requires accidental scrutiny in number notation.
+
+    Examples:
+    - Degree 7: '7add9', '7maj7', '7(2)', '7sus', '7sus4' (bVII extensions)
+    - Degree 6: '6add9', '6/4m', '6maj7' (bVI extensions)
+    - Degree 3: '3add9', '3maj7'
+    - Degree 2: '2add9', '2maj7'
+    """
+    if not raw or not isinstance(raw, str):
+        return False
+    r = raw.strip()
+    if r.startswith(("b", "#", "♭", "♯")):
+        return False
+    if re.match(r"^7(?:add9|maj7|\(2\)|sus4?)", r):
+        return True
+    if re.match(r"^6(?:add9|maj7|\(2\)|/4m)", r):
+        return True
+    if re.match(r"^3(?:add9|maj7|\(2\))", r):
+        return True
+    if re.match(r"^2(?:add9|maj7|\(2\))", r):
+        return True
+    return False
+
+
+def is_candidate_for_flat_five(raw: str, crop_raw: Optional[str] = None) -> bool:
+    """Check if chord is a realistic candidate for a dropped superscript '-5' or '(b5)'."""
+    if not raw or not isinstance(raw, str):
+        return False
+    r = raw.strip()
+    c_r = (crop_raw or "").strip()
+    if any(k in r for k in ["-5", "b5", "(-5)", "(b5)", "♭5"]):
+        return False
+    # If crop_raw has flat five, it's a candidate to verify
+    if any(k in c_r for k in ["-5", "b5", "(-5)", "(b5)", "♭5"]):
+        return True
+    if "m7" not in r:
+        return False
+    # 1. Degree 7 minor 7th is naturally half-diminished (viiø)
+    if re.search(r"\b7m7\b", r) or r.startswith("7m7"):
+        return True
+    # 2. Slashed minor 7ths with non-diatonic root or slash (e.g. 'b6/2m7', '2m7/b6')
+    if "/" in r and re.search(r"[#b♭♯]", r):
+        return True
+    # 3. Non-diatonic roots (e.g. '#4m7', 'b3m7', 'b7m7', 'b6m7', 'b2m7', '#1m7')
+    if re.search(r"[#b♭♯][1-7]m7", r):
+        return True
+    return False
+
+
+class BatchedAccidentalItem(BaseModel):
+    item_index: int = Field(description="1-based index of the chord crop")
+    has_flat: bool = Field(False, description="True if a flat symbol (b or ♭) is printed before or above-left of root number")
+    has_sharp: bool = Field(False, description="True if a sharp symbol (# or ♯) is printed before or above-left of root number")
+    has_flat_five: bool = Field(False, description="True if a superscript '-5', '(b5)', or 'b5' is printed after 'm7'")
+    full_chord_text: str = Field("", description="The complete transcribed chord symbol")
+
+
+class BatchedAccidentalResponse(BaseModel):
+    readings: list[BatchedAccidentalItem] = Field(default_factory=list)
+
+
+def _scrutinize_system_accidents(
+    items: list[dict[str, Any]],
+    timeout_s: float = 18.0,
+) -> dict[int, BatchedAccidentalItem]:
+    """Scrutinize a batch of chord crops from a system for prefix accidentals or flat-fives in one call."""
+    if not items:
+        return {}
+    images = [it["crop_bytes"] for it in items]
+    prompt_lines = [
+        f"You are given {len(images)} zoomed chord symbol crop images from a Taiwanese band chart system row, numbered 1 to {len(images)} in order.",
+        "For each image, inspect closely:",
+        "1. Is there a small prefix flat ('b' or '♭') or sharp ('#') before or above-left of the root number (e.g. 'b7add9', 'b6/4m')?",
+        "2. For minor 7th chords ('m7'), is there a small superscript '-5', '(b5)', or 'b5' after 'm7' (indicating half-diminished, e.g. 'b6/2m7-5', '6m7-5', '2m7-5')?",
+        "Transcribe the complete correct chord symbol verbatim.",
+    ]
+    prompt = "\n".join(prompt_lines)
+    try:
+        resp = ask_json(
+            prompt=prompt,
+            schema=BatchedAccidentalResponse,
+            images=images,
+            role="reader",
+            timeout_s=timeout_s,
+        )
+        res: dict[int, BatchedAccidentalItem] = {}
+        for r in resp.readings:
+            if r.item_index and r.item_index > 0:
+                res[r.item_index] = r
+        if not res and resp.readings:
+            for i, r in enumerate(resp.readings, 1):
+                res[i] = r
+        return res
+    except Exception as exc:
+        logger.warning("Batched accidental check failed: %s", exc)
+        return {}
+
+
+class AccidentalCheckReading(BaseModel):
+    has_flat: bool = Field(False, description="True if a flat symbol (b or ♭) is printed before or above-left of the root number")
+    has_sharp: bool = Field(False, description="True if a sharp symbol (# or ♯) is printed before or above-left of the root number")
+    has_flat_five: bool = Field(False, description="True if a small superscript '-5', '(b5)', or 'b5' is printed after 'm7' (half-diminished chord)")
+    full_chord_text: str = Field("", description="The complete chord symbol including any flat/sharp prefix or superscript extension")
+
 
 
 # ---------------------------------------------------------------------------
@@ -336,18 +468,23 @@ def resolve_chord_beat_geo(
     return beat_geo, True
 
 
-def _crop_chord_box(img_bgr: np.ndarray, chord: ChordSymbol) -> Optional[bytes]:
-    """Extract a tight image crop of a chord box based on its normalized bounding box."""
+def _crop_chord_box(
+    img_bgr: np.ndarray,
+    chord: ChordSymbol,
+    pad_left: float = 0.020,
+    pad_top: float = 0.004,
+    pad_right: float = 0.008,
+    pad_bottom: float = 0.005,
+) -> Optional[bytes]:
+    """Extract an image crop of a chord box based on its normalized bounding box."""
     if not chord.bbox:
         return None
     h, w = img_bgr.shape[:2]
     x0, y0, x1, y1 = chord.bbox
-    pad_x = 0.005
-    pad_y = 0.005
-    y_start = int(max(0.0, y0 - pad_y) * h)
-    y_end = int(min(1.0, y1 + pad_y) * h)
-    x_start = int(max(0.0, x0 - pad_x) * w)
-    x_end = int(min(1.0, x1 + pad_x) * w)
+    y_start = int(max(0.0, y0 - pad_top) * h)
+    y_end = int(min(1.0, y1 + pad_bottom) * h)
+    x_start = int(max(0.0, x0 - pad_left) * w)
+    x_end = int(min(1.0, x1 + pad_right) * w)
 
     if y_end <= y_start or x_end <= x_start:
         return None
@@ -358,6 +495,7 @@ def _crop_chord_box(img_bgr: np.ndarray, chord: ChordSymbol) -> Optional[bytes]:
 
     _, buf = cv2.imencode(".jpg", c_img)
     return buf.tobytes()
+
 
 
 def _crop_measure(img_bgr: np.ndarray, system: System, measure: Measure) -> Optional[bytes]:
@@ -659,32 +797,37 @@ def _transcribe_page_row(
 
 
 
-def _read_page_crops(page_num: int, items: list[dict[str, Any]]) -> dict[tuple[int, int], str]:
-    """Read all chord box crops for a single page in one Gemini Flash call."""
-    if not items:
+def _read_crop_chunk(
+    page_num: int,
+    chunk_items: list[dict[str, Any]],
+    chunk_idx: int,
+) -> dict[tuple[int, int], str]:
+    """Read a small chunk of chord crops for a page to avoid timeouts and 502s."""
+    if not chunk_items:
         return {}
-    page_crops = [it["crop_bytes"] for it in items]
+    chunk_crops = [it["crop_bytes"] for it in chunk_items]
     prompt = (
-        f"You are given {len(page_crops)} chord box images from a Taiwanese band chart (page {page_num + 1}), "
-        f"numbered 1 to {len(page_crops)} in order. "
+        f"You are given {len(chunk_crops)} chord box images from a Taiwanese band chart (page {page_num + 1}, part {chunk_idx + 1}), "
+        f"numbered 1 to {len(chunk_crops)} in order. "
         "Transcribe the chord symbol inside each box verbatim using Taiwanese number notation "
         "(e.g. '1(2)', '5/7', '2m7', '5m/7b', '67/1#', '6m7-5', '57sus', '4M7', '17/7b', "
-        "'3m/7', '6b', '5sus', '5', '57', '1/3', '4', '2m7/5', '6m7/5', '7b'). "
+        "'3m/7', '6b', '5sus', '5', '57', '1/3', '4', '2m7/5', '6m7/5', '7b', 'b6/2m7-5', '2m7-5'). "
+        "Inspect for superscript '-5' or '(b5)' after 'm7' (half-diminished chords, e.g. 'b6/2m7-5', '6m7-5', '2m7-5'). "
         "Do NOT convert to Western letter chords (never C, Dm, etc.). Exclude 'PN' or 'EG'."
     )
     try:
         batch_resp = ask_json(
             prompt=prompt,
             schema=PageCropReadings,
-            images=page_crops,
+            images=chunk_crops,
             role="reader",
-            timeout_s=60.0,
+            timeout_s=35.0,
         )
         res: dict[tuple[int, int], str] = {}
         idx_to_reading = {
             r.crop_index: r.chord.strip() for r in batch_resp.readings if r.crop_index
         }
-        for i, it in enumerate(items, 1):
+        for i, it in enumerate(chunk_items, 1):
             chord_str = idx_to_reading.get(i)
             if chord_str:
                 res[it["key"]] = chord_str
@@ -695,8 +838,31 @@ def _read_page_crops(page_num: int, items: list[dict[str, Any]]) -> dict[tuple[i
                     res[it["key"]] = clean_c
         return res
     except Exception as exc:
-        logger.warning("Crop re-read failed on page %d: %s", page_num + 1, exc)
+        logger.warning("Crop chunk re-read failed on page %d part %d: %s", page_num + 1, chunk_idx + 1, exc)
         return {}
+
+
+def _read_page_crops(page_num: int, items: list[dict[str, Any]]) -> dict[tuple[int, int], str]:
+    """Read all chord box crops for a single page using chunked parallel calls."""
+    if not items:
+        return {}
+    CHUNK_SIZE = 22
+    if len(items) <= CHUNK_SIZE:
+        return _read_crop_chunk(page_num, items, 0)
+
+    chunks = [items[i:i + CHUNK_SIZE] for i in range(0, len(items), CHUNK_SIZE)]
+    res: dict[tuple[int, int], str] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(chunks))) as executor:
+        futs = [
+            executor.submit(_read_crop_chunk, page_num, chunk, idx)
+            for idx, chunk in enumerate(chunks)
+        ]
+        for f in futs:
+            try:
+                res.update(f.result())
+            except Exception as exc:
+                logger.warning("Parallel crop chunk execution failed on page %d: %s", page_num + 1, exc)
+    return res
 
 
 def _finalize_undecided(item: dict[str, Any], issues: list[QualityIssue]) -> None:
@@ -708,7 +874,7 @@ def _finalize_undecided(item: dict[str, Any], issues: list[QualityIssue]) -> Non
     prior_full = item.get("prior_full", 0.5)
 
     top_cand, top_score = cand_scores[0]
-    c.alternatives = [x[0] for x in cand_scores[1:4]]
+    c.alternatives = [normalize_chord_accidental_prefix(x[0]) for x in cand_scores[1:4]]
 
     is_full_valid = is_valid_chord_grammar(orig_raw)
 
@@ -812,7 +978,7 @@ def _arbitrate_page(
             if dec and dec.chosen_chord:
                 chosen = dec.chosen_chord.strip()
                 c.confidence = dec.confidence
-                c.alternatives = [x[0] for x in it["cand_scores"] if x[0] != chosen][:3]
+                c.alternatives = [normalize_chord_accidental_prefix(x[0]) for x in it["cand_scores"] if x[0] != chosen][:3]
 
                 if chosen != orig_raw and dec.confidence >= 0.70:
                     c.raw = chosen
@@ -895,6 +1061,41 @@ def verify_sheet(
         arr = np.frombuffer(p_bytes, np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         cv2_pages.append(img)
+
+    # Filter invalid or roadmap KeyChanges
+    filtered_kcs = []
+    for kc in verified.key_changes:
+        is_roadmap = bool(re.search(r"主歌|副歌|桥段|前奏|间奏|尾奏", kc.raw))
+        if kc.semitones == 0 or is_roadmap:
+            new_issues.append(
+                QualityIssue(
+                    stage="omr",
+                    measure_index=kc.at_measure,
+                    severity="auto_fixed",
+                    code="key_change_filtered",
+                    message=f"已过滤非调性或结构标记转调: '{kc.raw}' (半音={kc.semitones})",
+                    detail={"raw": kc.raw, "semitones": kc.semitones, "roadmap": is_roadmap},
+                )
+            )
+        else:
+            filtered_kcs.append(kc)
+    verified.key_changes = filtered_kcs
+
+    # Verify header.chord_notation consistency
+    num_num = 0
+    num_let = 0
+    for s in verified.systems:
+        for m in s.measures:
+            for c in m.chords:
+                clean_r = clean_raw_chord(c.raw)
+                if re.match(r"^[b#♭♯]?[1-7]", clean_r):
+                    num_num += 1
+                elif re.match(r"^[A-Ga-g]", clean_r):
+                    num_let += 1
+    if num_num > num_let and verified.header.chord_notation != "number":
+        verified.header.chord_notation = "number"
+    elif num_let > num_num and verified.header.chord_notation != "letter":
+        verified.header.chord_notation = "letter"
 
     # Spawn web evidence reference lookup in parallel with first verify pass
     web_future = None
@@ -1104,6 +1305,7 @@ def verify_sheet(
         m.index: parse_melody(m.melody, beats=m.beats) for m in all_measures
     }
 
+
     # 2. Parallel Vision Phase: Row Transcription & Crop Re-Reading concurrently
     page_transcription_results: list[tuple[int, list[System], dict[int, list[RowTranscribedChord]], dict[int, int]]] = []
     crop_readings_map: dict[tuple[int, int], str] = {}
@@ -1304,6 +1506,47 @@ def verify_sheet(
                         )
                     )
 
+    # Rule: On charts whose chords are boxed (the geometry says so), drop unboxed extras
+    # directly without triggering new LLM re-reads or crop reads.
+    num_boxed = sum(
+        1 for s in verified.systems for m_i in s.measures for c in m_i.chords if c.bbox is not None
+    )
+    num_total_chords = sum(len(m_i.chords) for s in verified.systems for m_i in s.measures)
+    is_boxed_chart = (
+        verified.layout_source == "cv"
+        and num_boxed >= 5
+        and (num_boxed / max(1, num_total_chords)) >= 0.5
+    )
+    if is_boxed_chart:
+        for s in verified.systems:
+            for m in s.measures:
+                retained_chords: list[ChordSymbol] = []
+                for c in m.chords:
+                    raw_c = c.raw.strip()
+                    if c.bbox is not None:
+                        retained_chords.append(c)
+                        continue
+
+                    # Unboxed token on boxed chart: drop non-chord digits/cue patterns and non-chord tokens directly
+                    if NON_CHORD_VOICING_PATTERN.match(raw_c) or not is_valid_chord_grammar(raw_c, notation=verified.header.chord_notation):
+                        verified.warnings.append(
+                            f"[omr_verify] Dropped unboxed chord '{c.raw}' in measure {m.index + 1}: non-chord token not in box"
+                        )
+                        new_issues.append(
+                            QualityIssue(
+                                stage="omr",
+                                measure_index=m.index,
+                                severity="info",
+                                code="non_chord_token_dropped",
+                                message=f"第{m.index + 1}小节非和弦记号 '{c.raw}' 未处于和弦框内，已自动丢弃",
+                                detail={"raw": c.raw, "beat": c.beat},
+                            )
+                        )
+                    else:
+                        # Genuine chord (e.g. '1', '5', '5m7', '1/3') whose box was missed by layout CV
+                        retained_chords.append(c)
+                m.chords = retained_chords
+
     # 4. Visual Row-Level Chord Transcription & Sequence Alignment
     row_aligned_restored_measures: set[int] = set()
     m_tc_map_global: dict[int, list[RowTranscribedChord]] = {}
@@ -1488,30 +1731,6 @@ def verify_sheet(
                                 detail={"measure": m.index, "candidate": cand_c, "beat": cand_b},
                             )
                         )
-    # Drop non-chord voicing tokens outside closed boxes on boxed charts
-    is_boxed_chart = any(
-        c.bbox is not None for s in verified.systems for m_i in s.measures for c in m_i.chords
-    )
-    if is_boxed_chart:
-        for s in verified.systems:
-            for m in s.measures:
-                retained_chords = []
-                for c in m.chords:
-                    raw_c = c.raw.strip()
-                    if NON_CHORD_VOICING_PATTERN.match(raw_c) and c.bbox is None:
-                        new_issues.append(
-                            QualityIssue(
-                                stage="omr",
-                                measure_index=m.index,
-                                severity="info",
-                                code="non_chord_token_dropped",
-                                message=f"第{m.index + 1}小节非和弦记号 '{c.raw}' 未处于和弦框内，已自动丢弃",
-                                detail={"raw": c.raw, "beat": c.beat},
-                            )
-                        )
-                    else:
-                        retained_chords.append(c)
-                m.chords = retained_chords
 
     # 2a-2. Melody Beat-Sum Check (bounded concurrent re-read with per-page budget, skip if barline mismatch)
     systems_with_barline_mismatch: set[tuple[int, int]] = set()
@@ -1949,6 +2168,123 @@ def verify_sheet(
     undecided_chords: list[dict[str, Any]] = []
 
     for s in verified.systems:
+        p_idx = s.page
+        img_bgr = cv2_pages[p_idx] if p_idx < len(cv2_pages) else None
+
+        # System-level batched scrutiny for accidental / flat-five candidates
+        system_scrutiny_cands: list[dict[str, Any]] = []
+        if can_use_llm and img_bgr is not None and verified.header.chord_notation == "number":
+            for m in s.measures:
+                for c_idx, c in enumerate(m.chords):
+                    key = (m.index, c_idx)
+                    raw_full = c.raw.strip()
+                    raw_crop = crop_readings_map.get(key, "").strip()
+
+                    # Skip if already has prefix accidental or flat-five
+                    has_acc_prefix = raw_full.startswith(("b", "#", "♭", "♯")) or raw_crop.startswith(("b", "#", "♭", "♯"))
+                    has_f5 = any(k in raw_full for k in ["-5", "b5", "(-5)", "(b5)", "♭5"]) or any(k in raw_crop for k in ["-5", "b5", "(-5)", "(b5)", "♭5"])
+
+                    is_bare_acc = is_non_diatonic_bare_degree(raw_full) and not has_acc_prefix
+                    is_f5_cand = is_candidate_for_flat_five(raw_full, raw_crop) and not has_f5
+
+                    if (is_bare_acc or is_f5_cand) and c.bbox:
+                        crop_bytes = _crop_chord_box(img_bgr, c, pad_left=0.030, pad_top=0.015, pad_right=0.035, pad_bottom=0.010)
+                        if crop_bytes:
+                            system_scrutiny_cands.append({
+                                "chord": c,
+                                "measure": m,
+                                "c_idx": c_idx,
+                                "raw_full": raw_full,
+                                "raw_crop": raw_crop,
+                                "crop_bytes": crop_bytes,
+                                "is_bare_acc": is_bare_acc,
+                                "is_f5_cand": is_f5_cand,
+                            })
+
+        # Cap to at most 2 candidate chords per system to guarantee low latency
+        if len(system_scrutiny_cands) > 2:
+            system_scrutiny_cands = system_scrutiny_cands[:2]
+
+        if system_scrutiny_cands:
+            scrutiny_readings = _scrutinize_system_accidents(system_scrutiny_cands)
+            for idx, cand in enumerate(system_scrutiny_cands, 1):
+                c = cand["chord"]
+                m = cand["measure"]
+                raw_full = cand["raw_full"]
+                r_item = scrutiny_readings.get(idx)
+
+                if cand["is_bare_acc"]:
+                    acc_detected = False
+                    if r_item and (r_item.has_flat or (r_item.full_chord_text and r_item.full_chord_text.startswith(("b", "♭")))):
+                        orig_raw = c.raw
+                        norm_acc = f"b{raw_full}"
+                        if is_valid_chord_grammar(norm_acc, notation="number"):
+                            c.raw = norm_acc
+                            c.confidence = 0.95
+                            new_issues.append(
+                                QualityIssue(
+                                    stage="omr",
+                                    measure_index=m.index,
+                                    severity="auto_fixed",
+                                    code="chord_corrected",
+                                    message=f"第{m.index + 1}小节和弦由 '{orig_raw}' 更正为 '{norm_acc}'（检测到前置降号）",
+                                    detail={"original": orig_raw, "corrected": norm_acc, "evidence": ["zoomed_accidental"]},
+                                )
+                            )
+                            acc_detected = True
+                    elif r_item and (r_item.has_sharp or (r_item.full_chord_text and r_item.full_chord_text.startswith(("#", "♯")))):
+                        orig_raw = c.raw
+                        norm_acc = f"#{raw_full}"
+                        if is_valid_chord_grammar(norm_acc, notation="number"):
+                            c.raw = norm_acc
+                            c.confidence = 0.95
+                            new_issues.append(
+                                QualityIssue(
+                                    stage="omr",
+                                    measure_index=m.index,
+                                    severity="auto_fixed",
+                                    code="chord_corrected",
+                                    message=f"第{m.index + 1}小节和弦由 '{orig_raw}' 更正为 '{norm_acc}'（检测到前置升号）",
+                                    detail={"original": orig_raw, "corrected": norm_acc, "evidence": ["zoomed_accidental"]},
+                                )
+                            )
+                            acc_detected = True
+
+                    if not acc_detected and c.confidence < 0.8:
+                        c.confidence = 0.50
+                        c.alternatives = [f"b{raw_full}", f"#{raw_full}"]
+                        new_issues.append(
+                            QualityIssue(
+                                stage="omr",
+                                measure_index=m.index,
+                                severity="needs_review",
+                                code="chord_plausibility_warning",
+                                message=f"第{m.index + 1}小节和弦 '{raw_full}' 为非常规自然大和弦，请核对是否漏读前置升降号（备选：{c.alternatives}）",
+                                detail={"raw": raw_full, "alternatives": c.alternatives},
+                            )
+                        )
+
+                if cand["is_f5_cand"]:
+                    if r_item and (r_item.has_flat_five or (r_item.full_chord_text and any(k in r_item.full_chord_text for k in ["-5", "b5", "♭5"]))):
+                        orig_raw = c.raw
+                        if "m7" in c.raw and "-5" not in c.raw:
+                            norm_ff = re.sub(r"m7", "m7-5", c.raw, count=1)
+                        else:
+                            norm_ff = f"{c.raw}-5"
+                        if is_valid_chord_grammar(norm_ff, notation="number"):
+                            c.raw = norm_ff
+                            c.confidence = 0.95
+                            new_issues.append(
+                                QualityIssue(
+                                    stage="omr",
+                                    measure_index=m.index,
+                                    severity="auto_fixed",
+                                    code="chord_corrected",
+                                    message=f"第{m.index + 1}小节和弦由 '{orig_raw}' 更正为 '{norm_ff}'（检测到上标 -5 减五度）",
+                                    detail={"original": orig_raw, "corrected": norm_ff, "evidence": ["zoomed_flat_five"]},
+                                )
+                            )
+
         for m in s.measures:
             # Check 2nd chord beat alignment
             if len(m.chords) == 2:
@@ -1989,24 +2325,34 @@ def verify_sheet(
                 m_notes = pm.notes if pm else []
                 dur = m.beats - c.beat + 1.0 if c_idx == len(m.chords) - 1 else 2.0
 
-                is_full_valid = is_valid_chord_grammar(raw_full)
-                is_crop_valid = bool(raw_crop and is_valid_chord_grammar(raw_crop))
+                notation = verified.header.chord_notation
+                is_full_valid = is_valid_chord_grammar(raw_full, notation=notation)
+                is_crop_valid = bool(raw_crop and is_valid_chord_grammar(raw_crop, notation=notation))
 
                 # 4a. Concordance Check
                 if is_crop_valid and raw_crop == raw_full:
                     c.confidence = 0.95
                     continue
 
+                if c.confidence >= 0.95 and is_full_valid:
+                    continue
+
                 # 4b. Candidate Generation and Prior Scoring
                 cand_pool: set[str] = set()
                 cand_pool.update(generate_candidates(raw_full))
+                for g_c in list(cand_pool):
+                    cand_pool.add(normalize_chord_accidental_prefix(g_c))
                 if is_crop_valid:
                     cand_pool.update(generate_candidates(raw_crop))
+                    for g_c in list(cand_pool):
+                        cand_pool.add(normalize_chord_accidental_prefix(g_c))
                     cand_pool.add(raw_crop)
+                    cand_pool.add(normalize_chord_accidental_prefix(raw_crop))
                 if is_full_valid:
                     cand_pool.add(raw_full)
+                    cand_pool.add(normalize_chord_accidental_prefix(raw_full))
 
-                valid_cands = [cand for cand in cand_pool if is_valid_chord_grammar(cand)]
+                valid_cands = [cand for cand in cand_pool if is_valid_chord_grammar(cand, notation=notation)]
 
                 if not valid_cands:
                     c.confidence = 0.2
@@ -2054,11 +2400,11 @@ def verify_sheet(
                 # 4c. Auto-fix Decision when raw_full is invalid
                 if not is_full_valid:
                     cand_of_raw = set(generate_candidates(raw_full))
-                    if is_crop_valid and top_cand == raw_crop and (top_cand in cand_of_raw or len(cand_of_raw) > 0):
+                    if is_crop_valid and (top_cand == raw_crop or top_cand in cand_of_raw or len(cand_of_raw) > 0):
                         orig_raw = raw_full
                         c.raw = top_cand
                         c.confidence = 0.88
-                        c.alternatives = [x[0] for x in cand_scores[1:4]]
+                        c.alternatives = [normalize_chord_accidental_prefix(x[0]) for x in cand_scores[1:4]]
                         new_issues.append(
                             QualityIssue(
                                 stage="omr",
@@ -2071,7 +2417,7 @@ def verify_sheet(
                         )
                     else:
                         c.confidence = 0.20
-                        c.alternatives = [x[0] for x in cand_scores[:3]]
+                        c.alternatives = [normalize_chord_accidental_prefix(x[0]) for x in cand_scores[:3]]
                         new_issues.append(
                             QualityIssue(
                                 stage="omr",
@@ -2099,7 +2445,7 @@ def verify_sheet(
                 min_prior = 0.35 if is_v2_geometry else 0.55
                 if is_full_valid and prior_full >= min_prior and (not is_crop_valid or raw_crop == raw_full or (is_v2_geometry and top_cand == raw_full)):
                     c.confidence = 0.95 if is_v2_geometry else 0.92
-                    c.alternatives = [x[0] for x in cand_scores if x[0] != raw_full][:3]
+                    c.alternatives = [normalize_chord_accidental_prefix(x[0]) for x in cand_scores if x[0] != raw_full][:3]
                     continue
 
                 # 4e. Check for decisive prior superiority
@@ -2112,7 +2458,7 @@ def verify_sheet(
                     orig_raw = raw_full
                     c.raw = top_cand
                     c.confidence = 0.92
-                    c.alternatives = [x[0] for x in cand_scores[1:4]]
+                    c.alternatives = [normalize_chord_accidental_prefix(x[0]) for x in cand_scores[1:4]]
                     reason_parts = ["裁剪复读一致"]
                     if bass_hint_fit(top_cand, m.bass_hint) == 1.0:
                         reason_parts.append("低音行一致")
@@ -2130,9 +2476,9 @@ def verify_sheet(
                             detail={"original": orig_raw, "corrected": top_cand, "score": top_score, "evidence": ["crop"]},
                         )
                     )
-                elif top_cand == raw_full and (top_score - second_score >= (0.10 if is_v2_geometry else 0.25)):
+                elif top_cand == raw_full and (top_score - second_score >= (0.08 if is_v2_geometry else 0.25)):
                     c.confidence = 0.92 if is_v2_geometry else 0.90
-                    c.alternatives = [x[0] for x in cand_scores[1:4]]
+                    c.alternatives = [normalize_chord_accidental_prefix(x[0]) for x in cand_scores[1:4]]
                 else:
                     undecided_chords.append({
                         "key": key,
@@ -2147,6 +2493,7 @@ def verify_sheet(
                         "m_notes": m_notes,
                         "prior_full": prior_full,
                     })
+
 
     # 5. Escalate Undecided Chords to Arbiter (Claude Opus on Vertex AI)
     if can_use_llm and undecided_chords:
@@ -2206,6 +2553,11 @@ def verify_sheet(
         ladder_stats["ladder_latency_s"] = 0.0
         ladder_stats["nr_after"] = ladder_stats["nr_before"]
         ladder_stats["issues_after"] = list(ladder_stats["issues_before"])
+    # Final safety sweep: On every path (exceptions, ladder, use_llm=False), ensure no empty raw remains
+    for s in verified.systems:
+        for m in s.measures:
+            m.chords = [c for c in m.chords if c.raw and c.raw.strip()]
 
+    new_issues = [iss for iss in new_issues if iss.code != "empty_box_placeholder"]
     verified.issues = new_issues
     return verified

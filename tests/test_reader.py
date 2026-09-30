@@ -563,3 +563,47 @@ def test_read_sheet_chord_only_system():
     assert any("[v2_chord_only] page=0 system=0" in w for w in sheet.warnings)
     assert any("[v2_reader_measures_seen] page=0 system=0 measures_seen=2" in w for w in sheet.warnings)
 
+
+def test_read_sheet_empty_box_does_not_create_empty_raw():
+    """Verify that a missed/empty box reading never introduces ChordSymbol(raw='') into the sheet."""
+    img_bytes = _create_test_image(1000, 1400)
+    measures = [GMeasure(index_in_system=0, x0=0.05, x1=0.50)]
+    chord_boxes = [
+        GChordBox(bbox=(0.10, 0.12, 0.18, 0.15), measure_index_in_system=0, beat_geo=1.0, boxed=True)
+    ]
+    system = GSystem(
+        page=0,
+        index_on_page=0,
+        bbox=(0.05, 0.12, 0.90, 0.20),
+        melody_band=(0.15, 0.18),
+        measures=measures,
+        chord_boxes=chord_boxes,
+        confidence=0.9,
+    )
+    geom = PageGeometry(
+        page=0,
+        width=1000,
+        height=1400,
+        header_band=(0.0, 0.10),
+        systems=[system],
+        confidence=0.9,
+    )
+
+    mock_header = HeaderReading(title="Test Empty Box", time_signature="4/4")
+    # System reading returns box 1 with empty text
+    mock_system = SystemReading(
+        chord_boxes=[BoxReading(box_id=1, text="")],
+        measures=[MeasureContentReading(measure_index=0, melody="1 2 3 4")],
+    )
+
+    with patch("app.omr.reader.ask_reader") as mock_ask:
+        mock_ask.side_effect = [mock_header, mock_system]
+        sheet = read_sheet([img_bytes], [geom], model="gemini-2.5-pro")
+
+    # Sheet must be valid on its own: NO ChordSymbol with raw=""
+    m0 = sheet.systems[0].measures[0]
+    assert len(m0.chords) == 0
+    # No empty_box_placeholder is generated
+    assert not any(i.code == "empty_box_placeholder" for i in sheet.issues)
+
+

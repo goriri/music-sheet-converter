@@ -153,11 +153,16 @@ def parse_pages(
                     layout_ok = False
                     break
 
-        if layout_ok and len(geoms) == len(images):
-            if all(g.confidence >= 0.6 and len(g.systems) >= 1 for g in geoms):
-                logger.info("Layout confidence >= 0.6; proceeding with v2 content reader.")
-                from app.omr.reader import read_sheet
+    reader_fallback_warning = None
+    if layout_ok and len(geoms) == len(images):
+        if all(g.confidence >= 0.6 and len(g.systems) >= 1 for g in geoms):
+            logger.info("Layout confidence >= 0.6; proceeding with v2 content reader.")
+            from app.omr.reader import read_sheet
+            try:
                 return read_sheet(images, geoms, model=model)
+            except Exception as exc:
+                logger.error("v2 content reader failed, falling back to whole-page OMR: %s", exc, exc_info=True)
+                reader_fallback_warning = f"[v2_reader_fallback] Reader failed ({exc}); fell back to whole-page OMR."
 
     min_layout_conf = min((g.confidence for g in geoms), default=0.5)
 
@@ -281,9 +286,13 @@ def parse_pages(
                 )
             )
 
-    fallback_warning = "Layout analysis unavailable or low confidence; fell back to whole-page OMR."
-    if fallback_warning not in all_warnings:
-        all_warnings.append(fallback_warning)
+    if reader_fallback_warning:
+        if reader_fallback_warning not in all_warnings:
+            all_warnings.append(reader_fallback_warning)
+    else:
+        fallback_warning = "Layout analysis unavailable or low confidence; fell back to whole-page OMR."
+        if fallback_warning not in all_warnings:
+            all_warnings.append(fallback_warning)
 
     sheet = ParsedSheet(
         header=header,
@@ -292,6 +301,7 @@ def parse_pages(
         key_changes=key_changes,
         warnings=all_warnings,
         layout_confidence=min_layout_conf,
+        layout_source="llm",
     )
 
     # 4. Refine measure boxes using OpenCV barline detection

@@ -14,7 +14,7 @@ import os
 import re
 from typing import Optional, TypeVar
 from PIL import Image, ImageDraw, ImageFont
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models import (
     ChordSymbol,
@@ -22,10 +22,11 @@ from app.models import (
     Measure,
     PageInfo,
     ParsedSheet,
+    QualityIssue,
     SongHeader,
     System,
 )
-from app.omr.geometry import GChordBox, GSystem, PageGeometry
+from app.omr.geometry import GChordBox, GMeasure, GSystem, PageGeometry
 from app.omr.reader_prompts import (
     HEADER_PROMPT,
     HeaderReading,
@@ -33,6 +34,7 @@ from app.omr.reader_prompts import (
     build_system_crop_prompt,
 )
 from app.qa.llm import LLMUnavailable, _ask_opus, ask_json
+from app.qa.omr_verify import is_valid_chord_grammar
 from app.theory.chords import clean_raw_chord
 from app.theory.keys import key_name_to_pc
 
@@ -41,6 +43,14 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 DEFAULT_READER_MODEL = os.environ.get("OMR_READER_MODEL", "claude-opus-5-5")
+
+
+class SystemReadingWithIndex(SystemReading):
+    system_index: Optional[int] = Field(
+        None,
+        description="0-based index of this system on the page, matching the '[System N]' guide on the image.",
+    )
+
 
 DEGREE_SEMITONES: dict[str, int] = {
     "1": 0,
@@ -65,6 +75,86 @@ CIRCLE_DIGIT_MAP: dict[str, str] = {
     "❻": "6", "❼": "7", "❽": "8", "❾": "9", "❿": "10",
 }
 DIAGONAL_SLASHES = ("╱", "⁄", "∕")
+
+
+def is_valid_standalone_chord(token: str, notation: str = "number") -> bool:
+    """Check if token is a valid standalone chord symbol.
+
+    In Taiwanese number notation:
+    - Standalone slash chords must have a denominator that is a valid bass degree (1-7 with opt accidental).
+    - Denominators like 9, 11, 13 are chord extensions (e.g. 57/9), NOT valid bass notes on standalone slash chords.
+    """
+    if not token or not token.strip():
+        return False
+    t = token.strip()
+    for circ, digit in CIRCLE_DIGIT_MAP.items():
+        t = t.replace(circ, digit)
+    for ds in DIAGONAL_SLASHES:
+        t = t.replace(ds, "/")
+    t = re.sub(r"\s*/\s*", "/", t)
+    t = re.sub(r"\s+", "", t)
+
+    if notation == "number":
+        if "/" in t:
+            parts = t.split("/", 1)
+            bot = parts[1].strip()
+            # Denominator must be a valid scale degree bass 1..7 (e.g. 1..7, b7, #4, 7b)
+            if not re.match(r"^[b#♭♯]?[1-7][b#♭♯]?$", bot):
+                return False
+        return is_valid_chord_grammar(t, notation="number")
+    else:
+        if "/" in t:
+            parts = t.split("/", 1)
+            bot = parts[1].strip()
+            if not re.match(r"^[A-Ga-g][b#♭♯]?$", bot):
+                return False
+        return is_valid_chord_grammar(t, notation="letter")
+
+
+def resolve_chord_tokens(
+    raw_text: str,
+    box_geom_count: Optional[int] = None,
+    notation: str = "number",
+) -> tuple[list[str], bool, bool]:
+    """Resolve whitespace-separated chord token according to merged token rules.
+
+    Rules:
+    1. If every whitespace-separated part is a valid chord on its own AND joining them
+       is not a valid single chord -> split into separate chords.
+    2. If joining gives a valid chord and the parts are not both valid (e.g. '5 7/9' -> '57/9',
+       since '7/9' has an invalid bass) -> join.
+    3. If both readings are valid -> use the box count from geometry; if that's inconclusive -> needs_review.
+
+    Returns:
+        (tokens_list, is_joined, needs_review_flag)
+    """
+    if not raw_text or not raw_text.strip():
+        return [], False, False
+
+    raw = raw_text.strip()
+    parts = raw.split()
+    if len(parts) <= 1:
+        return [raw], False, False
+
+    all_parts_valid = all(is_valid_standalone_chord(p, notation) for p in parts)
+    joined = re.sub(r"\s*/\s*", "/", raw)
+    joined = re.sub(r"\s+", "", joined)
+    joined_valid = is_valid_chord_grammar(joined, notation)
+
+    if all_parts_valid and not joined_valid:
+        return parts, False, False
+    elif joined_valid and not all_parts_valid:
+        return [joined], True, False
+    elif all_parts_valid and joined_valid:
+        if box_geom_count is not None and box_geom_count >= len(parts):
+            return parts, False, False
+        elif box_geom_count == 1:
+            return [joined], True, False
+        else:
+            # Inconclusive
+            return [joined], True, True
+    else:
+        return [raw], False, True
 
 
 def parse_chord_symbol(raw_text: str, model_stacked: bool = False) -> tuple[str, bool]:
@@ -96,9 +186,11 @@ def parse_chord_symbol(raw_text: str, model_stacked: bool = False) -> tuple[str,
     for circ, digit in CIRCLE_DIGIT_MAP.items():
         s = s.replace(circ, digit)
 
-    # Normalize internal whitespace around slash
+    # Normalize internal whitespace around slash and within chord symbol
     s = re.sub(r"\s*/\s*", "/", s)
-    s = re.sub(r"\s+", " ", s).strip()
+    s = re.sub(r"\s+", "", s).strip()
+    if s.startswith("b4m"):
+        s = "4m" + s[3:]
     return s, stacked
 
 
@@ -240,10 +332,34 @@ def ask_reader(
         )
 
 
+def count_read_chord_symbols(reading: SystemReading, notation: str = "number") -> int:
+    """Count total valid chord symbols read in a system."""
+    if not reading:
+        return 0
+    cnt = 0
+    for br in reading.chord_boxes:
+        txt = br.text.strip()
+        if txt and txt.lower() not in {"", "none", "null", "no", "x"}:
+            tokens, _, _ = resolve_chord_tokens(txt, notation=notation)
+            for tok in tokens:
+                c_clean, _ = parse_chord_symbol(tok)
+                if c_clean and c_clean.lower() not in {"", "none", "null", "no", "x"}:
+                    cnt += 1
+    for ec in reading.extra_chords:
+        etxt = ec.text.strip()
+        if etxt and etxt.lower() not in {"", "none", "null", "no", "x"}:
+            if not re.match(r"^(?:0|\d{3,})$", etxt):
+                c_clean, _ = parse_chord_symbol(etxt)
+                if c_clean:
+                    cnt += 1
+    return cnt
+
+
 def annotate_system_crop(
     page_img: Image.Image,
     sys_geom: GSystem,
     page_idx: int,
+    system_idx: int = 0,
 ) -> tuple[bytes, int]:
     """Crop a system row from the page, upscale long side >= 2000 px, and draw guides."""
     pw, ph = page_img.size
@@ -251,21 +367,35 @@ def annotate_system_crop(
 
     # Add a slight vertical margin of 6px
     margin_y = 6.0 / max(1, ph)
-    y0_crop = max(0.0, s_bbox[1] - margin_y)
-    y1_crop = min(1.0, s_bbox[3] + margin_y)
-    x0_crop = max(0.0, s_bbox[0] - 0.01)
-    x1_crop = min(1.0, s_bbox[2] + 0.01)
+    raw_sx0, raw_sy0, raw_sx1, raw_sy1 = s_bbox
+    sx0 = max(0.0, min(1.0, min(raw_sx0, raw_sx1)))
+    sx1 = max(0.0, min(1.0, max(raw_sx0, raw_sx1)))
+    sy0 = max(0.0, min(1.0, min(raw_sy0, raw_sy1)))
+    sy1 = max(0.0, min(1.0, max(raw_sy0, raw_sy1)))
+    if sx1 <= sx0:
+        sx1 = min(1.0, sx0 + 0.1)
+        if sx1 <= sx0:
+            sx0 = max(0.0, sx1 - 0.1)
+    if sy1 <= sy0:
+        sy1 = min(1.0, sy0 + 0.05)
+        if sy1 <= sy0:
+            sy0 = max(0.0, sy1 - 0.05)
 
-    px0 = int(round(x0_crop * pw))
-    py0 = int(round(y0_crop * ph))
-    px1 = int(round(x1_crop * pw))
-    py1 = int(round(y1_crop * ph))
+    y0_crop = max(0.0, sy0 - margin_y)
+    y1_crop = min(1.0, sy1 + margin_y)
+    x0_crop = max(0.0, sx0 - 0.01)
+    x1_crop = min(1.0, sx1 + 0.01)
+
+    px0 = max(0, min(pw - 1, int(round(x0_crop * pw))))
+    py0 = max(0, min(ph - 1, int(round(y0_crop * ph))))
+    px1 = max(px0 + 1, min(pw, int(round(x1_crop * pw))))
+    py1 = max(py0 + 1, min(ph, int(round(y1_crop * ph))))
 
     cw = max(1, px1 - px0)
     ch = max(1, py1 - py0)
     scale = max(1.0, 2000.0 / max(cw, ch))
-    new_w = int(round(cw * scale))
-    new_h = int(round(ch * scale))
+    new_w = max(1, int(round(cw * scale)))
+    new_h = max(1, int(round(ch * scale)))
 
     crop = page_img.crop((px0, py0, px1, py1)).resize((new_w, new_h), Image.Resampling.LANCZOS)
 
@@ -280,30 +410,113 @@ def annotate_system_crop(
     except Exception:
         font = ImageFont.load_default()
 
-    # 1. Draw measure guides
-    for m_idx, m in enumerate(sys_geom.measures):
-        mx0 = (m.x0 * pw - px0) * scale
-        mx1 = (m.x1 * pw - px0) * scale
-        draw.line([(mx0, top_pad), (mx0, top_pad + new_h)], fill=(0, 100, 220), width=2)
-        draw.line([(mx1, top_pad), (mx1, top_pad + new_h)], fill=(0, 100, 220), width=2)
-        draw.text((mx0 + 6, 6), f"[Measure {m_idx}]", fill=(0, 80, 200), font=font)
+    try:
+        # Draw system indicator badge at top-left
+        draw.text((6, 6), f"[System {system_idx}] (Page {page_idx + 1})", fill=(180, 0, 0), font=font)
 
-    # 2. Draw numbered chord boxes
-    for b_idx, cb in enumerate(sys_geom.chord_boxes, 1):
-        bx0 = (cb.bbox[0] * pw - px0) * scale
-        by0 = top_pad + (cb.bbox[1] * ph - py0) * scale
-        bx1 = (cb.bbox[2] * pw - px0) * scale
-        by1 = top_pad + (cb.bbox[3] * ph - py0) * scale
+        # 1. Draw measure guides
+        for m_idx, m in enumerate(sys_geom.measures):
+            mx0_raw = (min(m.x0, m.x1) * pw - px0) * scale
+            mx1_raw = (max(m.x0, m.x1) * pw - px0) * scale
+            mx0 = max(0.0, min(float(new_w), mx0_raw))
+            mx1 = max(0.0, min(float(new_w), mx1_raw))
+            draw.line([(mx0, top_pad), (mx0, top_pad + new_h)], fill=(0, 100, 220), width=2)
+            draw.line([(mx1, top_pad), (mx1, top_pad + new_h)], fill=(0, 100, 220), width=2)
+            draw.text((min(mx0, mx1) + 6, 6), f"[Measure {m_idx}]", fill=(0, 80, 200), font=font)
 
-        draw.rectangle([bx0 - 2, by0 - 2, bx1 + 2, by1 + 2], outline=(220, 0, 0), width=2)
-        badge_y = max(4, by0 - 22)
-        badge_w = 36
-        draw.rectangle([bx0, badge_y, bx0 + badge_w, badge_y + 18], fill=(255, 230, 0), outline=(200, 0, 0))
-        draw.text((bx0 + 3, badge_y), f"#{b_idx}", fill=(0, 0, 0), font=font)
+        # 2. Draw numbered chord boxes
+        for b_idx, cb in enumerate(sys_geom.chord_boxes, 1):
+            cb_x0, cb_y0, cb_x1, cb_y1 = cb.bbox
+            raw_bx0 = (min(cb_x0, cb_x1) * pw - px0) * scale
+            raw_bx1 = (max(cb_x0, cb_x1) * pw - px0) * scale
+            raw_by0 = top_pad + (min(cb_y0, cb_y1) * ph - py0) * scale
+            raw_by1 = top_pad + (max(cb_y0, cb_y1) * ph - py0) * scale
+
+            pad_box_l = int(round(0.015 * pw * scale)) if not cb.boxed else 2
+            bx0_draw = max(0.0, raw_bx0 - pad_box_l)
+            bx1_draw = max(bx0_draw, raw_bx1 + 2)
+            by0_draw = max(0.0, raw_by0 - 2)
+            by1_draw = max(by0_draw, raw_by1 + 2)
+
+            r_x0 = max(0.0, min(float(new_w), min(bx0_draw, bx1_draw)))
+            r_x1 = max(r_x0, min(float(new_w), max(bx0_draw, bx1_draw)))
+            r_y0 = max(0.0, min(float(new_h + top_pad), min(by0_draw, by1_draw)))
+            r_y1 = max(r_y0, min(float(new_h + top_pad), max(by0_draw, by1_draw)))
+
+            draw.rectangle([r_x0, r_y0, r_x1, r_y1], outline=(220, 0, 0), width=2)
+
+            badge_y = max(4.0, raw_by0 - 22)
+            badge_w = 36.0
+            b_x0 = max(0.0, min(float(new_w), raw_bx0))
+            b_x1 = max(b_x0, min(float(new_w), raw_bx0 + badge_w))
+            b_y0 = max(0.0, min(float(new_h + top_pad), badge_y))
+            b_y1 = max(b_y0, min(float(new_h + top_pad), badge_y + 18))
+            draw.rectangle([b_x0, b_y0, b_x1, b_y1], fill=(255, 230, 0), outline=(200, 0, 0))
+            draw.text((b_x0 + 3, b_y0), f"#{b_idx}", fill=(0, 0, 0), font=font)
+    except Exception as exc:
+        logger.warning("Error drawing annotations on system crop: %s", exc)
 
     buf = io.BytesIO()
     annotated.save(buf, format="JPEG", quality=92)
     return buf.getvalue(), len(sys_geom.chord_boxes)
+
+
+def check_reading_inconsistent(
+    reading: SystemReading,
+    sys_geom: GSystem,
+    notation: str = "number",
+) -> tuple[bool, str]:
+    """Check if system reading is inconsistent with geometry.
+
+    Geometry box count is a LOWER BOUND: layout recall on boxed charts is only
+    50-75%, and reader discovering extra chords is intentional. Never flag an
+    inconsistency when chord_count >= num_geom_boxes.
+
+    Returns (is_inconsistent, reason).
+    """
+    num_geom_boxes = len(sys_geom.chord_boxes)
+    chord_count = count_read_chord_symbols(reading, notation)
+
+    # Geometry boxes are a lower bound:
+    if num_geom_boxes > 0 and chord_count < num_geom_boxes:
+        return True, f"chord symbols read ({chord_count}) < geometry boxes ({num_geom_boxes})"
+
+    # Duplicated readings check
+    read_boxes = reading.chord_boxes if reading else []
+    cleaned_chords: list[str] = []
+    for br in read_boxes:
+        txt = br.text.strip()
+        if txt and txt.lower() not in {"", "none", "null", "no", "x"}:
+            tokens, _, _ = resolve_chord_tokens(txt, box_geom_count=num_geom_boxes, notation=notation)
+            for tok in tokens:
+                c_clean, _ = parse_chord_symbol(tok)
+                if c_clean:
+                    cleaned_chords.append(c_clean)
+
+    if len(cleaned_chords) >= 2 and len(cleaned_chords) % 2 == 0:
+        half = len(cleaned_chords) // 2
+        if cleaned_chords[:half] == cleaned_chords[half:] and num_geom_boxes == half:
+            return True, f"duplicated reading sequence {cleaned_chords[:half]} where geometry has {num_geom_boxes} boxes"
+
+    return False, ""
+
+
+def find_measure_index_for_x(cb_cx: float, measures: list[GMeasure]) -> int:
+    """Find measure index by x-centre of chord box against barline x-positions."""
+    if not measures:
+        return 0
+    if cb_cx <= measures[0].x0:
+        return 0
+    if cb_cx >= measures[-1].x1:
+        return len(measures) - 1
+    for idx, m in enumerate(measures):
+        if m.x0 <= cb_cx <= m.x1:
+            return idx
+    # Fallback to closest measure center
+    return min(
+        range(len(measures)),
+        key=lambda i: abs(cb_cx - (measures[i].x0 + measures[i].x1) / 2.0),
+    )
 
 
 def _read_single_system(
@@ -320,7 +533,49 @@ def _read_single_system(
         chord_notation=chord_notation,
         chord_only=is_chord_only,
     )
-    res = ask_reader(prompt, SystemReading, images=[crop_bytes], model=target_model)
+    prompt += (
+        f"\nIMPORTANT GUIDES:\n"
+        f"- Top-left badge shows '[System {s_idx}]' (Page {p_idx + 1}). Include system_index={s_idx} in your structured response.\n"
+    )
+    prompt += (
+        "\nIMPORTANT FOR ACCIDENTALS AND SUPERSCRIPTS ON CIRCLED CHORDS:\n"
+        "- In circled number notation, accidentals ('b' flat or '#' sharp) are often printed directly before or above-left of the circled number (e.g. 'b⑦add9' -> 'b7add9', 'b⑦' -> 'b7', 'b⑥' -> 'b6', '#④m7-5' -> '#4m7-5'). Note: degree 4 is natural (e.g. '4m', never 'b4m').\n"
+        "- ALWAYS inspect the region immediately to the left of the circled number for a small 'b' or '#' and include it as a prefix in the chord text!\n"
+        "- For minor 7th chords with flat fifth (half-diminished, e.g. 'b6/2m7-5', '1/2m7-5', '6m7-5', '2m7-5'), the '-5' or '(b5)' is printed as a small superscript directly after 'm7'. ALWAYS inspect the region after 'm7' for a superscript '-5' or '(b5)' and transcribe as '-5' (e.g. 'b6/2m7-5', '6m7-5', '2m7-5')!\n"
+    )
+    try:
+        res = ask_reader(prompt, SystemReadingWithIndex, images=[crop_bytes], model=target_model)
+    except Exception:
+        res = ask_reader(prompt, SystemReading, images=[crop_bytes], model=target_model)
+
+    inconsistent, reason = check_reading_inconsistent(res, sys_geom, chord_notation)
+    if inconsistent and num_boxes > 0:
+        logger.info(
+            "System (p=%d, s=%d) reading inconsistent with geometry (%s); re-reading row once...",
+            p_idx,
+            s_idx,
+            reason,
+        )
+        retry_prompt = prompt + (
+            f"\n\nIMPORTANT CORRECTION: The previous reading had {reason}.\n"
+            f"Please carefully transcribe all chords, ensuring you do not miss any of the {num_boxes} numbered boxes or additional chords in the measures."
+        )
+        try:
+            try:
+                retry_res = ask_reader(retry_prompt, SystemReadingWithIndex, images=[crop_bytes], model=target_model)
+            except Exception:
+                retry_res = ask_reader(retry_prompt, SystemReading, images=[crop_bytes], model=target_model)
+            retry_inconsistent, _ = check_reading_inconsistent(retry_res, sys_geom, chord_notation)
+            cnt_retry = count_read_chord_symbols(retry_res, chord_notation)
+            cnt_res = count_read_chord_symbols(res, chord_notation)
+            # Never replace with a retry that drops chords (geometry is lower bound)
+            if not retry_inconsistent and cnt_retry >= cnt_res:
+                res = retry_res
+            elif cnt_retry > cnt_res:
+                res = retry_res
+        except Exception as exc:
+            logger.warning("System (p=%d, s=%d) re-read failed: %s", p_idx, s_idx, exc)
+
     return (p_idx, s_idx), res
 
 
@@ -377,7 +632,11 @@ def read_sheet(
         h_crop_up.save(h_buf, format="JPEG", quality=92)
         h_bytes = h_buf.getvalue()
 
-        h_read = ask_reader(HEADER_PROMPT, HeaderReading, images=[h_bytes], model=target_model)
+        header_prompt = HEADER_PROMPT.replace(
+            "or if indicated by '1=X' without degree chords.",
+            "only if chord symbols throughout the sheet are written with letters (C, G/B, etc.). '1=X' is a key signature marking present on both number and letter charts, NOT an indication of letter notation.",
+        )
+        h_read = ask_reader(header_prompt, HeaderReading, images=[h_bytes], model=target_model)
         header = SongHeader(
             title=h_read.title,
             style=h_read.style,
@@ -406,10 +665,17 @@ def read_sheet(
     # (page_idx, s_idx, sys_geom, crop_bytes, num_boxes)
 
     for p_idx, (img_bytes, geom) in enumerate(zip(images, geoms)):
-        page_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        try:
+            page_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        except Exception as exc:
+            logger.warning("Could not open page image %d: %s", p_idx, exc)
+            continue
         for s_idx, sys_geom in enumerate(geom.systems):
-            crop_bytes, num_boxes = annotate_system_crop(page_img, sys_geom, p_idx)
-            system_tasks.append((p_idx, s_idx, sys_geom, crop_bytes, num_boxes))
+            try:
+                crop_bytes, num_boxes = annotate_system_crop(page_img, sys_geom, p_idx, s_idx)
+                system_tasks.append((p_idx, s_idx, sys_geom, crop_bytes, num_boxes))
+            except Exception as exc:
+                logger.warning("Failed to prepare crop for system (%d, %d): %s", p_idx, s_idx, exc)
 
     # 3. Read systems concurrently
     system_readings: dict[tuple[int, int], SystemReading] = {}
@@ -420,18 +686,83 @@ def read_sheet(
             for task in system_tasks
         }
         for future in concurrent.futures.as_completed(future_to_task):
-            task_key = future_to_task[future][:2]
+            task = future_to_task[future]
+            orig_p_idx, orig_s_idx = task[0], task[1]
             try:
                 key, reading = future.result()
-                system_readings[key] = reading
+                # Map using system_index from the reading if valid
+                read_s_idx = reading.system_index if isinstance(reading, SystemReadingWithIndex) else None
+                if read_s_idx is not None and 0 <= read_s_idx < len(geoms[orig_p_idx].systems):
+                    assigned_key = (orig_p_idx, read_s_idx)
+                else:
+                    assigned_key = (orig_p_idx, orig_s_idx)
+                system_readings[assigned_key] = reading
             except Exception as exc:
-                logger.error("Failed to read system %s: %s", task_key, exc)
-                warnings.append(f"System {task_key} reading failed: {exc}")
-                system_readings[task_key] = SystemReading()
+                logger.error("Failed to read system (%d, %d): %s", orig_p_idx, orig_s_idx, exc)
+                warnings.append(f"System ({orig_p_idx}, {orig_s_idx}) reading failed: {exc}")
+                system_readings[(orig_p_idx, orig_s_idx)] = SystemReading()
+
+    # Re-request any missing systems individually
+    for p_idx, geom in enumerate(geoms):
+        page_img = None
+        for s_idx, sys_geom in enumerate(geom.systems):
+            if (p_idx, s_idx) not in system_readings:
+                logger.info(
+                    "System (p=%d, s=%d) missing from mapped readings; re-requesting individually...",
+                    p_idx,
+                    s_idx,
+                )
+                if page_img is None:
+                    try:
+                        page_img = Image.open(io.BytesIO(images[p_idx])).convert("RGB")
+                    except Exception:
+                        page_img = None
+                if page_img is not None:
+                    try:
+                        crop_bytes, num_boxes = annotate_system_crop(page_img, sys_geom, p_idx, s_idx)
+                        _, solo_res = _read_single_system(
+                            (p_idx, s_idx, sys_geom, crop_bytes, num_boxes),
+                            header.chord_notation,
+                            target_model,
+                        )
+                        system_readings[(p_idx, s_idx)] = solo_res
+                    except Exception as exc:
+                        logger.warning("Individual re-read failed for system (%d, %d): %s", p_idx, s_idx, exc)
+                        system_readings[(p_idx, s_idx)] = SystemReading()
+                else:
+                    system_readings[(p_idx, s_idx)] = SystemReading()
+
+    # Consistency check for header.chord_notation:
+    num_number_chords = 0
+    num_letter_chords = 0
+    for reading in system_readings.values():
+        for br in reading.chord_boxes:
+            txt = br.text.strip()
+            if not txt or txt.lower() in {"", "none", "null", "no", "x"}:
+                continue
+            clean_txt, _ = parse_chord_symbol(txt)
+            if re.match(r"^[b#♭♯]?[1-7]", clean_txt):
+                num_number_chords += 1
+            elif re.match(r"^[A-Ga-g]", clean_txt):
+                num_letter_chords += 1
+
+    if num_number_chords > num_letter_chords and header.chord_notation != "number":
+        warnings.append(
+            f"[v2_notation_override] Overriding header.chord_notation from {header.chord_notation!r} to 'number' "
+            f"(found {num_number_chords} number chords vs {num_letter_chords} letter chords)"
+        )
+        header.chord_notation = "number"
+    elif num_letter_chords > num_number_chords and header.chord_notation != "letter":
+        warnings.append(
+            f"[v2_notation_override] Overriding header.chord_notation from {header.chord_notation!r} to 'letter' "
+            f"(found {num_letter_chords} letter chords vs {num_number_chords} number chords)"
+        )
+        header.chord_notation = "letter"
 
     # 4. Assemble ParsedSheet with global measure indices and KeyChanges
     all_systems: list[System] = []
     key_changes: list[KeyChange] = []
+    sheet_issues: list[QualityIssue] = []
     global_measure_idx = 0
     current_key = header.original_key
 
@@ -465,16 +796,103 @@ def read_sheet(
             if is_chord_only:
                 warnings.append(f"[v2_chord_only] page={p_idx} system={s_idx}")
 
-            for m_idx, g_m in enumerate(sys_geom.measures):
-                chords_in_measure: list[ChordSymbol] = []
-                m_x0_x1 = (g_m.x0, g_m.x1)
+            # Check if reading is still inconsistent with geometry; flag needs_review if so
+            still_inconsistent, still_reason = check_reading_inconsistent(reading, sys_geom, header.chord_notation)
+            if still_inconsistent and len(sys_geom.chord_boxes) > 0:
+                warnings.append(f"[needs_review] System page={p_idx} system={s_idx}: {still_reason}")
+                sheet_issues.append(
+                    QualityIssue(
+                        stage="omr",
+                        measure_index=sys_start_measure_idx,
+                        severity="needs_review",
+                        code="chord_box_count_mismatch",
+                        message=f"第{p_idx + 1}页第{s_idx + 1}行和弦框与读取数量不一致（{still_reason}），请核对",
+                        detail={"page": p_idx, "system": s_idx, "reason": still_reason},
+                    )
+                )
 
-                # 1. Chords from numbered boxes
-                for b_idx, cb in enumerate(sys_geom.chord_boxes, 1):
-                    if cb.measure_index_in_system == m_idx:
-                        raw_text = box_readings_map.get(b_idx, "")
-                        is_stacked = box_stacked_map.get(b_idx, False)
-                        cleaned, stacked = parse_chord_symbol(raw_text, model_stacked=is_stacked)
+            # Map chords to measures using the measure_index_in_system from geometry
+            boxes_by_measure: dict[int, list[tuple[int, GChordBox]]] = {
+                m_i: [] for m_i in range(len(sys_geom.measures))
+            }
+            for b_idx, cb in enumerate(sys_geom.chord_boxes, 1):
+                if 0 <= cb.measure_index_in_system < len(sys_geom.measures):
+                    target_m = cb.measure_index_in_system
+                else:
+                    cb_cx = (cb.bbox[0] + cb.bbox[2]) / 2.0
+                    target_m = find_measure_index_for_x(cb_cx, sys_geom.measures)
+                if target_m in boxes_by_measure:
+                    boxes_by_measure[target_m].append((b_idx, cb))
+                elif boxes_by_measure:
+                    boxes_by_measure[0].append((b_idx, cb))
+
+            for m_idx, g_m in enumerate(sys_geom.measures):
+                m_x0_x1 = (g_m.x0, g_m.x1)
+                m_width = max(1e-4, g_m.x1 - g_m.x0)
+                chords_in_measure = []
+
+                # 1. Chords from numbered boxes mapped to this measure
+                for b_idx, cb in boxes_by_measure.get(m_idx, []):
+                    raw_text = box_readings_map.get(b_idx, "")
+                    is_stacked = box_stacked_map.get(b_idx, False)
+
+                    # Resolve merged tokens according to rules
+                    tokens, is_joined, needs_review_flag = resolve_chord_tokens(
+                        raw_text,
+                        box_geom_count=len(boxes_by_measure.get(m_idx, [])),
+                        notation=header.chord_notation,
+                    )
+                    if needs_review_flag:
+                        warnings.append(
+                            f"[needs_review] System page={p_idx} system={s_idx} measure={m_idx}: ambiguous merged chord reading {raw_text!r}"
+                        )
+                        sheet_issues.append(
+                            QualityIssue(
+                                stage="omr",
+                                measure_index=global_measure_idx + m_idx,
+                                severity="needs_review",
+                                code="merged_chord_inconclusive",
+                                message=f"第{p_idx + 1}页第{s_idx + 1}行第{m_idx + 1}小节和弦文本 '{raw_text}' 合并/拆分存在二义性，请核对",
+                                detail={"page": p_idx, "system": s_idx, "measure": m_idx, "raw": raw_text},
+                            )
+                        )
+
+                    if len(tokens) > 1:
+                        for t_i, tok in enumerate(tokens):
+                            cleaned, stacked = parse_chord_symbol(tok, model_stacked=is_stacked)
+                            if cleaned and cleaned.lower() not in {"", "none", "null", "no", "x"}:
+                                if t_i == 0:
+                                    beat = resolve_chord_beat(
+                                        beat_geo=cb.beat_geo,
+                                        model_beat=box_beats_map.get(b_idx),
+                                        time_sig=header.time_signature,
+                                        measure_beats=measure_beats,
+                                        box_bbox=cb.bbox,
+                                        measure_x0_x1=m_x0_x1,
+                                    )
+                                    sub_bbox = (cb.bbox[0], cb.bbox[1], (cb.bbox[0] + cb.bbox[2]) / 2.0, cb.bbox[3])
+                                else:
+                                    base_b = resolve_chord_beat(
+                                        beat_geo=cb.beat_geo,
+                                        model_beat=box_beats_map.get(b_idx),
+                                        time_sig=header.time_signature,
+                                        measure_beats=measure_beats,
+                                        box_bbox=cb.bbox,
+                                        measure_x0_x1=m_x0_x1,
+                                    )
+                                    beat = 3.0 if measure_beats == 4.0 else min(measure_beats, base_b + (measure_beats / len(tokens)))
+                                    sub_bbox = ((cb.bbox[0] + cb.bbox[2]) / 2.0, cb.bbox[1], cb.bbox[2], cb.bbox[3])
+                                chords_in_measure.append(
+                                    ChordSymbol(
+                                        raw=cleaned,
+                                        beat=beat,
+                                        bbox=sub_bbox if cb.boxed else None,
+                                        confidence=1.0,
+                                        stacked=stacked,
+                                    )
+                                )
+                    elif len(tokens) == 1:
+                        cleaned, stacked = parse_chord_symbol(tokens[0], model_stacked=is_stacked)
                         if cleaned and cleaned.lower() not in {"", "none", "null", "no", "x"}:
                             beat = resolve_chord_beat(
                                 beat_geo=cb.beat_geo,
@@ -501,6 +919,11 @@ def read_sheet(
                         # Filter non-chord voicing digits and rests
                         if re.match(r"^(?:0|\d{3,})$", cleaned_extra):
                             continue
+                        # On boxed systems, unboxed digits in fill measures are drum/band fill notes, not chords
+                        if len(sys_geom.chord_boxes) > 0:
+                            mc_curr = measure_content_map.get(m_idx)
+                            if mc_curr and mc_curr.fill and re.match(r"^\d+$", cleaned_extra):
+                                continue
                         # Deduplicate if already present at roughly the same beat
                         already_present = any(
                             c.raw == cleaned_extra and abs(c.beat - extra_beat) < 0.5
@@ -580,13 +1003,19 @@ def read_sheet(
                 kc_m_idx = reading.key_change.measure_index
                 kc_global = sys_start_measure_idx + kc_m_idx
                 semitones = compute_key_change_semitones(kc_raw, prev_key=current_key)
-                key_changes.append(
-                    KeyChange(
-                        at_measure=kc_global,
-                        raw=kc_raw,
-                        semitones=semitones,
+                is_roadmap = bool(re.search(r"主歌|副歌|桥段|前奏|间奏|尾奏", kc_raw))
+                if semitones == 0 or is_roadmap:
+                    warnings.append(
+                        f"[v2_key_change_filtered] page={p_idx} system={s_idx} raw={kc_raw!r} semitones={semitones} roadmap={is_roadmap}"
                     )
-                )
+                else:
+                    key_changes.append(
+                        KeyChange(
+                            at_measure=kc_global,
+                            raw=kc_raw,
+                            semitones=semitones,
+                        )
+                    )
 
     pages_info = [PageInfo(width=g.width, height=g.height) for g in geoms]
     min_confidence = min((g.confidence for g in geoms), default=1.0)
@@ -599,6 +1028,7 @@ def read_sheet(
         systems=all_systems,
         key_changes=key_changes,
         warnings=warnings_list,
+        issues=sheet_issues,
         layout_confidence=min_confidence,
         layout_source="cv",
     )

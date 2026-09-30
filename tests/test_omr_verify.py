@@ -1118,6 +1118,15 @@ def test_v2_robustness_evaluation_corrupted_outputs():
     """Build corrupted variants of v2 reader output for diaole and xiaobaichuan (10 injected anomalies each).
     Verify >= 90% detection/auto-fix rate and 0 false auto-fixes.
     """
+    import pytest
+    from pathlib import Path
+
+    project_root = Path(__file__).resolve().parent.parent
+    diaole_path = project_root / "out/v2/diaole_run_1_parsed.json"
+    xbc_path = project_root / "out/v2/xiaobaichuan_run_1_parsed.json"
+    if not diaole_path.exists() or not xbc_path.exists():
+        pytest.skip("Fixture file out/v2/*_parsed.json or out/batch/*/verified.json is absent in clean worktree")
+
     r_diaole, f_diaole = _eval_song_corruptions("diaole", ["fixtures/pages/page1.jpg", "fixtures/pages/page2.jpg"], "out/v2/diaole_run_1_parsed.json")
     assert r_diaole >= 0.90, f"diaole detection rate {r_diaole:.1%} < 90%"
     assert f_diaole == 0, f"diaole false auto-fixes {f_diaole} > 0"
@@ -1312,4 +1321,395 @@ def test_melody_crop_reread_skips_barline_mismatch_systems(monkeypatch, clean_sh
     # System 0 has barline mismatch, so melody re-read should NOT have been called for it
     assert not _melody_reread_called
     assert any(i.code == "barline_count_mismatch" for i in verified.issues)
+
+
+
+def test_is_valid_chord_grammar_notation_modes():
+    """Verify that is_valid_chord_grammar respects notation parameter (number vs letter)."""
+    from app.qa.omr_verify import is_valid_chord_grammar
+
+    # Number mode
+    assert is_valid_chord_grammar("1", notation="number")
+    assert is_valid_chord_grammar("5m/7b", notation="number")
+    assert is_valid_chord_grammar("1(2)", notation="number")
+    assert is_valid_chord_grammar("/5", notation="number")
+    assert is_valid_chord_grammar("/#4", notation="number")
+    assert is_valid_chord_grammar("b7add9", notation="number")
+    assert is_valid_chord_grammar("b6/4m", notation="number")
+    assert not is_valid_chord_grammar("xyz", notation="number")
+    assert not is_valid_chord_grammar("C#m7", notation="number")
+
+    # Letter mode
+    assert is_valid_chord_grammar("C", notation="letter")
+    assert is_valid_chord_grammar("Dm7", notation="letter")
+    assert is_valid_chord_grammar("G/B", notation="letter")
+    assert is_valid_chord_grammar("/G", notation="letter")
+    assert is_valid_chord_grammar("/F#", notation="letter")
+    assert not is_valid_chord_grammar("1(2)", notation="letter")
+    assert not is_valid_chord_grammar("invalid_letter", notation="letter")
+
+
+def test_normalize_chord_accidental_prefix():
+    """Verify postfix accidentals on root are normalized to standard prefix."""
+    from app.qa.omr_verify import normalize_chord_accidental_prefix
+
+    assert normalize_chord_accidental_prefix("7badd9") == "b7add9"
+    assert normalize_chord_accidental_prefix("6b/4m") == "b6/4m"
+    assert normalize_chord_accidental_prefix("4#m7") == "#4m7"
+    assert normalize_chord_accidental_prefix("b7") == "b7"
+    assert normalize_chord_accidental_prefix("#4") == "#4"
+    assert normalize_chord_accidental_prefix("1(2)") == "1(2)"
+    assert normalize_chord_accidental_prefix("") == ""
+
+
+def test_is_non_diatonic_bare_degree():
+    """Verify bare and non-diatonic major degrees are flagged for accidental inspection."""
+    from app.qa.omr_verify import is_non_diatonic_bare_degree
+
+    assert is_non_diatonic_bare_degree("7add9")
+    assert is_non_diatonic_bare_degree("7maj7")
+    assert is_non_diatonic_bare_degree("6add9")
+    assert is_non_diatonic_bare_degree("6/4m")
+    assert is_non_diatonic_bare_degree("3add9")
+    assert is_non_diatonic_bare_degree("2add9")
+
+    # Diatonic bare degrees or minor/prefixed chords should not trigger
+    assert not is_non_diatonic_bare_degree("7")
+    assert not is_non_diatonic_bare_degree("6")
+    assert not is_non_diatonic_bare_degree("3")
+    assert not is_non_diatonic_bare_degree("2")
+    assert not is_non_diatonic_bare_degree("b7")
+    assert not is_non_diatonic_bare_degree("b7add9")
+    assert not is_non_diatonic_bare_degree("b6/4m")
+    assert not is_non_diatonic_bare_degree("6m")
+    assert not is_non_diatonic_bare_degree("6m7")
+    assert not is_non_diatonic_bare_degree("2m")
+    assert not is_non_diatonic_bare_degree("3m")
+    assert not is_non_diatonic_bare_degree("1")
+    assert not is_non_diatonic_bare_degree("4")
+    assert not is_non_diatonic_bare_degree("5")
+
+
+def test_verify_sheet_filters_roadmap_and_zero_semitones_key_change(clean_sheet, dummy_images):
+    """Verify that verify_sheet filters roadmap labels and semitones=0 from sheet.key_changes."""
+    from app.models import KeyChange
+
+    sheet = clean_sheet.model_copy(deep=True)
+    sheet.key_changes = [
+        KeyChange(at_measure=4, raw="副歌", semitones=0),
+        KeyChange(at_measure=8, raw="1=F", semitones=0),
+        KeyChange(at_measure=12, raw="轉2調", semitones=2),
+    ]
+
+    verified = verify_sheet(dummy_images, sheet, use_llm=False)
+    assert len(verified.key_changes) == 1
+    assert verified.key_changes[0].semitones == 2
+    assert verified.key_changes[0].raw == "轉2調"
+
+    filtered_issues = [i for i in verified.issues if i.code == "key_change_filtered"]
+    assert len(filtered_issues) == 2
+
+
+def test_merged_tokens_splitting_and_joining():
+    """Verify merged token splitting and joining rules."""
+    from app.omr.reader import resolve_chord_tokens
+
+    # Rule 1: Every part is valid on its own, joined is not valid -> split
+    toks1, joined1, nr1 = resolve_chord_tokens("5sus 5")
+    assert toks1 == ["5sus", "5"]
+    assert joined1 is False
+    assert nr1 is False
+
+    # Rule 2: Joined is valid, parts are not all valid ('7/9' invalid bass) -> join
+    toks2, joined2, nr2 = resolve_chord_tokens("5 7/9")
+    assert toks2 == ["57/9"]
+    assert joined2 is True
+    assert nr2 is False
+
+    # Rule 3: Both valid -> use geometry box count
+    toks3_split, joined3_split, nr3_split = resolve_chord_tokens("5 7", box_geom_count=2)
+    assert toks3_split == ["5", "7"]
+    assert joined3_split is False
+    assert nr3_split is False
+
+    toks3_join, joined3_join, nr3_join = resolve_chord_tokens("5 7", box_geom_count=1)
+    assert toks3_join == ["57"]
+    assert joined3_join is True
+    assert nr3_join is False
+
+    # Inconclusive geometry -> needs_review
+    toks3_inc, joined3_inc, nr3_inc = resolve_chord_tokens("5 7", box_geom_count=None)
+    assert nr3_inc is True
+
+
+def test_half_diminished_superscript_flat_five():
+    """Verify is_candidate_for_flat_five detection and zoomed re-read correction."""
+    from app.qa.omr_verify import is_candidate_for_flat_five, AccidentalCheckReading
+
+    assert is_candidate_for_flat_five("b6/2m7") is True
+    assert is_candidate_for_flat_five("7m7") is True
+    assert is_candidate_for_flat_five("#4m7") is True
+    assert is_candidate_for_flat_five("2m7") is False
+    assert is_candidate_for_flat_five("6m7") is False
+    assert is_candidate_for_flat_five("2m7", crop_raw="2m7-5") is True
+    assert is_candidate_for_flat_five("b6/2m7-5") is False
+    assert is_candidate_for_flat_five("6m7-5") is False
+    assert is_candidate_for_flat_five("1(2)") is False
+
+
+def test_system_reading_out_of_order_and_skip(dummy_images):
+    """Verify read_sheet handles model returning systems out of order and skips one."""
+    from unittest.mock import patch
+    from app.omr.geometry import PageGeometry, GSystem, GMeasure, GChordBox
+    from app.omr.reader import read_sheet, SystemReadingWithIndex
+    from app.omr.reader_prompts import HeaderReading, BoxReading
+
+    geom = PageGeometry(
+        page=0,
+        width=1000,
+        height=1500,
+        confidence=0.95,
+        header_band=(0.02, 0.10),
+        systems=[
+            GSystem(
+                page=0,
+                index_on_page=0,
+                bbox=(0.05, 0.15, 0.95, 0.25),
+                melody_band=(0.18, 0.23),
+                measures=[GMeasure(index_in_system=0, x0=0.05, x1=0.50), GMeasure(index_in_system=1, x0=0.50, x1=0.95)],
+                chord_boxes=[GChordBox(index_in_system=0, measure_index_in_system=0, bbox=(0.10, 0.15, 0.20, 0.18), beat_geo=1.0)],
+            ),
+            GSystem(
+                page=0,
+                index_on_page=1,
+                bbox=(0.05, 0.30, 0.95, 0.40),
+                melody_band=(0.33, 0.38),
+                measures=[GMeasure(index_in_system=0, x0=0.05, x1=0.50), GMeasure(index_in_system=1, x0=0.50, x1=0.95)],
+                chord_boxes=[GChordBox(index_in_system=0, measure_index_in_system=0, bbox=(0.10, 0.30, 0.20, 0.33), beat_geo=1.0)],
+            ),
+            GSystem(
+                page=0,
+                index_on_page=2,
+                bbox=(0.05, 0.45, 0.95, 0.55),
+                melody_band=(0.48, 0.53),
+                measures=[GMeasure(index_in_system=0, x0=0.05, x1=0.50), GMeasure(index_in_system=1, x0=0.50, x1=0.95)],
+                chord_boxes=[GChordBox(index_in_system=0, measure_index_in_system=0, bbox=(0.10, 0.45, 0.20, 0.48), beat_geo=1.0)],
+            ),
+        ],
+    )
+
+def _mock_ask_out_of_order(prompt, schema, images=None, model=None, timeout_s=90.0):
+    from app.omr.reader import SystemReadingWithIndex
+    from app.omr.reader_prompts import HeaderReading, BoxReading
+
+    if schema == HeaderReading:
+        return HeaderReading(title="Test Out of Order", chord_notation="number")
+    if "[System 2]" in prompt:
+        return SystemReadingWithIndex(system_index=2, chord_boxes=[BoxReading(box_id=1, text="5")])
+    elif "[System 0]" in prompt:
+        return SystemReadingWithIndex(system_index=0, chord_boxes=[BoxReading(box_id=1, text="1")])
+    elif "[System 1]" in prompt:
+        return SystemReadingWithIndex(system_index=1, chord_boxes=[BoxReading(box_id=1, text="4")])
+    return SystemReadingWithIndex()
+
+
+def test_system_reading_out_of_order_and_skip(dummy_images):
+    """Verify read_sheet handles model returning systems out of order and skips one."""
+    from unittest.mock import patch
+    from app.omr.geometry import PageGeometry, GSystem, GMeasure, GChordBox
+    from app.omr.reader import read_sheet
+
+    geom = PageGeometry(
+        page=0,
+        width=1000,
+        height=1500,
+        confidence=0.95,
+        header_band=(0.02, 0.10),
+        systems=[
+            GSystem(
+                page=0,
+                index_on_page=0,
+                bbox=(0.05, 0.15, 0.95, 0.25),
+                melody_band=(0.18, 0.23),
+                measures=[GMeasure(index_in_system=0, x0=0.05, x1=0.50), GMeasure(index_in_system=1, x0=0.50, x1=0.95)],
+                chord_boxes=[GChordBox(index_in_system=0, measure_index_in_system=0, bbox=(0.10, 0.15, 0.20, 0.18), beat_geo=1.0)],
+            ),
+            GSystem(
+                page=0,
+                index_on_page=1,
+                bbox=(0.05, 0.30, 0.95, 0.40),
+                melody_band=(0.33, 0.38),
+                measures=[GMeasure(index_in_system=0, x0=0.05, x1=0.50), GMeasure(index_in_system=1, x0=0.50, x1=0.95)],
+                chord_boxes=[GChordBox(index_in_system=0, measure_index_in_system=0, bbox=(0.10, 0.30, 0.20, 0.33), beat_geo=1.0)],
+            ),
+            GSystem(
+                page=0,
+                index_on_page=2,
+                bbox=(0.05, 0.45, 0.95, 0.55),
+                melody_band=(0.48, 0.53),
+                measures=[GMeasure(index_in_system=0, x0=0.05, x1=0.50), GMeasure(index_in_system=1, x0=0.50, x1=0.95)],
+                chord_boxes=[GChordBox(index_in_system=0, measure_index_in_system=0, bbox=(0.10, 0.45, 0.20, 0.48), beat_geo=1.0)],
+            ),
+        ],
+    )
+
+    with patch("app.omr.reader.ask_reader", side_effect=_mock_ask_out_of_order):
+        sheet = read_sheet([dummy_images[0]], [geom], model="gemini-2.5-pro")
+
+    assert len(sheet.systems) == 3
+    assert sheet.systems[0].measures[0].chords[0].raw == "1"
+    assert sheet.systems[1].measures[0].chords[0].raw == "4"
+    assert sheet.systems[2].measures[0].chords[0].raw == "5"
+
+
+def test_degenerate_and_inverted_boxes(dummy_images):
+    """Verify annotate_system_crop and read_sheet never crash on degenerate, zero-width, or inverted boxes."""
+    from unittest.mock import patch
+    from PIL import Image
+    from app.omr.geometry import PageGeometry, GSystem, GMeasure, GChordBox
+    from app.omr.reader import annotate_system_crop, read_sheet, SystemReadingWithIndex
+    from app.omr.reader_prompts import HeaderReading, BoxReading
+
+    page_img = Image.new("RGB", (1000, 1500), (255, 255, 255))
+    sys_geom = GSystem(
+        page=0,
+        index_on_page=0,
+        bbox=(0.05, 0.25, 0.95, 0.15),  # Inverted y
+        melody_band=(0.18, 0.23),
+        measures=[
+            GMeasure(index_in_system=0, x0=0.60, x1=0.10),  # Inverted x
+            GMeasure(index_in_system=1, x0=0.60, x1=0.60),  # Zero-width
+        ],
+        chord_boxes=[
+            GChordBox(index_in_system=0, measure_index_in_system=0, bbox=(0.20, 0.15, 0.10, 0.10), beat_geo=1.0),  # Inverted x and y
+            GChordBox(index_in_system=1, measure_index_in_system=1, bbox=(0.10, 0.15, 0.10, 0.15), beat_geo=2.0),  # Zero-width and zero-height
+        ],
+    )
+
+    # 1. annotate_system_crop must not raise
+    crop_bytes, num_boxes = annotate_system_crop(page_img, sys_geom, page_idx=0, system_idx=0)
+    assert len(crop_bytes) > 0
+    assert num_boxes == 2
+
+    # 2. read_sheet with degenerate boxes must not raise
+    geom = PageGeometry(
+        page=0,
+        width=1000,
+        height=1500,
+        confidence=0.95,
+        header_band=(0.02, 0.10),
+        systems=[sys_geom],
+    )
+
+    with patch("app.omr.reader.ask_reader", side_effect=_mock_reader_degenerate):
+        sheet = read_sheet([dummy_images[0]], [geom], model="gemini-2.5-pro")
+
+    assert len(sheet.systems) == 1
+    assert sheet.layout_source == "cv"
+
+
+def _mock_reader_degenerate(prompt, schema, images, **kwargs):
+    from app.omr.reader import SystemReadingWithIndex
+    from app.omr.reader_prompts import HeaderReading, BoxReading
+
+    if "PAGE HEADER" in prompt or "SongHeader" in str(schema):
+        return HeaderReading(title="Test Degenerate", chord_notation="number")
+    return SystemReadingWithIndex(
+        system_index=0,
+        chord_boxes=[
+            BoxReading(box_id=1, text="1"),
+            BoxReading(box_id=2, text="4"),
+        ],
+    )
+
+
+def _raising_read_sheet(*args, **kwargs):
+    raise ValueError("Simulated crash in reader")
+
+
+def test_parse_pages_v2_reader_fallback(monkeypatch, dummy_images):
+    """Verify parse_pages catches read_sheet exception and falls back to whole-page OMR."""
+    from unittest.mock import patch, MagicMock
+    from app.omr import gemini_omr
+    from app.omr.geometry import PageGeometry, GSystem, GMeasure
+
+    geom = PageGeometry(
+        page=0,
+        width=1000,
+        height=1500,
+        confidence=0.95,
+        header_band=(0.02, 0.10),
+        systems=[GSystem(page=0, index_on_page=0, bbox=(0.05, 0.15, 0.95, 0.25), melody_band=(0.18, 0.23), measures=[GMeasure(index_in_system=0, x0=0.05, x1=0.95)])],
+    )
+
+    monkeypatch.setattr("app.omr.layout.analyze_page", lambda img_bytes, idx: geom)
+
+    mock_client = MagicMock()
+    mock_single_page = MagicMock()
+    mock_single_page.warnings = []
+    mock_single_page.header = None
+    mock_single_page.systems = []
+    mock_single_page.key_changes = []
+
+    with patch("app.omr.reader.read_sheet", side_effect=_raising_read_sheet):
+        with patch.object(gemini_omr, "get_client", return_value=mock_client):
+            with patch.object(gemini_omr, "parse_single_page", return_value=mock_single_page):
+                sheet = gemini_omr.parse_pages([dummy_images[0]], model="gemini-2.5-pro")
+
+    assert sheet.layout_source == "llm"
+    assert any("[v2_reader_fallback]" in w for w in sheet.warnings)
+
+
+def test_unboxed_chords_on_boxed_chart_direct_drop(clean_sheet, dummy_images):
+    """Verify that unboxed chords on boxed charts are dropped directly without triggering LLM re-reading."""
+    sheet = clean_sheet.model_copy(deep=True)
+    sheet.layout_source = "cv"
+    sheet.layout_confidence = 0.95
+
+    # Establish boxed chart with >= 5 boxed chords
+    for s in sheet.systems:
+        for m in s.measures:
+            for c in m.chords:
+                c.bbox = (0.1, 0.2, 0.2, 0.25)
+
+    # Measure 0: unboxed voicing pattern chord '0'
+    m0 = sheet.systems[0].measures[0]
+    m0.chords.append(ChordSymbol(raw="0", beat=3.0, bbox=None, confidence=1.0))
+
+    # Measure 1: unboxed non-chord token 'PN'
+    m1 = sheet.systems[0].measures[1]
+    m1.chords.append(ChordSymbol(raw="PN", beat=3.0, bbox=None, confidence=1.0))
+
+    # Measure 2: unboxed valid chord '5' (missed by layout CV)
+    m2 = sheet.systems[0].measures[2]
+    m2.chords.append(ChordSymbol(raw="5", beat=3.0, bbox=None, confidence=1.0))
+
+    verified = verify_sheet(dummy_images, sheet, use_llm=False)
+
+    # Measure 0 voicing pattern chord '0' dropped
+    assert not any(c.raw == "0" and c.beat == 3.0 for c in verified.systems[0].measures[0].chords)
+    assert any(i.code == "non_chord_token_dropped" and i.measure_index == m0.index for i in verified.issues)
+
+    # Measure 1 unboxed non-chord token 'PN' dropped directly
+    assert not any(c.raw == "PN" and c.beat == 3.0 for c in verified.systems[0].measures[1].chords)
+    assert any(i.code == "non_chord_token_dropped" and i.measure_index == m1.index for i in verified.issues)
+
+    # Measure 2 unboxed valid chord '5' retained
+    assert any(c.raw == "5" and c.beat == 3.0 for c in verified.systems[0].measures[2].chords)
+
+
+def test_use_llm_false_never_leaves_empty_raws(clean_sheet, dummy_images):
+    """Running verify_sheet with use_llm=False never leaves empty or whitespace raw chords."""
+    sheet = clean_sheet.model_copy(deep=True)
+    m0 = sheet.systems[0].measures[0]
+    m0.chords.append(ChordSymbol(raw="", beat=2.0, bbox=(0.1, 0.2, 0.2, 0.25)))
+    m1 = sheet.systems[0].measures[1]
+    m1.chords.append(ChordSymbol(raw="   ", beat=3.0, bbox=None))
+
+    verified = verify_sheet(dummy_images, sheet, use_llm=False)
+
+    for s in verified.systems:
+        for m in s.measures:
+            for c in m.chords:
+                assert c.raw and c.raw.strip(), f"Found empty raw chord in measure {m.index}: {c!r}"
 
