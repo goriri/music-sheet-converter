@@ -327,7 +327,7 @@ def arrange(
                         stacked_orientation=stacked_orientation,
                     )
                     resolved.append(rc)
-                except ValueError:
+                except ValueError as exc:
                     cleaned = clean_raw_chord(cs.raw)
                     if cleaned.startswith("/") and prev_c is None:
                         tonic_prior = resolve_chord("1", current_tonic_pc, cs.beat, current_key_name)
@@ -385,26 +385,35 @@ def arrange(
                         arr_notes.append(
                             f"Measure {m.index}: Unparseable chord {cs.raw!r} replaced with alternative {alt_resolved.raw!r}"
                         )
-                    elif last_chords:
-                        last_ch = last_chords[-1]
-                        carried = ResolvedChord(
-                            raw=cs.raw,
-                            name=last_ch.name,
-                            beat=cs.beat,
-                            root_pc=last_ch.root_pc,
-                            bass_pc=last_ch.bass_pc,
-                            pcs=last_ch.pcs,
-                            quality=last_ch.quality,
-                        )
-                        resolved.append(carried)
-                        arr_notes.append(
-                            f"Measure {m.index}: Unparseable chord {cs.raw!r} replaced with carried chord {last_ch.name}"
-                        )
                     else:
-                        default_rc = resolve_chord("1", current_tonic_pc, cs.beat, current_key_name)
-                        resolved.append(default_rc)
+                        hold_chord = prev_c
+                        if hold_chord is not None:
+                            carried = ResolvedChord(
+                                raw=cs.raw,
+                                name=hold_chord.name,
+                                beat=cs.beat,
+                                root_pc=hold_chord.root_pc,
+                                bass_pc=hold_chord.bass_pc,
+                                pcs=hold_chord.pcs,
+                                quality=hold_chord.quality,
+                            )
+                            resolved.append(carried)
+                        else:
+                            default_rc = resolve_chord("1", current_tonic_pc, cs.beat, current_key_name)
+                            resolved.append(default_rc)
+
                         arr_notes.append(
-                            f"Measure {m.index}: Unparseable chord {cs.raw!r} replaced with default tonic chord"
+                            f"UNPARSEABLE: measure={m.index} raw={cs.raw!r} reason={str(exc)}"
+                        )
+                        arr_issues.append(
+                            QualityIssue(
+                                stage="arrange",
+                                severity="auto_fixed",
+                                code="unparseable_chord",
+                                message=f"第 {m.index + 1} 小节和弦 {cs.raw!r} 无法识别，已沿用前一和弦（{resolved[-1].name}）",
+                                measure_index=m.index,
+                                detail={"raw": cs.raw, "fallback": resolved[-1].name, "reason": str(exc)},
+                            )
                         )
             if resolved:
                 last_chords = resolved

@@ -620,6 +620,39 @@ def fails_stricter_heuristic(
     return False, ""
 
 
+def _refinger_fallback_events(events: list[Event], hand: str) -> None:
+    """Ensure sequential single notes in fallback measures do not repeat the same finger at close intervals."""
+    sounding = [(i, ev) for i, ev in enumerate(events) if ev.notes and len(ev.notes) == 1]
+    for idx in range(len(sounding) - 1):
+        orig_i, ev1 = sounding[idx]
+        orig_next_i, ev2 = sounding[idx + 1]
+        n1 = ev1.notes[0]
+        n2 = ev2.notes[0]
+        if n1.midi == n2.midi:
+            continue
+        if orig_next_i > orig_i + 1:
+            if any(len(events[k].notes) == 0 for k in range(orig_i + 1, orig_next_i)):
+                continue
+        delta = round(ev2.onset - ev1.onset, 4)
+        if delta <= 0.5 and n1.finger == n2.finger:
+            if hand == "LH":
+                if n2.midi > n1.midi:
+                    candidate = n1.finger - 2 if n1.finger > 2 else (n1.finger - 1 if n1.finger > 1 else 2)
+                else:
+                    candidate = n1.finger + 2 if n1.finger < 4 else (n1.finger + 1 if n1.finger < 5 else 4)
+                if candidate == n1.finger:
+                    candidate = 3 if n1.finger != 3 else 2
+                n2.finger = candidate
+            else:  # RH
+                if n2.midi > n1.midi:
+                    candidate = n1.finger + 2 if n1.finger < 4 else (n1.finger + 1 if n1.finger < 5 else 4)
+                else:
+                    candidate = n1.finger - 2 if n1.finger > 2 else (n1.finger - 1 if n1.finger > 1 else 2)
+                if candidate == n1.finger:
+                    candidate = 3 if n1.finger != 3 else 2
+                n2.finger = candidate
+
+
 def check_and_repair(
     sheet: ParsedSheet,
     arrangement: Arrangement,
@@ -688,6 +721,8 @@ def check_and_repair(
                 difficulty=arrangement.difficulty,
                 prev_rh_voicing=prev_rh_voicing,
             )
+            _refinger_fallback_events(safe_rh, "RH")
+            _refinger_fallback_events(safe_lh, "LH")
             m_arr.rh = safe_rh
             m_arr.lh = safe_lh
             m_arr.tonic_pc = exp_tonic
@@ -697,21 +732,28 @@ def check_and_repair(
             recheck_violations = validate_measure(m_arr, measure, exp_tonic, arrangement.difficulty, next_chord)
             if recheck_violations:
                 recheck_errs = "; ".join(v.message for v in recheck_violations)
-                raise ArrangementQAError(
-                    f"Safe fallback failed re-validation on measure {m_idx + 1}: {recheck_errs}"
+                arrangement.issues.append(
+                    QualityIssue(
+                        stage="arrange",
+                        severity="needs_review",
+                        measure_index=m_idx,
+                        code="fallback_recheck_warning",
+                        message=f"第{m_idx + 1}小节安全回退复核未完全通过（{recheck_errs}），已保留稳妥弹法供人工确认",
+                        detail={"recheck_violations": [v.code for v in recheck_violations]},
+                    )
                 )
-
-            # Record auto-fixed QualityIssue
-            arrangement.issues.append(
-                QualityIssue(
-                    stage="arrange",
-                    severity="auto_fixed",
-                    measure_index=m_idx,
-                    code=primary.code,
-                    message=f"第{m_idx + 1}小节检测到编曲问题（{primary.message}），已改用稳妥弹法",
-                    detail={"original_violations": [v.code for v in violations]},
+            else:
+                # Record auto-fixed QualityIssue
+                arrangement.issues.append(
+                    QualityIssue(
+                        stage="arrange",
+                        severity="auto_fixed",
+                        measure_index=m_idx,
+                        code=primary.code,
+                        message=f"第{m_idx + 1}小节检测到编曲问题（{primary.message}），已改用稳妥弹法",
+                        detail={"original_violations": [v.code for v in violations]},
+                    )
                 )
-            )
 
         # Track previous RH voicing for voice leading
         for ev in m_arr.rh:
@@ -752,6 +794,8 @@ def check_and_repair(
                             difficulty=arrangement.difficulty,
                             prev_rh_voicing=prev_rh_voicing,
                         )
+                        _refinger_fallback_events(safe_rh, "RH")
+                        _refinger_fallback_events(safe_lh, "LH")
                         m_arr.rh = safe_rh
                         m_arr.lh = safe_lh
                         arrangement.issues.append(

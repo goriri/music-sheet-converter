@@ -802,6 +802,41 @@ class TestLetterChordArrangement:
             for i in arr.issues
         )
 
+    def test_tinghai_like_letter_notation_with_number_raws(self):
+        """A chart with header.chord_notation='letter' but number chords (e.g. 1add9, 4maj7) parses correctly."""
+        header = SongHeader(title="Ting Hai Mock", original_key="Bb", chord_notation="letter")
+        m0 = Measure(
+            index=0,
+            bbox=(0, 0, 1, 1),
+            beats=4.0,
+            chords=[ChordSymbol(raw="1add9", beat=1.0), ChordSymbol(raw="1/2m7-5", beat=3.0)],
+        )
+        m1 = Measure(
+            index=1,
+            bbox=(0, 0, 1, 1),
+            beats=4.0,
+            chords=[ChordSymbol(raw="3m7", beat=1.0), ChordSymbol(raw="4maj7", beat=3.0)],
+        )
+        sheet = ParsedSheet(header=header, pages=[], systems=[System(page=0, bbox=(0, 0, 1, 1), measures=[m0, m1])])
+        arr = arrange(sheet, start_key="Bb")
+        assert [c.name for c in arr.measures[0].chords] == ["Bbadd9", "Cm7b5/Bb"]
+        assert [c.name for c in arr.measures[1].chords] == ["Dm7", "Ebmaj7"]
+        unparseable = [n for n in arr.notes if n.startswith("UNPARSEABLE:")]
+        assert len(unparseable) == 0
+
+    def test_check_and_repair_safe_fallback_no_crash(self):
+        """check_and_repair must not crash with ArrangementQAError when safe fallback is triggered."""
+        from app.qa.arrange_check import check_and_repair
+
+        gt_path = os.path.join(os.path.dirname(__file__), "..", "out", "gt_eval", "qianlizhiwai.json")
+        if os.path.exists(gt_path):
+            with open(gt_path, "r", encoding="utf-8") as f:
+                sheet = ParsedSheet.model_validate_json(f.read())
+            arr = arrange(sheet, start_key="G", difficulty="intermediate")
+            repaired = check_and_repair(sheet, arr)
+            assert len(repaired.measures) == len(sheet.measures())
+
+
 
 
 

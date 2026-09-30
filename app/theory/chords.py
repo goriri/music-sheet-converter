@@ -476,9 +476,7 @@ def resolve_chord(
 
         bass_part = cleaned_raw[1:]
         m_let = re.match(r"^([A-Ga-g])([b#♭♯]?)$", bass_part)
-        if m_let or notation == "letter":
-            if not m_let:
-                raise ValueError(f"Invalid letter bass note {bass_part!r} in {raw!r}")
+        if m_let:
             b_let = m_let.group(1).upper()
             b_acc_raw = m_let.group(2)
             b_acc = "b" if b_acc_raw in ("b", "♭") else ("#" if b_acc_raw in ("#", "♯") else "")
@@ -486,7 +484,7 @@ def resolve_chord(
             b_pc = KEY_NAME_TO_PC.get(b_name.upper())
             if b_pc is None:
                 raise ValueError(f"Unrecognized bass note in letter chord: {raw!r}")
-            shift = (tonic_pc - printed_tonic_pc) % 12 if (notation == "letter" and printed_tonic_pc is not None) else 0
+            shift = (tonic_pc - printed_tonic_pc) % 12 if printed_tonic_pc is not None else 0
             if shift != 0:
                 b_pc = (b_pc + shift) % 12
                 b_name = spell(b_pc, tonic_pc=tonic_pc, key_name=key_name)
@@ -510,15 +508,21 @@ def resolve_chord(
             quality=prior.quality,
         )
 
-    # Auto-detect letter chords
-    is_letter = (
-        bool(re.match(r"^[A-Ga-g][b#]?(?![0-9])", cleaned_raw))
-        and not bool(re.match(r"^[b#][1-7]", cleaned_raw))
-    )
-    if notation == "number" and is_letter:
-        notation = "letter"
+    # Per-token notation detection:
+    # A token starting with a digit (optionally b/# + digit, or a circled digit) is a number chord.
+    # A token starting with A-G is a letter chord.
+    # The header field only decides transposition for letter tokens.
+    is_number = bool(re.match(r"^[b#♭♯]?[1-7]", cleaned_raw))
+    is_letter = bool(re.match(r"^[A-Ga-g]", cleaned_raw))
 
-    if notation == "letter":
+    if is_number:
+        token_notation = "number"
+    elif is_letter:
+        token_notation = "letter"
+    else:
+        token_notation = notation
+
+    if token_notation == "letter":
         spec = parse_letter_chord(raw)
         shift = (tonic_pc - printed_tonic_pc) % 12 if printed_tonic_pc is not None else 0
 
