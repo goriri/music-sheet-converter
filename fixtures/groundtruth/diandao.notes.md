@@ -20,3 +20,19 @@
    - Opus accurately detected all 3 passing chords in this cadence bar before the repeat.
 3. **Key Change Verification**:
    - The original sheet is in C throughout. The baseline pipeline `verified.json` falsely asserted a modulation at m78 (borrowed from diaole fallback). Ground truth strictly has `key_changes: []`.
+
+## Visual Audit for Small Flats (Accidentals)
+- Audited all rows against original sheet crops at 3x zoom for small preceding flat signs (`♭`):
+  - `p1 r2`: m2 has `♭⑦add9` (`b7add9`).
+  - `p1 r3`: m2 has `♭⑦add9` (`b7add9`); m4 has `♭⑥/④m` (`b6/4m`) and `♭⑦` (`b7`).
+  - `p1 r4`: m4 has `♭⑦add9` (`b7add9`).
+  - `p1 r5`: m3 has `♭⑦add9` (`b7add9`).
+  - `p1 r6`: m4 has `♭⑥` (`b6`).
+  - `p1 r8`: m2 has `♭⑦add9` (`b7add9`).
+  - `p1 r9`: m2 has `♭⑦add9` (`b7add9`).
+  - `p2 r1` & `p2 r2`: m2 has `♭⑦` (`b7`).
+  - `p2 r3`: m4 has `♭⑦` (`b7`).
+  - `p2 r4`: m2 is natural `⑥` (major 6th secondary dominant, no flat engraved), m3 has `♭⑦` (`b7`).
+  - `p2 r5`: m4 has `♭⑥` (`b6`).
+- All flat symbols are accurately captured and verified 100% consistent with the engraved sheet.
+
