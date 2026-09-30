@@ -1,0 +1,743 @@
+{
+  "slug": "xueronghua",
+  "pages": 2,
+  "header": {
+    "time_signature": "3/4",
+    "original_key": "D",
+    "chord_notation": "number"
+  },
+  "key_changes": [],
+  "rows": [
+    {
+      "page": 1,
+      "row": 1,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1add9",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4/2m7-5",
+              "beat": 1.0,
+              "stacked": true
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1add9",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4/2m7-5",
+              "beat": 1.0,
+              "stacked": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 2,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1add9",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5add9",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4sus2",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1add9",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 3,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1add9",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4/2m7-5",
+              "beat": 1.0,
+              "stacked": true
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1add9",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4/2m7-5",
+              "beat": 1.0,
+              "stacked": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 4,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1add9",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "67",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "#1/67",
+              "beat": 1.0,
+              "stacked": true
+            },
+            {
+              "raw": "2m7/9",
+              "beat": 2.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "#4/27/9",
+              "beat": 1.0,
+              "stacked": true
+            },
+            {
+              "raw": "57/11",
+              "beat": 2.0
+            },
+            {
+              "raw": "5",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 5,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1add9",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4/2m7-5",
+              "beat": 1.0,
+              "stacked": true
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1add9",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4/2m7-5",
+              "beat": 1.0,
+              "stacked": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 6,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1add9",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5add9",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4sus2",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1add9",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 7,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "5add9",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5",
+              "beat": 1.0
+            },
+            {
+              "raw": "7/5",
+              "beat": 3.0,
+              "stacked": true
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            },
+            {
+              "raw": "7/5",
+              "beat": 3.0,
+              "stacked": true
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m7",
+              "beat": 1.0
+            },
+            {
+              "raw": "5/1maj7",
+              "beat": 3.0,
+              "stacked": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 8,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "4maj7",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "#4/2",
+              "beat": 1.0,
+              "stacked": true
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "7/5",
+              "beat": 1.0,
+              "stacked": true
+            },
+            {
+              "raw": "57/9",
+              "beat": 3.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 9,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1add9",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "b7",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "6m7",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "b6/2m7-5",
+              "beat": 1.0,
+              "stacked": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 1,
+      "row": 10,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "5/1",
+              "beat": 1.0,
+              "stacked": true
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "27/13",
+              "beat": 1.0
+            },
+            {
+              "raw": "b37/13",
+              "beat": 2.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1add9",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 1,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 2,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 3,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 4,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 5,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "2",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 6,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 7,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "row": 8,
+      "measures": [
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "5",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "4",
+              "beat": 1.0
+            }
+          ]
+        },
+        {
+          "chords": [
+            {
+              "raw": "1",
+              "beat": 1.0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
