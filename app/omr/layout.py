@@ -92,7 +92,7 @@ def _find_dashes_in_binary(
     for i in range(1, num):
         x, y, sw, sh, area = stats[i]
         cx, cy = centroids[i]
-        if sw <= 5 and 1 <= sh <= 16 and area <= 65:
+        if sw <= 5 and 1 <= sh <= max(25, int(0.85 * mel_h)) and area <= 120:
             dash_candidates.append((float(cx), float(cy + y0), int(sh), int(y + y0), int(y + y0 + sh)))
 
     dash_candidates.sort(key=lambda d: d[0])
@@ -113,11 +113,13 @@ def _find_dashes_in_binary(
     bars: list[tuple[float, float, int, int, float, float]] = []
     min_span = max(12.0, 0.55 * mel_h)
     for g in groups:
-        if len(g) >= 3:
-            top_y = min(d[3] for d in g)
-            bot_y = max(d[4] for d in g)
-            span_y = bot_y - top_y
-            if span_y >= min_span:
+        top_y = min(d[3] for d in g)
+        bot_y = max(d[4] for d in g)
+        span_y = bot_y - top_y
+        is_dashed_bar = (len(g) >= 3 and span_y >= min_span) or (
+            len(g) >= 2 and span_y >= max(20.0, 0.75 * mel_h) and any(d[2] >= 18 for d in g)
+        )
+        if is_dashed_bar:
                 avg_x = float(np.mean([d[0] for d in g]))
                 avg_y = float(np.mean([d[1] for d in g]))
                 if not (0.02 * crop.shape[1] <= avg_x <= 0.98 * crop.shape[1]):
@@ -727,7 +729,7 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
         sheet_left = float(np.median(full_lefts)) if full_lefts else 0.05 * w
         sheet_right = float(np.median(full_rights)) if full_rights else 0.95 * w
 
-        if sheet_left > 0.16 * w:
+        if not is_tall_bar and sheet_left > 0.16 * w:
             left_proj = np.sum(bin_img[:, : int(sheet_left - 0.04 * w)] > 0, axis=0)
             ink_cols = np.where(left_proj > 20)[0]
             if len(ink_cols) > 0 and len(ink_cols) >= int(0.05 * w):
@@ -837,7 +839,32 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
             melody_band_norm = (round(mel_y0 / float(h), 4), round(mel_y1 / float(h), 4))
 
             # Candidate barlines: combine solid bars and dashed barlines
-            candidate_bars: list[tuple] = list(sys_cand["bars"])
+            candidate_bars: list[tuple] = []
+            mel_h_val = float(mel_y1 - mel_y0)
+            scale_h = h / 2400.0
+            min_solid_run = (
+                max(int(round(15 * scale_h)), int(round(0.48 * mel_h_val)))
+                if chords_below
+                else max(int(round(10 * scale_h)), int(round(0.35 * mel_h_val)))
+            )
+            for b in sys_cand["bars"]:
+                bx = int(round(b[0]))
+                crop = bin_img[mel_y0:mel_y1, max(0, bx - 2):min(w, bx + 3)]
+                if crop.size > 0:
+                    max_run = 0
+                    for c in range(crop.shape[1]):
+                        col = crop[:, c] > 0
+                        curr = 0
+                        for px in col:
+                            if px:
+                                curr += 1
+                                if curr > max_run:
+                                    max_run = curr
+                            else:
+                                curr = 0
+                    if max_run >= min_solid_run:
+                        candidate_bars.append(b)
+
             dashed_bars = (
                 []
                 if is_boxed_page
@@ -846,21 +873,24 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                     ym,
                     y_radius=int(0.015 * h),
                     u_curr=u_curr,
-                    mel_h=float(mel_y1 - mel_y0),
+                    mel_h=mel_h_val,
                     gray=gray,
                 )
             )
             for db in dashed_bars:
                 # If db is on the left (pickup candidate)
                 if db[0] < sheet_left + 0.05 * w:
-                    if is_tall_bar and s_idx > 0:
-                        continue
-                    if not is_tall_bar:
-                        scale_f = (h / 2400.0) * (w / 1700.0)
-                        left_ink = np.sum(bin_img[y_top:y_bot, int(db[0]):int(sheet_left - 2)] > 0)
-                        min_ink = 350 if s_idx == 0 else 650
-                        if (left_ink / scale_f) < min_ink:
+                    scale_f = (h / 2400.0) * (w / 1700.0)
+                    next_solid = [b[0] for b in candidate_bars if b[0] > db[0] + 15]
+                    x_end = int((min(next_solid) if next_solid else max(sheet_left, db[0] + 0.08 * w)) - 2)
+                    if x_end > int(db[0] + 4):
+                        mel_ink = np.sum(bin_img[mel_y0:mel_y1, int(db[0] + 4):x_end] > 0)
+                        row_ink = np.sum(bin_img[y_top:y_bot, int(db[0]):x_end] > 0)
+                        has_pickup = (mel_ink / scale_f >= 40) or (s_idx == 0 and is_tall_bar and row_ink / scale_f >= 350)
+                        if not has_pickup:
                             continue
+                    else:
+                        continue
                 candidate_bars.append(db)
 
             m_bars: list[float] = []
@@ -876,7 +906,13 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                         m_bars.append(bx)
 
                 # Filter spurious elements outside printable region
-                m_bars = [bx for bx in m_bars if sheet_left - 0.08 * w <= bx <= sheet_right + 0.04 * w]
+                dashed_xs = {db[0] for db in dashed_bars}
+                m_bars = [
+                    bx
+                    for bx in m_bars
+                    if (bx >= 0.02 * w and any(abs(db[0] - bx) <= 5.0 for db in dashed_bars))
+                    or (sheet_left - 0.08 * w <= bx <= sheet_right + 0.04 * w)
+                ]
 
                 # Evidence-based minimum measure spacing: 0.042 * w
                 m_bars_spaced: list[float] = []
@@ -891,7 +927,8 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                     is_full_meas = (m_bars[0] - sheet_left >= 0.14 * w)
                     if is_full_meas or not chords_below:
                         pickup_crop = bin_img[mel_y0:mel_y1, int(sheet_left - 0.02 * w):int(m_bars[0] - 10)]
-                        if np.sum(pickup_crop > 0) > 80:
+                        min_pickup_ink = 80 * scale_f
+                        if np.sum(pickup_crop > 0) > min_pickup_ink:
                             m_bars.insert(0, sheet_left)
 
                 if is_boxed_page and scaled_page:
@@ -1037,6 +1074,8 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                 sys_notes.append("chord_only")
             elif chords_below:
                 sys_notes.append("chords_below")
+            if m_bars and (m_bars[0] < sheet_left - 0.02 * w or any(abs(db[0] - m_bars[0]) <= 5.0 for db in dashed_bars)):
+                sys_notes.append("pickup")
 
             systems.append(
                 GSystem(

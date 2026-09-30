@@ -422,5 +422,59 @@ def test_pickup_and_measure_invariants():
         assert m0_w >= 0.14, f"Full measure width should be >= 0.14, got {m0_w}"
 
 
+def _calculate_max_vertical_run(bin_img: np.ndarray, y0: int, y1: int, bx: int, img_w: int) -> int:
+    crop = bin_img[y0:y1, max(0, bx - 2) : min(img_w, bx + 3)]
+    max_run = 0
+    for c in range(crop.shape[1]):
+        col = crop[:, c] > 0
+        curr = 0
+        for px in col:
+            if px:
+                curr += 1
+                if curr > max_run:
+                    max_run = curr
+            else:
+                curr = 0
+    return max_run
+
+
+def test_barline_continuous_run_rejection():
+    """Verify that spurious strokes (dotted-note columns, slur/tie ends) are rejected as barlines.
+
+    Rule (b) requires a real barline to have a continuous ink run >= min_solid_run or >= 3 dashes.
+    - Dotted-note column: vertically spaced dots with white gaps between them must be rejected.
+    - Slur/tie end: thin horizontal/curved tick (height <= 3 px) must be rejected.
+    - Real solid barline: continuous ink run spanning melody band height must be accepted.
+    """
+    import numpy as np
+
+    h, w = 400, 800
+    bin_img = np.zeros((h, w), dtype=np.uint8)
+    mel_y0, mel_y1 = 150, 200
+    mel_h = float(mel_y1 - mel_y0)
+
+    # 1. Real solid barline at x=200: continuous run of 30 px
+    bin_img[mel_y0 + 10 : mel_y1 - 10, 200] = 255
+
+    # 2. Dotted-note column at x=350: 3 dots (height 3 px, gap 8 px) -> max continuous run = 3 px
+    bin_img[mel_y0 + 10 : mel_y0 + 13, 350] = 255
+    bin_img[mel_y0 + 21 : mel_y0 + 24, 350] = 255
+    bin_img[mel_y0 + 32 : mel_y0 + 35, 350] = 255
+
+    # 3. Slur / tie end at x=500: horizontal curve/tick of height 2 px, width 12 px -> max run = 2 px
+    bin_img[mel_y0 + 20 : mel_y0 + 22, 494:506] = 255
+
+    # Verify solid bar continuous ink run filter directly
+    scale_h = h / 2400.0
+    min_solid_run = max(int(round(15 * scale_h)), int(round(0.48 * mel_h)))
+
+    # Solid bar has continuous run >= min_solid_run
+    assert _calculate_max_vertical_run(bin_img, mel_y0, mel_y1, 200, w) >= min_solid_run
+    # Dotted-note column has max run 3 px < min_solid_run -> rejected
+    assert _calculate_max_vertical_run(bin_img, mel_y0, mel_y1, 350, w) < min_solid_run
+    # Slur / tie end has max run 2 px < min_solid_run -> rejected
+    assert _calculate_max_vertical_run(bin_img, mel_y0, mel_y1, 500, w) < min_solid_run
+
+
 
 

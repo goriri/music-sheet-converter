@@ -1,85 +1,237 @@
 {
   "fixtures/pages/page1.jpg": {
     "num_systems": 10,
-    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "measures_per_system": [
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
     "total_measures": 40,
     "verified_by_eye": true
   },
   "fixtures/pages/page2.jpg": {
     "num_systems": 9,
-    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4, 5],
+    "measures_per_system": [
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      5
+    ],
     "total_measures": 37,
     "verified_by_eye": true
   },
   "fixtures/external/qianlizhiwai/page1.jpg": {
     "num_systems": 10,
-    "measures_per_system": [3, 3, 3, 3, 3, 3, 4, 4, 4, 3],
+    "measures_per_system": [
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      4,
+      4,
+      4,
+      3
+    ],
     "total_measures": 33,
     "verified_by_eye": true
   },
   "fixtures/external/tinghai/page1.jpg": {
     "num_systems": 12,
-    "measures_per_system": [4, 4, 5, 4, 5, 4, 4, 4, 4, 4, 4, 4],
+    "measures_per_system": [
+      4,
+      4,
+      5,
+      4,
+      5,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
     "total_measures": 50,
     "verified_by_eye": true
   },
   "fixtures/external/tinghai/page2.jpg": {
     "num_systems": 8,
-    "measures_per_system": [5, 4, 4, 4, 4, 4, 4, 4],
+    "measures_per_system": [
+      5,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
     "total_measures": 33,
     "verified_by_eye": true
   },
   "fixtures/external/diandao/page1.jpg": {
     "num_systems": 9,
-    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "measures_per_system": [
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
     "total_measures": 36,
     "verified_by_eye": true
   },
   "fixtures/external/diandao/page2.jpg": {
     "num_systems": 7,
-    "measures_per_system": [4, 4, 4, 4, 4, 4, 1],
+    "measures_per_system": [
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      1
+    ],
     "total_measures": 25,
     "verified_by_eye": true
   },
   "fixtures/external/xiaobaichuan/page1.jpg": {
     "num_systems": 10,
-    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "measures_per_system": [
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
     "total_measures": 40,
     "verified_by_eye": true
   },
   "fixtures/external/xiaobaichuan/page2.jpg": {
     "num_systems": 8,
-    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4],
+    "measures_per_system": [
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
     "total_measures": 32,
     "verified_by_eye": true
   },
   "fixtures/external/phone_photo_skewed/page1.jpg": {
     "num_systems": 10,
-    "measures_per_system": [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+    "measures_per_system": [
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
     "total_measures": 40,
     "verified_by_eye": true
   },
   "fixtures/external/liusha/page1.jpg": {
     "num_systems": 13,
-    "measures_per_system": [5, 4, 4, 4, 4, 2, 4, 4, 4, 4, 2, 4, 1],
-    "total_measures": 46,
-    "verified_by_eye": true
+    "measures_per_system": [
+      5,
+      4,
+      4,
+      4,
+      5,
+      2,
+      4,
+      4,
+      4,
+      4,
+      2,
+      4,
+      1
+    ],
+    "total_measures": 47,
+    "verified_by_eye": true,
+    "notes": "Row 5 starts with a dashed-line pickup fragment (01), counted as its own measure."
   },
   "fixtures/external/liusha/page2.jpg": {
     "num_systems": 7,
-    "measures_per_system": [4, 4, 4, 2, 4, 4, 1],
+    "measures_per_system": [
+      4,
+      4,
+      4,
+      2,
+      4,
+      4,
+      1
+    ],
     "total_measures": 23,
     "verified_by_eye": true
   },
   "fixtures/external/xindong/page1.jpg": {
     "num_systems": 12,
-    "measures_per_system": [5, 5, 5, 5, 5, 5, 4, 4, 5, 5, 5, 4],
+    "measures_per_system": [
+      5,
+      5,
+      5,
+      5,
+      5,
+      5,
+      4,
+      4,
+      5,
+      5,
+      5,
+      4
+    ],
     "total_measures": 57,
     "verified_by_eye": true
   },
   "fixtures/external/langrenqingge/page1.jpg": {
     "num_systems": 12,
-    "measures_per_system": [5, 4, 5, 4, 5, 5, 5, 5, 5, 6, 6, 5],
+    "measures_per_system": [
+      5,
+      4,
+      5,
+      4,
+      5,
+      5,
+      5,
+      5,
+      5,
+      6,
+      6,
+      5
+    ],
     "total_measures": 60,
     "verified_by_eye": true
   }
