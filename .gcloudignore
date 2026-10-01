@@ -1,0 +1,13 @@
+.git
+.gitignore
+.venv/
+out/
+fixtures/
+tests/
+docs/
+scripts/
+*.jpg
+*.jpeg
+*.png
+*.pdf
+__pycache__/
