@@ -9,7 +9,9 @@ import json
 from pathlib import Path
 import pytest
 
+from app.omr.geometry import GMeasure
 from app.omr.layout import (
+    _assign_chord_box_to_measure,
     analyze_page,
     clean_narrow_measures,
     deskew_image,
@@ -474,6 +476,74 @@ def test_barline_continuous_run_rejection():
     assert _calculate_max_vertical_run(bin_img, mel_y0, mel_y1, 350, w) < min_solid_run
     # Slur / tie end has max run 2 px < min_solid_run -> rejected
     assert _calculate_max_vertical_run(bin_img, mel_y0, mel_y1, 500, w) < min_solid_run
+
+
+def test_chord_box_anchor_assignment_stacked_fraction():
+    """Verify that stacked fractions anchor to lower-right number across barlines.
+
+    Given a barline at x=250 between measure 0 [0.0, 0.25] and measure 1 [0.25, 0.50]:
+    A stacked fraction with whole-box center in measure 0 (x_mid=240), but lower-right
+    number in measure 1 (center x=265), must be assigned to measure 1.
+    """
+    img_w = 1000
+    measures = [
+        GMeasure(index_in_system=0, x0=0.0, x1=0.25),
+        GMeasure(index_in_system=1, x0=0.25, x1=0.50),
+        GMeasure(index_in_system=2, x0=0.50, x1=0.75),
+        GMeasure(index_in_system=3, x0=0.75, x1=1.0),
+    ]
+
+    bx0, by0, bx1, by1 = 200, 10, 280, 80
+    # Whole box center: (200 + 280)/2 = 240 -> measure 0 (x < 250)
+    # Upper circle (e.g. ⑦): (205, 12, 30, 30) -> center (220, 27)
+    # Diagonal slash ╱: (235, 15, 20, 50) -> center (245, 40)
+    # Lower circle (e.g. ⑤): (250, 45, 30, 30) -> center (265, 60) in measure 1
+    comps = [
+        (205, 12, 30, 30),
+        (235, 15, 20, 50),
+        (250, 45, 30, 30),
+    ]
+
+    m_idx, anchor_norm = _assign_chord_box_to_measure(
+        bx0, by0, bx1, by1, comps, measures, img_w
+    )
+
+    # Must be assigned to measure 1, with anchor x corresponding to lower circle (265 / 1000 = 0.265)
+    assert m_idx == 1
+    assert round(anchor_norm * img_w) == 265
+
+
+def test_chord_box_anchor_assignment_plain_box_barline_tolerance():
+    """Verify that plain boxes near barlines respect tolerance towards box center.
+
+    Barline at x=250 between measure 0 and measure 1 (img_w=1000).
+    - Case A: First glyph at x=245 (within 16px tolerance of barline), box center in measure 1.
+      Should be favoured towards measure 1 with anchor clamped to start of measure 1.
+    - Case B: First glyph at x=210 (outside tolerance of barline), box spans into measure 1.
+      Should remain in measure 0 with anchor at first glyph.
+    """
+    img_w = 1000
+    measures = [
+        GMeasure(index_in_system=0, x0=0.0, x1=0.25),
+        GMeasure(index_in_system=1, x0=0.25, x1=0.50),
+    ]
+
+    # Case A: First glyph center = 245 (5px before barline 250), box center = 265
+    comps_a = [(235, 20, 20, 20), (260, 20, 30, 20)]
+    m_idx_a, anchor_norm_a = _assign_chord_box_to_measure(
+        235, 20, 290, 40, comps_a, measures, img_w
+    )
+    assert m_idx_a == 1
+    assert round(anchor_norm_a * img_w) >= 250  # Clamped to measure 1
+
+    # Case B: First glyph center = 215 (35px before barline), box center = 255
+    comps_b = [(200, 20, 30, 20), (250, 20, 40, 20)]
+    m_idx_b, anchor_norm_b = _assign_chord_box_to_measure(
+        200, 20, 290, 40, comps_b, measures, img_w
+    )
+    assert m_idx_b == 0
+    assert round(anchor_norm_b * img_w) == 215
+
 
 
 

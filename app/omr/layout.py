@@ -159,6 +159,120 @@ def find_dashed_barlines(
     return res
 
 
+def _assign_chord_box_to_measure(
+    bx0: int,
+    by0: int,
+    bx1: int,
+    by1: int,
+    comps: list[tuple[int, int, int, int]],
+    measures: list[GMeasure],
+    img_w: int,
+) -> tuple[int, float]:
+    """Assign a chord box to a measure and compute its anchor position.
+
+    Rules:
+    - Stacked fractions (chords with diagonal slash, e.g. ⑦╱⑤ or #①╱⑥7):
+      Anchor is the x-centre of the lower-right number (or whole box if parts
+      cannot be separated).
+    - Plain boxes:
+      Anchor is the x-centre of the first glyph, with a small tolerance favouring
+      the measure where the box's centre lies when near a barline.
+    - Beat position is derived from the chosen anchor x.
+    """
+    if not measures:
+        return 0, (bx0 + bx1) / 2.0 / float(img_w)
+
+    x_mid = (bx0 + bx1) / 2.0
+    x_mid_norm = x_mid / float(img_w)
+
+    # Find measure containing x_mid
+    m_c_idx = 0
+    min_dist = 1e9
+    for m in measures:
+        if m.x0 <= x_mid_norm <= m.x1:
+            m_c_idx = m.index_in_system
+            break
+        dist = min(abs(x_mid_norm - m.x0), abs(x_mid_norm - m.x1))
+        if dist < min_dist:
+            min_dist = dist
+            m_c_idx = m.index_in_system
+
+    if not comps:
+        return m_c_idx, x_mid_norm
+
+    y_mid = (by0 + by1) / 2.0
+    box_h = float(by1 - by0)
+
+    # Check for stacked fraction (slash or vertical split)
+    has_slash = any(c[3] >= 1.35 * c[2] and c[3] >= 20 for c in comps)
+    ys = [c[1] + c[3] / 2.0 for c in comps]
+    y_spread = max(ys) - min(ys)
+    has_upper = any((c[1] + c[3] / 2.0) < y_mid - 4 and c[2] >= 10 and c[3] >= 10 for c in comps)
+    has_lower = any((c[1] + c[3] / 2.0) > y_mid + 4 and c[2] >= 10 and c[3] >= 10 for c in comps)
+    is_stacked = has_slash or (len(comps) >= 2 and has_upper and has_lower and y_spread >= max(14.0, 0.25 * box_h))
+
+    if is_stacked:
+        # Stacked fraction: anchor is x-centre of lower-right number
+        lower_comps = [c for c in comps if (c[1] + c[3] / 2.0) > y_mid and c[2] >= 8 and c[3] >= 8]
+        lower_non_slash = [c for c in lower_comps if not (c[3] >= 1.35 * c[2] and c[3] >= 20)]
+        lower_candidates = lower_non_slash if lower_non_slash else lower_comps
+
+        if lower_candidates:
+            lower_circles = [
+                c for c in lower_candidates
+                if c[2] >= 20 and c[3] >= 20 and 0.7 <= c[2] / float(c[3]) <= 1.4
+            ]
+            if lower_circles:
+                lower_num = max(lower_circles, key=lambda c: c[0] + c[2] / 2.0)
+            else:
+                lower_num = max(lower_candidates, key=lambda c: c[0] + c[2] / 2.0)
+            anchor_x = lower_num[0] + lower_num[2] / 2.0
+        else:
+            anchor_x = x_mid
+
+        anchor_norm = anchor_x / float(img_w)
+        target_m_idx = 0
+        min_dist = 1e9
+        for m in measures:
+            if m.x0 <= anchor_norm <= m.x1:
+                target_m_idx = m.index_in_system
+                break
+            dist = min(abs(anchor_norm - m.x0), abs(anchor_norm - m.x1))
+            if dist < min_dist:
+                min_dist = dist
+                target_m_idx = m.index_in_system
+        return target_m_idx, anchor_norm
+
+    # Plain box: anchor is x-centre of first glyph
+    first_comp = min(comps, key=lambda c: c[0])
+    first_glyph_x = first_comp[0] + first_comp[2] / 2.0
+    first_norm = first_glyph_x / float(img_w)
+
+    m_a_idx = 0
+    min_dist = 1e9
+    for m in measures:
+        if m.x0 <= first_norm <= m.x1:
+            m_a_idx = m.index_in_system
+            break
+        dist = min(abs(first_norm - m.x0), abs(first_norm - m.x1))
+        if dist < min_dist:
+            min_dist = dist
+            m_a_idx = m.index_in_system
+
+    if m_a_idx < m_c_idx:
+        # Near barline between m_a_idx and m_c_idx
+        barline_x = measures[m_c_idx].x0 * img_w
+        dist_to_barline = barline_x - first_glyph_x
+        tol = max(16.0, 0.012 * img_w)
+        if dist_to_barline <= tol:
+            anchor_x = max(first_glyph_x, barline_x + 2.0)
+            return m_c_idx, anchor_x / float(img_w)
+        else:
+            return m_a_idx, first_norm
+    else:
+        return m_a_idx, first_norm
+
+
 def detect_chord_boxes(
     bin_img: np.ndarray,
     y0_px: int,
@@ -204,7 +318,7 @@ def detect_chord_boxes(
                 )
             )
             if is_boxed:
-                candidates.append([bx, by + y0_px, bw, bh, True])
+                candidates.append([bx, by + y0_px, bw, bh, True, [(bx, by + y0_px, bw, bh)]])
         else:
             # Printed chord boxes (Taiwanese charts)
             is_boxed = (
@@ -214,7 +328,7 @@ def detect_chord_boxes(
             is_unboxed = (bw >= 10 and bh >= 8 and (rect_ratio >= 0.20 or area >= 25))
 
             if is_boxed or is_unboxed:
-                candidates.append([bx, by + y0_px, bw, bh, is_boxed])
+                candidates.append([bx, by + y0_px, bw, bh, is_boxed, [(bx, by + y0_px, bw, bh)]])
 
     if chords_below:
         # Merge horizontally close components (<= 15px) for circled numbers, slashes, extensions
@@ -230,7 +344,8 @@ def detect_chord_boxes(
                     y0 = min(prev[1], c[1])
                     x1 = max(prev[0] + prev[2], c[0] + c[2])
                     y1 = max(prev[1] + prev[3], c[1] + c[3])
-                    merged[-1] = [x0, y0, x1 - x0, y1 - y0, False]
+                    merged_comps = prev[5] + c[5]
+                    merged[-1] = [x0, y0, x1 - x0, y1 - y0, False, merged_comps]
                 else:
                     merged.append(c)
         candidates = merged
@@ -254,23 +369,15 @@ def detect_chord_boxes(
         candidates = deduped
 
     results: list[GChordBox] = []
-    for bx, by, bw, bh, boxed in candidates:
-        x_mid_norm = (bx + bw / 2.0) / float(img_w)
-        # Find which measure contains x_mid
-        target_m_idx = 0
-        min_dist = 1e9
-        for m in measures:
-            if m.x0 <= x_mid_norm <= m.x1:
-                target_m_idx = m.index_in_system
-                break
-            dist = min(abs(x_mid_norm - m.x0), abs(x_mid_norm - m.x1))
-            if dist < min_dist:
-                min_dist = dist
-                target_m_idx = m.index_in_system
+    for c in candidates:
+        bx, by, bw, bh, boxed, comps = c[0], c[1], c[2], c[3], c[4], c[5]
+        target_m_idx, anchor_norm = _assign_chord_box_to_measure(
+            bx, by, bx + bw, by + bh, comps, measures, img_w
+        )
 
         m_obj = measures[target_m_idx]
         m_width = max(1e-4, m_obj.x1 - m_obj.x0)
-        frac = max(0.0, min(0.99, (x_mid_norm - m_obj.x0) / m_width))
+        frac = max(0.0, min(0.99, (anchor_norm - m_obj.x0) / m_width))
         raw_beat = 1.0 + frac * 4.0
         beat_geo = float(max(1.0, min(4.0, round(raw_beat * 2.0) / 2.0)))
 
@@ -428,23 +535,33 @@ def extract_chord_only_boxes(
                 if 0 <= cx - grp[1] <= 25 and cw <= 40:
                     grp[1] = max(grp[1], cx + cw)
 
+    # Collect CCs for each group
+    group_comps: list[list[tuple[int, int, int, int]]] = [[] for _ in grouped]
+    for g_idx, grp in enumerate(grouped):
+        for ci in range(1, nl):
+            cx, cy, cw, ch, area = stats[ci]
+            if cw < 4 or ch < 4 or area < 10:
+                continue
+            abs_y0 = y0_px - 10 + cy
+            abs_y1 = abs_y0 + ch
+            if (
+                cx + cw >= grp[0] - 2
+                and cx <= grp[1] + 2
+                and abs_y1 >= grp[2] - 5
+                and abs_y0 <= grp[3] + 5
+            ):
+                group_comps[g_idx].append((cx, abs_y0, cw, ch))
+
     chord_boxes: list[GChordBox] = []
-    for bx0, bx1, by0, by1 in grouped:
-        x_mid_norm = (bx0 + bx1) / 2.0 / float(img_w)
-        target_m_idx = 0
-        min_dist = 1e9
-        for m in measures:
-            if m.x0 <= x_mid_norm <= m.x1:
-                target_m_idx = m.index_in_system
-                break
-            dist = min(abs(x_mid_norm - m.x0), abs(x_mid_norm - m.x1))
-            if dist < min_dist:
-                min_dist = dist
-                target_m_idx = m.index_in_system
+    for g_idx, (bx0, bx1, by0, by1) in enumerate(grouped):
+        comps = group_comps[g_idx]
+        target_m_idx, anchor_norm = _assign_chord_box_to_measure(
+            bx0, by0, bx1, by1, comps, measures, img_w
+        )
 
         m_obj = measures[target_m_idx]
         m_w = max(1e-4, m_obj.x1 - m_obj.x0)
-        frac = max(0.0, min(0.99, (x_mid_norm - m_obj.x0) / m_w))
+        frac = max(0.0, min(0.99, (anchor_norm - m_obj.x0) / m_w))
         beat_geo = float(max(1, min(4, int(frac * 4) + 1)))
 
         bbox_norm: BBox = (
