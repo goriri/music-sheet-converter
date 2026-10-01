@@ -5,3 +5,6 @@ out/
 fixtures/external/
 fixtures/holdout/*/
 !fixtures/holdout/chords/
+# third-party chart images: local only
+Weixin Image*
+fixtures/pages/*.jpg
