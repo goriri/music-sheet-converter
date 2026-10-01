@@ -75,9 +75,13 @@ def evaluate_song(
 
     # 2. Measures-per-row accuracy
     matched_row_meas_count = 0
+    total_gt_measures = 0
+    strict_matched_measures = 0
+
     # Also evaluate chord matches per row
     total_gt_chords = 0
     exact_matched_chords = 0
+    total_cand_chords = sum(len(m.chords) for s in cand_systems for m in s.measures)
     total_lcs_matched_chords = 0
     beat_eligible_chords = 0
     beat_matched_chords = 0
@@ -111,11 +115,18 @@ def evaluate_song(
         row_cand_chords_norm: list[str] = []
 
         for m_idx, m_gt in enumerate(gt_measures):
+            total_gt_measures += 1
             gt_m_chords = m_gt.get("chords", [])
             cand_m_chords = cand_measures[m_idx].chords if m_idx < len(cand_measures) else []
 
             norm_cand_m = [(normalize_chord(c.raw), c.beat) for c in cand_m_chords]
             cand_raws = [c[0] for c in norm_cand_m]
+
+            # Measure strict check: correct only if its chord list equals the truth exactly
+            gt_norm_list = [normalize_chord(c.get("raw", "")) for c in gt_m_chords if c.get("raw", "") != "?"]
+            cand_norm_list = [c[0] for c in norm_cand_m]
+            if m_idx < len(cand_measures) and cand_norm_list == gt_norm_list:
+                strict_matched_measures += 1
 
             for c_gt in gt_m_chords:
                 raw_gt = c_gt.get("raw", "")
@@ -148,7 +159,10 @@ def evaluate_song(
         total_lcs_matched_chords += lcs_len
 
     meas_per_row_acc = matched_row_meas_count / total_gt_rows if total_gt_rows > 0 else 1.0
+    meas_strict_acc = strict_matched_measures / total_gt_measures if total_gt_measures > 0 else 1.0
     chord_exact_acc = exact_matched_chords / total_gt_chords if total_gt_chords > 0 else 1.0
+    chord_precision_acc = exact_matched_chords / total_cand_chords if total_cand_chords > 0 else (1.0 if total_gt_chords == 0 else 0.0)
+    total_extras = max(0, total_cand_chords - exact_matched_chords)
     chord_seq_acc = total_lcs_matched_chords / total_gt_chords if total_gt_chords > 0 else 1.0
     beat_acc = beat_matched_chords / beat_eligible_chords if beat_eligible_chords > 0 else 1.0
 
@@ -215,10 +229,22 @@ def evaluate_song(
             "total_rows": total_gt_rows,
             "acc": round(meas_per_row_acc, 3),
         },
+        "meas_strict": {
+            "matched": strict_matched_measures,
+            "total": total_gt_measures,
+            "acc": round(meas_strict_acc, 3),
+        },
         "chord_exact": {
             "matched": exact_matched_chords,
             "total": total_gt_chords,
             "acc": round(chord_exact_acc, 3),
+            "extras": total_extras,
+        },
+        "chord_precision": {
+            "matched": exact_matched_chords,
+            "candidate": total_cand_chords,
+            "extras": total_extras,
+            "acc": round(chord_precision_acc, 3),
         },
         "chord_seq": {
             "matched": total_lcs_matched_chords,
@@ -241,53 +267,86 @@ def evaluate_song(
 def run_evaluation(
     gt_dir: Path,
     batch_dir: Optional[Path] = None,
-    candidate_file: Optional[Path] = None,
+    candidate_file: Optional[Path | list[Path]] = None,
     slug: Optional[str] = None,
     live: bool = False,
 ) -> dict[str, Any]:
     """Run evaluation across songs and print report."""
     results = {}
     gt_files = list(gt_dir.glob("*.json"))
-    if slug:
+    if slug and not (isinstance(candidate_file, (list, tuple)) and len(candidate_file) > 1):
         gt_files = [f for f in gt_files if f.stem == slug]
 
     if not gt_files:
         raise FileNotFoundError(f"No groundtruth JSON files found in {gt_dir}")
 
-    for gt_path in sorted(gt_files):
-        s_slug = gt_path.stem
-        gt_data = json.loads(gt_path.read_text(encoding="utf-8"))
+    # Build list of candidate files if provided
+    cand_files_list: list[Path] = []
+    if isinstance(candidate_file, (list, tuple)):
+        for item in candidate_file:
+            p = Path(item)
+            if p.is_dir():
+                cand_files_list.extend(sorted(p.glob("*.json")))
+            elif p.exists():
+                cand_files_list.append(p)
+            else:
+                logger.warning("Candidate path does not exist: %s", p)
+    elif isinstance(candidate_file, (str, Path)):
+        p = Path(candidate_file)
+        if p.is_dir():
+            cand_files_list.extend(sorted(p.glob("*.json")))
+        elif p.exists():
+            cand_files_list.append(p)
+        else:
+            logger.warning("Candidate path does not exist: %s", p)
 
-        cand_sheet: Optional[ParsedSheet] = None
-        if live:
-            from app.omr.gemini_omr import parse_pages
-            # Load images
-            meta_pages = gt_data.get("pages", 1)
-            img_bytes_list = []
-            if s_slug == "diaole":
-                paths = ["fixtures/pages/page1.jpg", "fixtures/pages/page2.jpg"]
+    if cand_files_list:
+        for cand_path in cand_files_list:
+            label = cand_path.stem
+            if slug and len(cand_files_list) == 1:
+                gt_slug = slug
             else:
-                paths = [f"fixtures/external/{s_slug}/page{i}.jpg" for i in range(1, meta_pages + 1)]
-            for p in paths:
-                img_bytes_list.append((PROJECT_ROOT / p).read_bytes())
-            cand_sheet = parse_pages(img_bytes_list)
-        elif candidate_file:
-            cand_sheet = ParsedSheet.model_validate_json(candidate_file.read_text(encoding="utf-8"))
-        elif batch_dir:
-            cand_path = batch_dir / s_slug / "verified.json"
-            if not cand_path.exists():
-                # Try fallback for diaole
-                if s_slug == "diaole":
-                    cand_path = PROJECT_ROOT / "fixtures/omr_sample.json"
-            if cand_path.exists():
-                cand_sheet = ParsedSheet.model_validate_json(cand_path.read_text(encoding="utf-8"))
-            else:
-                logger.warning("[%s] Candidate file not found at %s", s_slug, cand_path)
+                gt_slug = cand_path.stem.replace("_live", "").replace("_verified", "").replace("_parsed", "")
+            gt_path = gt_dir / f"{gt_slug}.json"
+            if not gt_path.exists():
+                logger.warning("[%s] Ground truth not found at %s", label, gt_path)
                 continue
-
-        if cand_sheet is not None:
+            gt_data = json.loads(gt_path.read_text(encoding="utf-8"))
+            cand_sheet = ParsedSheet.model_validate_json(cand_path.read_text(encoding="utf-8"))
             metrics = evaluate_song(gt_data, cand_sheet)
-            results[s_slug] = metrics
+            metrics["slug"] = label
+            results[label] = metrics
+    else:
+        for gt_path in sorted(gt_files):
+            s_slug = gt_path.stem
+            gt_data = json.loads(gt_path.read_text(encoding="utf-8"))
+
+            cand_sheet: Optional[ParsedSheet] = None
+            if live:
+                from app.omr.gemini_omr import parse_pages
+                meta_pages = gt_data.get("pages", 1)
+                img_bytes_list = []
+                if s_slug == "diaole":
+                    paths = ["fixtures/pages/page1.jpg", "fixtures/pages/page2.jpg"]
+                else:
+                    paths = [f"fixtures/external/{s_slug}/page{i}.jpg" for i in range(1, meta_pages + 1)]
+                for p in paths:
+                    img_bytes_list.append((PROJECT_ROOT / p).read_bytes())
+                cand_sheet = parse_pages(img_bytes_list)
+            elif batch_dir:
+                cand_path = batch_dir / s_slug / "verified.json"
+                if not cand_path.exists():
+                    if s_slug == "diaole":
+                        cand_path = PROJECT_ROOT / "fixtures/omr_sample.json"
+                if cand_path.exists():
+                    cand_sheet = ParsedSheet.model_validate_json(cand_path.read_text(encoding="utf-8"))
+                else:
+                    logger.warning("[%s] Candidate file not found at %s", s_slug, cand_path)
+                    continue
+
+            if cand_sheet is not None:
+                metrics = evaluate_song(gt_data, cand_sheet)
+                results[s_slug] = metrics
 
     # Aggregate overall metrics
     if results:
@@ -295,11 +354,22 @@ def run_evaluation(
             "songs_evaluated": len(results),
             "row_count_acc": round(sum(r["row_count"]["acc"] for r in results.values()) / len(results), 3),
             "meas_per_row_acc": round(sum(r["meas_per_row"]["acc"] for r in results.values()) / len(results), 3),
+            "meas_strict_acc": round(
+                sum(r["meas_strict"]["matched"] for r in results.values()) /
+                max(1, sum(r["meas_strict"]["total"] for r in results.values())),
+                3
+            ),
             "chord_exact_acc": round(
                 sum(r["chord_exact"]["matched"] for r in results.values()) /
                 max(1, sum(r["chord_exact"]["total"] for r in results.values())),
                 3
             ),
+            "chord_precision_acc": round(
+                sum(r["chord_precision"]["matched"] for r in results.values()) /
+                max(1, sum(r["chord_precision"]["candidate"] for r in results.values())),
+                3
+            ),
+            "total_extras": sum(r["chord_precision"]["extras"] for r in results.values()),
             "chord_seq_acc": round(
                 sum(r["chord_seq"]["matched"] for r in results.values()) /
                 max(1, sum(r["chord_seq"]["total"] for r in results.values())),
@@ -316,21 +386,31 @@ def run_evaluation(
         overall = {}
 
     # Print Table
-    print("\n" + "=" * 92)
-    print(f"{'Slug':<15} | {'Rows':<8} | {'M/Row Acc':<10} | {'Chord(Row,M)':<13} | {'Chord(Seq)':<11} | {'Beat Acc':<9} | {'KeyChg Acc':<10}")
-    print("-" * 92)
+    sep_len = 114
+    print("\n" + "=" * sep_len)
+    print(f"{'Slug':<15} | {'Rows':<8} | {'M/Row Acc':<10} | {'M/Strict':<10} | {'Chord(Row,M)':<13} | {'Chord Prec':<14} | {'Chord(Seq)':<11} | {'Beat Acc':<9} | {'KeyChg Acc':<10}")
+    print("-" * sep_len)
     for s_slug, res in results.items():
         r_str = f"{res['row_count']['candidate']}/{res['row_count']['gt']}"
         m_acc = f"{res['meas_per_row']['acc']*100:.1f}%"
+        ms_acc = f"{res['meas_strict']['acc']*100:.1f}%"
         c_acc = f"{res['chord_exact']['acc']*100:.1f}%"
+        cp_acc = f"{res['chord_precision']['acc']*100:.1f}% (+{res['chord_precision']['extras']})"
         s_acc = f"{res['chord_seq']['acc']*100:.1f}%"
         b_acc = f"{res['beat']['acc']*100:.1f}%"
         kc_acc = f"{res['key_change']['acc']*100:.1f}%"
-        print(f"{s_slug:<15} | {r_str:<8} | {m_acc:<10} | {c_acc:<13} | {s_acc:<11} | {b_acc:<9} | {kc_acc:<10}")
-    print("-" * 92)
+        print(f"{s_slug:<15} | {r_str:<8} | {m_acc:<10} | {ms_acc:<10} | {c_acc:<13} | {cp_acc:<14} | {s_acc:<11} | {b_acc:<9} | {kc_acc:<10}")
+    print("-" * sep_len)
     if overall:
-        print(f"{'OVERALL':<15} | {'-':<8} | {overall['meas_per_row_acc']*100:.1f}%{'':<5} | {overall['chord_exact_acc']*100:.1f}%{'':<8} | {overall['chord_seq_acc']*100:.1f}%{'':<6} | {overall['beat_acc']*100:.1f}%{'':<4} | {overall['key_change_acc']*100:.1f}%")
-    print("=" * 92 + "\n")
+        m_acc = f"{overall['meas_per_row_acc']*100:.1f}%"
+        ms_acc = f"{overall['meas_strict_acc']*100:.1f}%"
+        c_acc = f"{overall['chord_exact_acc']*100:.1f}%"
+        cp_acc = f"{overall['chord_precision_acc']*100:.1f}% (+{overall['total_extras']})"
+        s_acc = f"{overall['chord_seq_acc']*100:.1f}%"
+        b_acc = f"{overall['beat_acc']*100:.1f}%"
+        kc_acc = f"{overall['key_change_acc']*100:.1f}%"
+        print(f"{'OVERALL':<15} | {'-':<8} | {m_acc:<10} | {ms_acc:<10} | {c_acc:<13} | {cp_acc:<14} | {s_acc:<11} | {b_acc:<9} | {kc_acc:<10}")
+    print("=" * sep_len + "\n")
 
     eval_output = {"overall": overall, "songs": results}
     print(f"EVAL_JSON: {json.dumps(eval_output, ensure_ascii=False)}")
@@ -341,7 +421,7 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate OMR against Ground Truth")
     parser.add_argument("--gt-dir", type=Path, default=PROJECT_ROOT / "fixtures/groundtruth")
     parser.add_argument("--batch-dir", type=Path, default=PROJECT_ROOT / "out/batch")
-    parser.add_argument("--candidate", type=Path, help="Single candidate ParsedSheet JSON")
+    parser.add_argument("--candidate", type=Path, nargs="*", help="Candidate ParsedSheet JSON file(s) or directory")
     parser.add_argument("--slug", type=str, help="Evaluate single song")
     parser.add_argument("--live", action="store_true", help="Run live parse_pages")
     args = parser.parse_args()
