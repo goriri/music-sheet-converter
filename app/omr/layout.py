@@ -369,11 +369,19 @@ def detect_chord_boxes(
         candidates = deduped
 
     results: list[GChordBox] = []
+    first_bar_x = measures[0].x0 * img_w if measures else 0.0
+    min_x = first_bar_x - max(16.0, 0.012 * img_w)
     for c in candidates:
         bx, by, bw, bh, boxed, comps = c[0], c[1], c[2], c[3], c[4], c[5]
+        # Reject chord boxes in the left margin before the first barline (labels, not chords)
+        if (bx + bw) <= first_bar_x or (bx + bw / 2.0) < min_x:
+            continue
+
         target_m_idx, anchor_norm = _assign_chord_box_to_measure(
             bx, by, bx + bw, by + bh, comps, measures, img_w
         )
+        if anchor_norm * img_w < min_x:
+            continue
 
         m_obj = measures[target_m_idx]
         m_width = max(1e-4, m_obj.x1 - m_obj.x0)
@@ -497,12 +505,17 @@ def extract_chord_only_boxes(
     seeds: list[tuple[int, int, int, int]] = []
     digits: list[tuple[int, int, int, int]] = []
 
+    first_bar_x = measures[0].x0 * img_w if measures else 0.0
+    min_x = first_bar_x - max(16.0, 0.012 * img_w)
+
     for ci in range(1, nl):
         cx, cy, cw, ch, area = stats[ci]
         is_circle = (28 <= cw <= 80 and 28 <= ch <= 80 and 0.75 <= cw / float(ch) <= 1.35 and 200 <= area <= 1200)
         is_slash = (30 <= cw <= 80 and 50 <= ch <= 110 and area >= 200)
         if is_circle or is_slash:
-            seeds.append((cx, y0_px - 10 + cy, cw, ch))
+            # Reject chord boxes in the left margin before the first barline (labels, not chords)
+            if cx + cw > first_bar_x and cx >= min_x:
+                seeds.append((cx, y0_px - 10 + cy, cw, ch))
         elif 6 <= cw <= 24 and 16 <= ch <= 35 and area <= 280:
             digits.append((cx, y0_px - 10 + cy, cw, ch))
 
@@ -510,6 +523,10 @@ def extract_chord_only_boxes(
         if len(seeds) < 2 or (len(seeds) < 3 and len(digits) > len(seeds)):
             return False, []
     elif not seeds:
+        return False, []
+
+    # A system with a melody line (digits + barlines) is never chord_only
+    if len(digits) >= 10 and len(seeds) <= 2:
         return False, []
 
     # Cluster seeds into chord tokens horizontally within 25px
@@ -558,6 +575,8 @@ def extract_chord_only_boxes(
         target_m_idx, anchor_norm = _assign_chord_box_to_measure(
             bx0, by0, bx1, by1, comps, measures, img_w
         )
+        if bx1 <= first_bar_x or anchor_norm * img_w < min_x:
+            continue
 
         m_obj = measures[target_m_idx]
         m_w = max(1e-4, m_obj.x1 - m_obj.x0)
@@ -646,6 +665,89 @@ def measure_intrinsic_unit(bin_img: np.ndarray) -> float:
     return float(np.median(cands)) if cands else float(max(15.0, 0.01 * h))
 
 
+def _has_melody_line(
+    bin_img: np.ndarray,
+    mel_y0: int,
+    mel_y1: int,
+    measures: list[GMeasure],
+    img_w: int,
+    img_h: int,
+) -> bool:
+    """Return True if the melody band contains an actual melody line (digits + barlines)."""
+    if not measures or mel_y1 <= mel_y0:
+        return False
+    x0 = max(0, int(measures[0].x0 * img_w))
+    x1 = min(img_w, int(measures[-1].x1 * img_w))
+    if x1 <= x0:
+        return False
+    crop = bin_img[max(0, mel_y0 - 5):min(img_h, mel_y1 + 5), x0:x1]
+    if crop.size == 0:
+        return False
+    nl, _, stats, _ = cv2.connectedComponentsWithStats(crop)
+    digits = 0
+    seeds = 0
+    for i in range(1, nl):
+        cw, ch, area = stats[i, 2], stats[i, 3], stats[i, 4]
+        is_circle = (28 <= cw <= 80 and 28 <= ch <= 80 and 0.75 <= cw / float(ch) <= 1.35 and 150 <= area <= 1200)
+        is_slash = (30 <= cw <= 80 and 50 <= ch <= 110 and area >= 180)
+        if is_circle or is_slash:
+            seeds += 1
+        elif 5 <= cw <= 26 and 14 <= ch <= 38 and area <= 300:
+            digits += 1
+    return digits >= 10 and seeds <= 2
+
+
+def _is_bar_number_band(
+    bars: list[tuple],
+    gray: np.ndarray | None,
+    img_w: int,
+    img_h: int,
+) -> bool:
+    """Return True if the bar group corresponds to a grey bar-number header band.
+
+    Bar-number bands (e.g. '1 小节 2 小节 3 小节 4 小节' directly above row 1)
+    have:
+    - Position near the top of the score (y_mean < 0.28 * img_h)
+    - Dense vertical hatching lines (bars spaced < 20px apart)
+      OR short barline height with grey background fill
+    """
+    if not bars or gray is None:
+        return False
+    y_mean = float(np.mean([b[1] for b in bars]))
+    if y_mean > 0.28 * img_h:
+        return False
+
+    xs = sorted([b[0] for b in bars])
+    # Dense vertical hatching lines
+    if len(bars) >= 8:
+        close_pairs = sum(1 for i in range(len(xs) - 1) if xs[i + 1] - xs[i] < 20)
+        if close_pairs >= 6:
+            return True
+
+    # Grey shaded background fill
+    span = (xs[-1] - xs[0]) / float(img_w) if len(xs) > 1 else 0.0
+    if span < 0.25:
+        return False
+
+    sh_med = float(np.median([b[3] for b in bars]))
+    if sh_med > max(35, int(0.025 * img_h)):
+        return False
+
+    x0 = max(0, int(xs[0] - 5))
+    x1 = min(img_w, int(xs[-1] + 5))
+    y0 = max(0, int(y_mean - 18))
+    y1 = min(img_h, int(y_mean + 18))
+
+    strip_gray = gray[y0:y1, x0:x1]
+    if strip_gray.size == 0:
+        return False
+
+    page_top_bg = float(np.median(gray[:int(0.30 * img_h), :]))
+    local_bg = float(np.median(strip_gray))
+    grey_ratio = float(np.mean((strip_gray >= 80) & (strip_gray <= 228)))
+    return (grey_ratio >= 0.18) or (local_bg < page_top_bg - 12)
+
+
 def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
     """Analyze a music sheet page using classical CV to extract layout geometry.
 
@@ -691,9 +793,10 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
         # Detect whether page is a landscape chord accompaniment chart with tall barlines
         k45 = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 45))
         v45 = cv2.morphologyEx(bin_img, cv2.MORPH_OPEN, k45)
-        num45, _, stats45, _ = cv2.connectedComponentsWithStats(v45)
-        tall_count = sum(1 for i in range(1, num45) if stats45[i, 2] <= 15 and stats45[i, 3] >= 45)
-        is_tall_bar = (tall_count >= 15)
+        num45, _, stats45, centroids45 = cv2.connectedComponentsWithStats(v45)
+        tall_bars_y = [centroids45[i][1] for i in range(1, num45) if stats45[i, 2] <= 15 and stats45[i, 3] >= 45]
+        tall_y_span = (max(tall_bars_y) - min(tall_bars_y)) if tall_bars_y else 0
+        is_tall_bar = (len(tall_bars_y) >= 15 and tall_y_span >= 0.20 * h)
 
         # Detect whether page is a boxed Taiwanese chart
         cnts_page, _ = cv2.findContours(bin_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -715,7 +818,7 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
         if is_tall_bar:
             kh = 45
         else:
-            kh = (24 if scaled_page else max(20, min(26, int(0.015 * h))))
+            kh = (24 if scaled_page else max(20, min(32, max(int(0.015 * h), int(round(1.28 * u_curr)))) if u_curr >= 23.0 else min(26, int(0.015 * h))))
 
         k = cv2.getStructuringElement(cv2.MORPH_RECT, (1, kh))
         vert = cv2.morphologyEx(bin_img, cv2.MORPH_OPEN, k)
@@ -817,12 +920,27 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
         # Inter-system vertical suppression (>= 40 px separation)
         suppressed_cands: list[dict] = []
         min_dist = max(40, int(0.035 * h))
-        for cand in processed_cands:
+        for cand_idx, cand in enumerate(processed_cands):
             if not suppressed_cands:
                 suppressed_cands.append(cand)
             else:
                 prev = suppressed_cands[-1]
-                if cand["y_mean"] - prev["y_mean"] < min_dist:
+                gap = cand["y_mean"] - prev["y_mean"]
+                is_close = gap < min_dist or (
+                    gap < max(min_dist, int(0.048 * h))
+                    and (
+                        (prev["span"] < 0.45 and len(prev["merged_xs"]) <= 2 and cand["span"] >= 0.60 and len(cand["merged_xs"]) >= 4)
+                        or (
+                            cand["span"] < 0.45
+                            and len(cand["merged_xs"]) <= 2
+                            and prev["span"] >= 0.60
+                            and len(prev["merged_xs"]) >= 4
+                            and cand != processed_cands[-1]
+                            and cand["y_mean"] < 0.85 * h
+                        )
+                    )
+                )
+                if is_close:
                     if cand["span"] > prev["span"] or len(cand["merged_xs"]) > len(prev["merged_xs"]):
                         suppressed_cands[-1] = cand
                 else:
@@ -833,7 +951,15 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
             lefts = [c["merged_xs"][0] for c in suppressed_cands]
             med_left = float(np.median(lefts[1:]))
             c0 = suppressed_cands[0]
+            c1 = suppressed_cands[1]
+            diffs = [
+                suppressed_cands[i + 1]["y_mean"] - suppressed_cands[i]["y_mean"]
+                for i in range(len(suppressed_cands) - 1)
+            ]
+            med_gap = float(np.median(diffs)) if diffs else 100.0
             if c0["y_mean"] < 0.12 * h and (c0["merged_xs"][0] > med_left + 0.05 * w or c0["span"] < 0.70):
+                suppressed_cands.pop(0)
+            elif (c1["y_mean"] - c0["y_mean"]) < 0.75 * med_gap and c0["y_mean"] < 0.28 * h and _is_bar_number_band(c0["bars"], gray, w, h):
                 suppressed_cands.pop(0)
 
         # Common printable margins from full systems
@@ -1141,11 +1267,12 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
             is_chord_only = False
             if not is_boxed_page:
                 if len(chord_boxes) == 0 or is_tall_bar:
-                    is_co, co_boxes = extract_chord_only_boxes(bin_img, mel_y0, mel_y1, measures, w, h)
-                    if is_co and (len(chord_boxes) == 0 or len(co_boxes) >= len(chord_boxes) or is_tall_bar):
-                        is_chord_only = True
-                        chord_boxes = co_boxes
-                        chord_band_norm = melody_band_norm
+                    if not _has_melody_line(bin_img, mel_y0, mel_y1, measures, w, h):
+                        is_co, co_boxes = extract_chord_only_boxes(bin_img, mel_y0, mel_y1, measures, w, h)
+                        if is_co and (len(chord_boxes) == 0 or len(co_boxes) >= len(chord_boxes) or is_tall_bar):
+                            is_chord_only = True
+                            chord_boxes = co_boxes
+                            chord_band_norm = melody_band_norm
 
             # Lyric bands
             lyric_bands: list[tuple[float, float]] = []
@@ -1220,10 +1347,14 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
                 if "chord_only" not in s.notes:
                     my0_px = int(s.melody_band[0] * h)
                     my1_px = int(s.melody_band[1] * h)
+                    if _has_melody_line(bin_img, my0_px, my1_px, s.measures, w, h):
+                        continue
                     is_co, co_boxes = extract_chord_only_boxes(bin_img, my0_px, my1_px, s.measures, w, h, force=True)
                     if is_co and co_boxes:
                         s.chord_boxes = co_boxes
                         s.chord_band = s.melody_band
+                        if "chords_below" in s.notes:
+                            s.notes.remove("chords_below")
                         s.notes.append("chord_only")
 
         global_conf = float(min(s.confidence for s in systems)) if systems else 0.0

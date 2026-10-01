@@ -12,9 +12,12 @@ import pytest
 from app.omr.geometry import GMeasure
 from app.omr.layout import (
     _assign_chord_box_to_measure,
+    _has_melody_line,
+    _is_bar_number_band,
     analyze_page,
     clean_narrow_measures,
     deskew_image,
+    detect_chord_boxes,
     estimate_skew_angle,
     find_dashed_barlines,
 )
@@ -543,6 +546,39 @@ def test_chord_box_anchor_assignment_plain_box_barline_tolerance():
     )
     assert m_idx_b == 0
     assert round(anchor_norm_b * img_w) == 215
+
+
+def test_bar_number_band_and_margin_labels():
+    """Verify bar-number band detection and margin label rejection."""
+    import numpy as np
+
+    # 1. Bar-number band with dense vertical hatching lines
+    h, w = 1000, 800
+    hatched_bars = [(100 + i * 12, 100, 2, 25, 87, 112) for i in range(10)]
+    assert _is_bar_number_band(hatched_bars, np.full((h, w), 255, dtype=np.uint8), w, h)
+
+    # Normal widely-spaced barlines are not a bar-number band
+    normal_bars = [(100 + i * 150, 100, 2, 25, 87, 112) for i in range(4)]
+    assert not _is_bar_number_band(normal_bars, np.full((h, w), 255, dtype=np.uint8), w, h)
+
+    # Bars lower down the page are never considered a bar-number band
+    lower_bars = [(100 + i * 12, 500, 2, 25, 487, 512) for i in range(10)]
+    assert not _is_bar_number_band(lower_bars, np.full((h, w), 255, dtype=np.uint8), w, h)
+
+    # 2. Left margin chord box rejection (labels before first barline)
+    measures = [
+        GMeasure(index_in_system=0, x0=0.20, x1=0.60),
+        GMeasure(index_in_system=1, x0=0.60, x1=1.00),
+    ]
+    bin_img = np.zeros((200, 1000), dtype=np.uint8)
+    # Box strictly before first barline (x=200): e.g. x=50..120
+    bin_img[20:45, 50:120] = 255
+    # Box inside measure 0: e.g. x=250..320
+    bin_img[20:45, 250:320] = 255
+
+    boxes = detect_chord_boxes(bin_img, 10, 60, measures, 1000, 200)
+    # The margin label before x=200 should be rejected; only the box inside measure 0 kept
+    assert all(cb.bbox[0] * 1000 >= 180 for cb in boxes)
 
 
 
