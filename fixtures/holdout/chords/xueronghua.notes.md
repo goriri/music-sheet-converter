@@ -15,8 +15,8 @@ Dual model transcriptions were performed using:
 2. **Claude Opus 5.5** (`role='arbiter'`)
 
 All disagreements between models were reviewed against 3x resolution crops of each row:
-- Page 1 Row 4 M2-M4: Opus shifted stacked fractions across measures. Gemini correctly assigned M2 [(6)7], M3 [(#1)/(6)7 (stacked: true), (2)m7/9], M4 [(#4)/(2)7/9 (stacked: true), (5)7/11, (5)].
-- Page 1 Row 10 M2-M3: Boundary placement of altered chord (2)7/13 and (b3)7/13. Verified: M2 has [(5)], M3 has [(2)7/13, (b3)7/13].
+- Page 1 Row 4 M2-M4: Stacked fractions placed strictly by physical printed position relative to barlines: stacked `[#1/67]` sits before the barline under note 5 in M2 (`[67, #1/67]`); stacked `[#4/27/9]` sits before the barline in M3 (`[2m7/9, #4/27/9]`); M4 contains `[57/11, 5]`.
+- Page 1 Row 10 M2-M3: Printed position relative to barline verified: `[27/13]` sits under transition note 7 before the barline in M2 (`[5, 27/13]`); M3 contains `[b37/13]`.
 - Page 2 Rows 4–8: Re-audited all 8 rows on page 2 using individual row crops (system height ~107px). Resolved sequence: Row 4 `[1, 5, 4, 1]`, Row 5 `[5, 5, 1, 6m]`, Row 6 `[4, 2, 5, 5]`, Row 7 `[1, 5, 1, 4]`, Row 8 `[1, 5, 4, 1]`. Corrected earlier crop offset that skipped Row 5 and duplicated Row 8.
 
 ## Unreadable Cells

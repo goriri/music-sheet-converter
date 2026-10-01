@@ -20,6 +20,7 @@ All disagreements between models were reviewed against 3x resolution crops of ea
 - Row 6 M2-M4: Measure distribution of chords [57, 1, 5/7], [6m, 4], [57, 1, 37/5#]. Opus matched visual ground truth.
 - Row 7 M1-M4: Gemini misassigned chords across barlines; Opus aligned M1 [6m, 4], M2 [57, 37/5#, 6m], M3 [2m7, 57], M4 [1, 37/5#].
 - Row 8 M2-M4: Same pattern as Row 6; Opus aligned accurately.
+- Row 9 M4: Verified against 3x crop: contains exactly one boxed `[1]` above beat 1; trailing numbers are instrumental fill annotations (`EG+Vio`, `i5 35`, `(D.r fill)`), not chords.
 
 ## Unreadable Cells
 - Total '?' cells: **0** (all chord symbols clearly resolved).
