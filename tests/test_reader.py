@@ -726,3 +726,38 @@ def test_resolve_chord_tokens_digit_runs():
     assert needs_review is False
 
 
+def test_read_sheet_chord_dedup_same_beat():
+    from app.omr.reader import read_sheet
+    from app.omr.reader_prompts import HeaderReading, BoxReading
+    from app.omr.geometry import PageGeometry, GSystem, GMeasure, GChordBox
+
+    img_bytes = _create_test_image()
+    measures = [GMeasure(index_in_system=0, x0=0.05, x1=0.95)]
+    chord_boxes = [
+        GChordBox(bbox=(0.10, 0.12, 0.18, 0.15), measure_index_in_system=0, beat_geo=3.0, boxed=True),
+        GChordBox(bbox=(0.19, 0.12, 0.27, 0.15), measure_index_in_system=0, beat_geo=3.0, boxed=True),
+    ]
+    sys_geom = GSystem(
+        page=0, index_on_page=0, bbox=(0.05, 0.12, 0.95, 0.20),
+        melody_band=(0.15, 0.18), measures=measures, chord_boxes=chord_boxes, confidence=0.9
+    )
+    geom = PageGeometry(page=0, width=1000, height=1400, header_band=(0.0, 0.10), systems=[sys_geom], confidence=0.9)
+
+    mock_header = HeaderReading(title="Test Dedup", time_signature="4/4")
+    mock_sys = SystemReading(
+        chord_boxes=[
+            BoxReading(box_id=1, text="1/3", beat=3.0),
+            BoxReading(box_id=2, text="1/3", beat=3.0),
+        ],
+        measures=[MeasureContentReading(measure_index=0, melody="1 2 3 4")],
+    )
+
+    with patch("app.omr.reader.ask_reader") as mock_ask:
+        mock_ask.side_effect = [mock_header, mock_sys]
+        sheet = read_sheet([img_bytes], [geom], model="gemini-2.5-pro")
+
+    m0_chords = [c.raw for c in sheet.systems[0].measures[0].chords]
+    assert m0_chords == ["1/3"]
+
+
+

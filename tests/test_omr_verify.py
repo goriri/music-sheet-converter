@@ -1747,3 +1747,69 @@ def test_use_llm_false_never_leaves_empty_raws(clean_sheet, dummy_images):
             for c in m.chords:
                 assert c.raw and c.raw.strip(), f"Found empty raw chord in measure {m.index}: {c!r}"
 
+
+def test_row_level_zero_chords_with_melody_flags_nr(clean_sheet, dummy_images):
+    """Verify that a system with melody notes but 0 chords while neighbours carry chords flags missing_chord_suspected NR."""
+    sheet = clean_sheet.model_copy(deep=True)
+    # Ensure system 0 and system 2 have chords
+    assert len(sheet.systems) >= 3
+    # Strip all chords from system 1, but keep melody notes
+    for m in sheet.systems[1].measures:
+        m.chords = []
+        m.melody = "1 2 3 4"
+
+    verified = verify_sheet(dummy_images, sheet, use_llm=False)
+    first_m_idx = sheet.systems[1].measures[0].index
+    nr_issues = [
+        i for i in verified.issues
+        if i.code == "missing_chord_suspected" and i.measure_index == first_m_idx and i.severity == "needs_review"
+    ]
+    assert len(nr_issues) == 1
+    assert "疑似整行遗漏和弦" in nr_issues[0].message
+
+
+def test_first_measure_missing_starting_chord_flags_nr(clean_sheet, dummy_images):
+    """Verify that very first measure (m.index == 0) with melody and 0 chords on a boxed chart flags missing_chord_suspected NR."""
+    sheet = clean_sheet.model_copy(deep=True)
+    sheet.layout_source = "cv"
+    sheet.layout_confidence = 0.95
+    # Mark chords as boxed
+    for s in sheet.systems:
+        for m in s.measures:
+            for c in m.chords:
+                c.bbox = (0.1, 0.2, 0.2, 0.25)
+
+    # Measure 0 has melody but 0 chords
+    sheet.systems[0].measures[0].chords = []
+    sheet.systems[0].measures[0].melody = "1 2 3 4"
+
+    verified = verify_sheet(dummy_images, sheet, use_llm=False)
+    m0_nr = [
+        i for i in verified.issues
+        if i.code == "missing_chord_suspected" and i.measure_index == 0 and i.severity == "needs_review"
+    ]
+    assert len(m0_nr) >= 1
+    # Must NOT emit chord_carry_over for measure 0
+    assert not any(i.code == "chord_carry_over" and i.measure_index == 0 for i in verified.issues)
+
+
+def test_verify_sheet_measure_chord_dedup_same_beat(clean_sheet, dummy_images):
+    """Verify that verify_sheet deduplicates identical raw chords at the same beat, but keeps different chords."""
+    sheet = clean_sheet.model_copy(deep=True)
+    m0 = sheet.systems[0].measures[0]
+    # Add duplicate identical chord at same beat
+    m0.chords = [
+        ChordSymbol(raw="1/3", beat=3.0, bbox=(0.1, 0.2, 0.2, 0.25)),
+        ChordSymbol(raw="1/3", beat=3.0, bbox=(0.2, 0.2, 0.3, 0.25)),
+        # Add different chord at same beat
+        ChordSymbol(raw="5", beat=3.0, bbox=(0.3, 0.2, 0.4, 0.25)),
+    ]
+
+    verified = verify_sheet(dummy_images, sheet, use_llm=False)
+    m0_res = verified.systems[0].measures[0]
+    # '1/3' is deduped to 1 copy; '5' is preserved
+    rawe_list = [c.raw for c in m0_res.chords]
+    assert rawe_list.count("1/3") == 1
+    assert rawe_list.count("5") == 1
+
+

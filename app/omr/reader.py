@@ -982,6 +982,13 @@ def read_sheet(
                             )
 
                 chords_in_measure.sort(key=lambda c: c.beat)
+                # Deduplicate identical raw chords at the same beat (±0.25) within a measure
+                if len(chords_in_measure) > 1:
+                    deduped_chords = []
+                    for c in chords_in_measure:
+                        if not any(dc.raw == c.raw and abs(dc.beat - c.beat) <= 0.25 for dc in deduped_chords):
+                            deduped_chords.append(c)
+                    chords_in_measure = deduped_chords
 
                 # Measure content
                 mc = measure_content_map.get(m_idx)

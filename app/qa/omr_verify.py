@@ -1941,6 +1941,7 @@ def verify_sheet(
                     "measure": m,
                     "beat": 1.0,
                     "reason": "fill_empty" if m.fill else "empty_measure_melody_clash",
+                    "prev_c": prev_c,
                 })
         elif len(m.chords) == 1 and m.beats >= 4.0:
             c0 = m.chords[0]
@@ -2041,7 +2042,24 @@ def verify_sheet(
                         has_unmapped_ink = True
 
         # In boxed charts, absence of a chord box and ink token is strong evidence no chord is printed -> info carry-over
+        # UNLESS this is measure 1 of the score (or a row start with no prior chord) with melody notes:
+        # in that case, there is no starting chord to carry over, so flag missing_chord_suspected (needs_review).
         if is_boxed_chart and not has_unmapped_ink:
+            has_melody = bool(m.melody and re.search(r"[0-7]", m.melody))
+            is_row_start_no_prev = bool(m_sys and m.index == m_sys.measures[0].index and it.get("prev_c") is None)
+            if (m.index == 0 or is_row_start_no_prev) and has_melody and len(m.chords) == 0:
+                new_issues.append(
+                    QualityIssue(
+                        stage="omr",
+                        measure_index=m.index,
+                        severity="needs_review",
+                        code="missing_chord_suspected",
+                        message=f"第{m.index + 1}小节乐谱起始处有旋律但未识别到和弦，疑似遗漏起始和弦，请核对",
+                        detail={"measure": m.index, "beat": sus_beat, "reason": "starting_measure_missing_chord"},
+                    )
+                )
+                continue
+
             new_issues.append(
                 QualityIssue(
                     stage="omr",
@@ -2626,9 +2644,59 @@ def verify_sheet(
         ladder_stats["nr_after"] = ladder_stats["nr_before"]
         ladder_stats["issues_after"] = list(ladder_stats["issues_before"])
     # Final safety sweep: On every path (exceptions, ladder, use_llm=False), ensure no empty raw remains
+    # and deduplicate identical raw chords at the same beat (±0.25) within each measure
     for s in verified.systems:
         for m in s.measures:
             m.chords = [c for c in m.chords if c.raw and c.raw.strip()]
+            if len(m.chords) > 1:
+                deduped = []
+                for c in m.chords:
+                    if not any(dc.raw == c.raw and abs(dc.beat - c.beat) <= 0.25 for dc in deduped):
+                        deduped.append(c)
+                m.chords = deduped
+
+    # Row-level check: A system whose melody has notes but 0 chords while neighbouring systems carry chords
+    # flags missing_chord_suspected (needs_review) on row's first measure (no model call).
+    for s_idx, s in enumerate(verified.systems):
+        row_chords_count = sum(len(m.chords) for m in s.measures)
+        if row_chords_count == 0:
+            has_melody_notes = any(m.melody and re.search(r"[0-7]", m.melody) for m in s.measures)
+            if has_melody_notes:
+                prev_has = (s_idx > 0 and sum(len(m.chords) for m in verified.systems[s_idx - 1].measures) > 0)
+                next_has = (s_idx < len(verified.systems) - 1 and sum(len(m.chords) for m in verified.systems[s_idx + 1].measures) > 0)
+                if prev_has or next_has:
+                    first_m = s.measures[0]
+                    new_issues = [
+                        iss for iss in new_issues
+                        if not (iss.code == "chord_carry_over" and iss.measure_index == first_m.index)
+                    ]
+                    existing_iss = next(
+                        (
+                            iss
+                            for iss in new_issues
+                            if iss.code == "missing_chord_suspected" and iss.measure_index == first_m.index
+                        ),
+                        None,
+                    )
+                    if existing_iss is not None:
+                        existing_iss.severity = "needs_review"
+                        existing_iss.message = f"第{first_m.index + 1}小节整行有旋律但无任何和弦，邻近行均有和弦，疑似整行遗漏和弦，请核对"
+                        existing_iss.detail["reason"] = "row_zero_chords_with_melody"
+                    else:
+                        new_issues.append(
+                            QualityIssue(
+                                stage="omr",
+                                measure_index=first_m.index,
+                                severity="needs_review",
+                                code="missing_chord_suspected",
+                                message=f"第{first_m.index + 1}小节整行有旋律但无任何和弦，邻近行均有和弦，疑似整行遗漏和弦，请核对",
+                                detail={
+                                    "system": s_idx,
+                                    "first_measure": first_m.index,
+                                    "reason": "row_zero_chords_with_melody",
+                                },
+                            )
+                        )
 
     new_issues = [iss for iss in new_issues if iss.code != "empty_box_placeholder"]
     verified.issues = new_issues
