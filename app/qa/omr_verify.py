@@ -1300,6 +1300,8 @@ def verify_sheet(
 
     # Collect all measures and pre-parse melodies
     all_measures = verified.measures()
+    total_meas = len(all_measures)
+    pickup_systems: set[tuple[int, int]] = set()
     measure_map: dict[int, Measure] = {m.index: m for m in all_measures}
     parsed_melodies: dict[int, Any] = {
         m.index: parse_melody(m.melody, beats=m.beats) for m in all_measures
@@ -1383,6 +1385,9 @@ def verify_sheet(
             m_co = re.search(r"\[v2_chord_only\]\s+page=(\d+)\s+system=(\d+)", w)
             if m_co:
                 chord_only_systems.add((int(m_co.group(1)), int(m_co.group(2))))
+            m_pu = re.search(r"\[v2_pickup\]\s+page=(\d+)\s+system=(\d+)", w)
+            if m_pu:
+                pickup_systems.add((int(m_pu.group(1)), int(m_pu.group(2))))
 
         total_meas = len(all_measures)
         for p_idx in range(len(cv2_pages)):
@@ -1393,27 +1398,36 @@ def verify_sheet(
                 reader_count = reader_meas_counts.get((p_idx, s_idx))
                 beat_sums = [round(parsed_melodies[m.index].beat_sum, 2) for m in target_sys.measures]
                 is_chord_only_sys = (p_idx, s_idx) in chord_only_systems
+                is_pickup_sys = (p_idx, s_idx) in pickup_systems
 
                 # (a) Check melody beat-sum anomalies (exclude pickup/first measure, final measure, and chord_only measures)
-                has_beat_anomaly = False
+                has_merged_or_split = False
+                deviated_measures: list[tuple[Measure, float, float]] = []
+
                 if not is_chord_only_sys:
                     for m in target_sys.measures:
+                        # Exclude global first/last measure
                         if m.index == 0 or m.index == total_meas - 1:
+                            continue
+                        # Exclude pickup measures at row boundaries for systems marked as pickup
+                        if is_pickup_sys and (m.index == target_sys.measures[0].index or m.index == target_sys.measures[-1].index):
                             continue
                         if not m.melody or not m.melody.strip():
                             continue
                         b_sum = parsed_melodies[m.index].beat_sum
-                        exp_b = m.beats
+                        exp_b = m.beats / 2.0 if ("/8" in verified.header.time_signature) else m.beats
                         if b_sum > 0:
-                            # Missed barline -> merged measure ~2x beats; Extra barline -> under-full measure
+                            # Merged measure ~2x beats; Split measure ~0.5x beats
                             if b_sum >= 1.75 * exp_b or b_sum <= 0.55 * exp_b:
-                                has_beat_anomaly = True
+                                has_merged_or_split = True
                                 break
+                            elif abs(b_sum - exp_b) >= 0.5:
+                                deviated_measures.append((m, b_sum, exp_b))
 
                 # (b) Cross-check reader measures_seen with geometry_count
                 has_count_mismatch = (reader_count is not None and reader_count != geometry_count)
 
-                if has_count_mismatch or has_beat_anomaly:
+                if has_count_mismatch or has_merged_or_split:
                     new_issues.append(
                         QualityIssue(
                             stage="omr",
@@ -1447,6 +1461,17 @@ def verify_sheet(
                             },
                         )
                     )
+                    for dev_m, dev_b, exp_b_val in deviated_measures:
+                        new_issues.append(
+                            QualityIssue(
+                                stage="omr",
+                                measure_index=dev_m.index,
+                                severity="warning",
+                                code="melody_beat_sum_mismatch",
+                                message=f"第{dev_m.index + 1}小节旋律拍数（{dev_b:.1f}拍）与预期拍数（{exp_b_val:.1f}拍）不符，请核对",
+                                detail={"measure": dev_m.index, "beat_sum": dev_b, "expected_beats": exp_b_val},
+                            )
+                        )
     else:
         for w in verified.warnings:
             m_match = re.search(r"Page\s+(\d+)\s+System\s+(\d+):\s+detected\s+(\d+)\s+barlines\s+for\s+(\d+)\s+measures", w)
@@ -1820,8 +1845,9 @@ def verify_sheet(
             m_pool.shutdown(wait=False, cancel_futures=True)
 
     for m in all_measures:
+        exp_m_b = m.beats / 2.0 if ("/8" in verified.header.time_signature) else m.beats
         pm = parsed_melodies.get(m.index)
-        if pm and pm.notes and abs(pm.beat_sum - m.beats) >= 1.0:
+        if pm and pm.notes and abs(pm.beat_sum - exp_m_b) >= 1.0:
                 has_unresolved_beat_disagreement = False
                 if len(m.chords) >= 2:
                     beats = [c.beat for c in m.chords]
@@ -2180,9 +2206,55 @@ def verify_sheet(
                     raw_full = c.raw.strip()
                     raw_crop = crop_readings_map.get(key, "").strip()
 
+                    # 1. Direct adoption if crop reading detected a missed prefix accidental
+                    notation = verified.header.chord_notation
+                    if (
+                        raw_crop.startswith(("b", "#", "♭", "♯"))
+                        and not raw_full.startswith(("b", "#", "♭", "♯"))
+                        and is_valid_chord_grammar(raw_crop, notation=notation)
+                    ):
+                        orig_raw = c.raw
+                        c.raw = raw_crop
+                        c.confidence = 0.95
+                        new_issues.append(
+                            QualityIssue(
+                                stage="omr",
+                                measure_index=m.index,
+                                severity="auto_fixed",
+                                code="chord_corrected",
+                                message=f"第{m.index + 1}小节和弦由 '{orig_raw}' 更正为 '{raw_crop}'（局部切片检测到前置变音记号）",
+                                detail={"original": orig_raw, "corrected": raw_crop, "evidence": ["crop_accidental"]},
+                            )
+                        )
+                        continue
+
+                    # 2. Direct adoption if crop reading detected a missed flat-five
+                    has_f5_crop = any(k in raw_crop for k in ["-5", "b5", "(-5)", "(b5)", "♭5"])
+                    has_f5_full = any(k in raw_full for k in ["-5", "b5", "(-5)", "(b5)", "♭5"])
+                    if (
+                        has_f5_crop
+                        and not has_f5_full
+                        and is_candidate_for_flat_five(raw_full, raw_crop)
+                        and is_valid_chord_grammar(raw_crop, notation=notation)
+                    ):
+                        orig_raw = c.raw
+                        c.raw = raw_crop
+                        c.confidence = 0.95
+                        new_issues.append(
+                            QualityIssue(
+                                stage="omr",
+                                measure_index=m.index,
+                                severity="auto_fixed",
+                                code="chord_corrected",
+                                message=f"第{m.index + 1}小节和弦由 '{orig_raw}' 更正为 '{raw_crop}'（局部切片检测到减五度 -5 记号）",
+                                detail={"original": orig_raw, "corrected": raw_crop, "evidence": ["crop_flat_five"]},
+                            )
+                        )
+                        continue
+
                     # Skip if already has prefix accidental or flat-five
-                    has_acc_prefix = raw_full.startswith(("b", "#", "♭", "♯")) or raw_crop.startswith(("b", "#", "♭", "♯"))
-                    has_f5 = any(k in raw_full for k in ["-5", "b5", "(-5)", "(b5)", "♭5"]) or any(k in raw_crop for k in ["-5", "b5", "(-5)", "(b5)", "♭5"])
+                    has_acc_prefix = raw_full.startswith(("b", "#", "♭", "♯"))
+                    has_f5 = has_f5_full
 
                     is_bare_acc = is_non_diatonic_bare_degree(raw_full) and not has_acc_prefix
                     is_f5_cand = is_candidate_for_flat_five(raw_full, raw_crop) and not has_f5

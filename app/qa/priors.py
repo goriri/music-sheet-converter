@@ -391,6 +391,12 @@ def generate_candidates(raw: str) -> list[str]:
         candidates.add(f"{d}b{rest}")
         candidates.add(f"{d}#{rest}")
 
+    # 8. Truncated 'maj' <-> 'maj7'
+    if re.search(r"maj$", clean, re.IGNORECASE):
+        candidates.add(clean + "7")
+    if re.search(r"maj7$", clean, re.IGNORECASE):
+        candidates.add(re.sub(r"maj7$", "maj", clean, flags=re.IGNORECASE))
+
     # Validate each candidate with parse_chord; keep only grammatically valid chords
     valid_candidates: list[str] = []
     # Preserve raw first if valid

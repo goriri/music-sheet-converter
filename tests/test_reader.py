@@ -607,3 +607,122 @@ def test_read_sheet_empty_box_does_not_create_empty_raw():
     assert not any(i.code == "empty_box_placeholder" for i in sheet.issues)
 
 
+def test_one_geom_box_four_model_boxed_chords_all_kept():
+    """Verify that when layout geometry has 1 box while model reads 4 boxed chords, all 4 are kept."""
+    img_bytes = _create_test_image()
+    measures = [
+        GMeasure(index_in_system=0, x0=0.05, x1=0.50),
+        GMeasure(index_in_system=1, x0=0.50, x1=0.95),
+    ]
+    chord_boxes = [
+        GChordBox(bbox=(0.10, 0.12, 0.18, 0.15), measure_index_in_system=0, beat_geo=1.0, boxed=True)
+    ]
+    system = GSystem(
+        page=0,
+        index_on_page=0,
+        bbox=(0.05, 0.12, 0.95, 0.20),
+        melody_band=(0.15, 0.18),
+        measures=measures,
+        chord_boxes=chord_boxes,
+        confidence=0.9,
+    )
+    geom = PageGeometry(
+        page=0,
+        width=1000,
+        height=1400,
+        header_band=(0.0, 0.10),
+        systems=[system],
+        confidence=0.9,
+    )
+
+    mock_header = HeaderReading(title="Test Boxed Extras Kept", time_signature="4/4")
+    mock_system = SystemReading(
+        chord_boxes=[BoxReading(box_id=1, text="1")],
+        extra_chords=[
+            ExtraChordReading(measure_index=0, text="5m7", beat=3.0, boxed=True),
+            ExtraChordReading(measure_index=1, text="6m", beat=1.0, boxed=True),
+            ExtraChordReading(measure_index=1, text="4", beat=3.0, boxed=True),
+        ],
+        measures=[
+            MeasureContentReading(measure_index=0, melody="1 2 3 4"),
+            MeasureContentReading(measure_index=1, melody="5 6 7 1"),
+        ],
+    )
+
+    with patch("app.omr.reader.ask_reader") as mock_ask:
+        mock_ask.side_effect = [mock_header, mock_system]
+        sheet = read_sheet([img_bytes], [geom], model="gemini-2.5-pro")
+
+    all_chords = [c.raw for m in sheet.systems[0].measures for c in m.chords]
+    assert all_chords == ["1", "5m7", "6m", "4"]
+
+
+def test_page2_row8_measure2_unboxed_voicing_hints_dropped():
+    """Verify that unboxed voicing hints (e.g. page2 row 8 'PN [1(2)] 2 2') are dropped on boxed charts."""
+    img_bytes = _create_test_image()
+    measures = [
+        GMeasure(index_in_system=0, x0=0.05, x1=0.50),
+        GMeasure(index_in_system=1, x0=0.50, x1=0.95),
+    ]
+    chord_boxes = [
+        GChordBox(bbox=(0.55, 0.12, 0.65, 0.15), measure_index_in_system=1, beat_geo=1.0, boxed=True)
+    ]
+    system = GSystem(
+        page=0,
+        index_on_page=0,
+        bbox=(0.05, 0.12, 0.95, 0.20),
+        melody_band=(0.15, 0.18),
+        measures=measures,
+        chord_boxes=chord_boxes,
+        confidence=0.9,
+    )
+    geom = PageGeometry(
+        page=0,
+        width=1000,
+        height=1400,
+        header_band=(0.0, 0.10),
+        systems=[system],
+        confidence=0.9,
+    )
+
+    mock_header = HeaderReading(title="Test Unboxed Dropped", time_signature="4/4")
+    # Measure 1 has boxed chord 1(2) and unboxed voicing hints '2' at beat 3 and beat 4
+    mock_system = SystemReading(
+        chord_boxes=[BoxReading(box_id=1, text="1(2)")],
+        extra_chords=[
+            ExtraChordReading(measure_index=1, text="2", beat=3.0, boxed=False),
+            ExtraChordReading(measure_index=1, text="2", beat=4.0, boxed=False),
+        ],
+        measures=[
+            MeasureContentReading(measure_index=0, melody="1 2 3 4"),
+            MeasureContentReading(measure_index=1, melody="5 6 7 1"),
+        ],
+    )
+
+    with patch("app.omr.reader.ask_reader") as mock_ask:
+        mock_ask.side_effect = [mock_header, mock_system]
+        sheet = read_sheet([img_bytes], [geom], model="gemini-2.5-pro")
+
+    m1_chords = [c.raw for c in sheet.systems[0].measures[1].chords]
+    assert m1_chords == ["1(2)"]
+    assert any(i.code == "unboxed_chord_dropped" for i in sheet.issues)
+
+
+def test_parse_chord_symbol_maj_repair():
+    from app.omr.reader import parse_chord_symbol
+    assert parse_chord_symbol("5/1maj")[0] == "5/1maj7"
+    assert parse_chord_symbol("1maj")[0] == "1maj7"
+    assert parse_chord_symbol("4maj")[0] == "4maj7"
+    assert parse_chord_symbol("Cmaj")[0] == "Cmaj7"
+    assert parse_chord_symbol("F#maj")[0] == "F#maj7"
+
+
+def test_resolve_chord_tokens_digit_runs():
+    from app.omr.reader import resolve_chord_tokens
+    # Never split digit runs like '46' or '056'
+    tokens, joined, needs_review = resolve_chord_tokens("46")
+    assert tokens == ["46"]
+    assert joined is False
+    assert needs_review is False
+
+

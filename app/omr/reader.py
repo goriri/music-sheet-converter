@@ -132,6 +132,10 @@ def resolve_chord_tokens(
         return [], False, False
 
     raw = raw_text.strip()
+    # Never split a digit run like '46' (leave to grammar check -> re-read -> needs_review)
+    if re.match(r"^\d+$", raw):
+        return [raw], False, False
+
     parts = raw.split()
     if len(parts) <= 1:
         return [raw], False, False
@@ -191,6 +195,9 @@ def parse_chord_symbol(raw_text: str, model_stacked: bool = False) -> tuple[str,
     s = re.sub(r"\s+", "", s).strip()
     if s.startswith("b4m"):
         s = "4m" + s[3:]
+    # Repair truncated maj7: in scale degree or letter notation, 'maj' without a number suffix is truncated 'maj7'
+    # (e.g. '5/1maj' -> '5/1maj7', '1maj' -> '1maj7', '4maj' -> '4maj7')
+    s = re.sub(r"maj$", "maj7", s, flags=re.IGNORECASE)
     return s, stacked
 
 
@@ -782,19 +789,26 @@ def read_sheet(
                     box_beats_map[br.box_id] = br.beat
                 box_stacked_map[br.box_id] = br.stacked
 
-            # Pre-group extra chords by measure index
-            extra_chords_by_m: dict[int, list[tuple[str, float, bool]]] = {}
+            # Pre-group extra chords by measure index (handling 1-based index if model reported it)
+            extra_chords_by_m: dict[int, list[tuple[str, float, bool, bool]]] = {}
             for ec in reading.extra_chords:
                 m_ec = ec.measure_index
+                if m_ec >= len(sys_geom.measures):
+                    if 1 <= m_ec <= len(sys_geom.measures):
+                        m_ec = m_ec - 1
+                    else:
+                        m_ec = len(sys_geom.measures) - 1
                 if m_ec not in extra_chords_by_m:
                     extra_chords_by_m[m_ec] = []
-                extra_chords_by_m[m_ec].append((ec.text, ec.beat, ec.stacked))
+                extra_chords_by_m[m_ec].append((ec.text, ec.beat, ec.stacked, bool(ec.boxed)))
 
             # Pre-index measure content readings by measure_index
             measure_content_map = {mc.measure_index: mc for mc in reading.measures}
             is_chord_only = "chord_only" in sys_geom.notes
             if is_chord_only:
                 warnings.append(f"[v2_chord_only] page={p_idx} system={s_idx}")
+            if "pickup" in sys_geom.notes:
+                warnings.append(f"[v2_pickup] page={p_idx} system={s_idx}")
 
             # Check if reading is still inconsistent with geometry; flag needs_review if so
             still_inconsistent, still_reason = check_reading_inconsistent(reading, sys_geom, header.chord_notation)
@@ -886,7 +900,7 @@ def read_sheet(
                                     ChordSymbol(
                                         raw=cleaned,
                                         beat=beat,
-                                        bbox=sub_bbox if cb.boxed else None,
+                                        bbox=sub_bbox,
                                         confidence=1.0,
                                         stacked=stacked,
                                     )
@@ -906,21 +920,38 @@ def read_sheet(
                                 ChordSymbol(
                                     raw=cleaned,
                                     beat=beat,
-                                    bbox=cb.bbox if cb.boxed else None,
+                                    bbox=cb.bbox,
                                     confidence=1.0,
                                     stacked=stacked,
                                 )
                             )
 
                 # 2. Extra chords
-                for extra_text, extra_beat, extra_stacked in extra_chords_by_m.get(m_idx, []):
+                is_sys_boxed = len(sys_geom.chord_boxes) > 0
+                for extra_text, extra_beat, extra_stacked, extra_boxed in extra_chords_by_m.get(m_idx, []):
                     cleaned_extra, stacked_extra = parse_chord_symbol(extra_text, model_stacked=extra_stacked)
                     if cleaned_extra and cleaned_extra.lower() not in {"", "none", "null", "no", "x"}:
                         # Filter non-chord voicing digits and rests
-                        if re.match(r"^(?:0|\d{3,})$", cleaned_extra):
+                        if re.match(r"^(?:0|\d{3,})$", cleaned_extra) or not is_valid_chord_grammar(cleaned_extra, notation=header.chord_notation):
+                            continue
+                        # On boxed systems, drop an extra if the model marks it as not boxed (e.g. PN voicing hints like '2 2')
+                        if is_sys_boxed and not extra_boxed:
+                            warnings.append(
+                                f"[omr_verify] Dropped unboxed chord {cleaned_extra!r} in page {p_idx} system {s_idx} measure {m_idx}: not inside a printed chord box"
+                            )
+                            sheet_issues.append(
+                                QualityIssue(
+                                    stage="omr",
+                                    measure_index=global_measure_idx + m_idx,
+                                    severity="info",
+                                    code="unboxed_chord_dropped",
+                                    message=f"第{p_idx + 1}页第{s_idx + 1}行第{m_idx + 1}小节记号 '{cleaned_extra}' 未处于和弦框内，已自动丢弃",
+                                    detail={"page": p_idx, "system": s_idx, "measure": m_idx, "raw": cleaned_extra, "beat": extra_beat},
+                                )
+                            )
                             continue
                         # On boxed systems, unboxed digits in fill measures are drum/band fill notes, not chords
-                        if len(sys_geom.chord_boxes) > 0:
+                        if is_sys_boxed:
                             mc_curr = measure_content_map.get(m_idx)
                             if mc_curr and mc_curr.fill and re.match(r"^\d+$", cleaned_extra):
                                 continue
@@ -931,11 +962,20 @@ def read_sheet(
                         )
                         if not already_present:
                             final_b = extra_beat if (1.0 <= extra_beat <= measure_beats) else 1.0
+                            synth_bbox = None
+                            if extra_boxed:
+                                x_frac = (final_b - 1.0) / max(1.0, measure_beats)
+                                cb_w = 0.05
+                                cb_x0 = g_m.x0 + x_frac * (g_m.x1 - g_m.x0)
+                                cb_x1 = min(g_m.x1, cb_x0 + cb_w)
+                                cb_y0 = sys_geom.bbox[1]
+                                cb_y1 = sys_geom.bbox[1] + 0.25 * (sys_geom.bbox[3] - sys_geom.bbox[1])
+                                synth_bbox = (cb_x0, cb_y0, cb_x1, cb_y1)
                             chords_in_measure.append(
                                 ChordSymbol(
                                     raw=cleaned_extra,
                                     beat=final_b,
-                                    bbox=None,
+                                    bbox=synth_bbox,
                                     confidence=0.9,
                                     stacked=stacked_extra,
                                 )

@@ -815,6 +815,40 @@ def test_v2_dropped_barline_emits_needs_review(clean_sheet, dummy_images):
     assert mismatch_issues[0].detail["system"] == 0
 
 
+def test_v2_barline_false_alarm_prevented_when_geometry_matches_reader(clean_sheet, dummy_images):
+    """Verify that when geometry_count == reader_count, beat deviations do not emit barline_count_mismatch needs_review."""
+    sheet = clean_sheet.model_copy(deep=True)
+    sheet.layout_source = "cv"
+    sheet.layout_confidence = 0.95
+    # 4 measures in system 0, reader saw 4 measures, system marked with pickup
+    sheet.warnings = [
+        "[v2_geometry] Classical CV layout authoritative boundaries",
+        "[v2_reader_measures_seen] page=0 system=0 measures_seen=4",
+        "[v2_pickup] page=0 system=0",
+    ]
+    # 3/4 time signature
+    sheet.header.time_signature = "3/4"
+    sheet.systems = [sheet.systems[0]]
+    for s in sheet.systems:
+        for m in s.measures:
+            m.beats = 3.0
+
+    # Pickup measure at start of row has 1.5 beats
+    sheet.systems[0].measures[0].melody = "1. 2"
+    # Measure 1 has slight melody misread: 2.5 beats instead of 3.0
+    sheet.systems[0].measures[1].melody = "1 2"
+
+    verified = verify_sheet(dummy_images, sheet, use_llm=False)
+
+    # Should NOT emit barline_count_mismatch needs_review
+    mismatches = [i for i in verified.issues if i.code == "barline_count_mismatch" and i.severity == "needs_review"]
+    assert len(mismatches) == 0
+
+    # Emits barline_count_consistent info
+    consistent = [i for i in verified.issues if i.code == "barline_count_consistent" and i.detail.get("system") == 0]
+    assert len(consistent) > 0
+
+
 def test_v2_boxed_chart_measure_without_box_emits_info_carry_over(clean_sheet, dummy_images):
     """Verify that in a boxed chart, absence of a chord box emits info chord_carry_over."""
     sheet = clean_sheet.model_copy(deep=True)
