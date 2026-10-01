@@ -130,7 +130,8 @@ def test_json_schema_roundtrip_with_sample():
 
 def test_barline_refinement_on_page1():
     """Test OpenCV barline refinement on page1.jpg using parsed sheet."""
-    assert PAGE1_PATH.is_file()
+    if not PAGE1_PATH.is_file():
+        pytest.skip("sample chart image not in repo (local-only fixture)")
     assert SAMPLE_JSON_PATH.is_file()
 
     img_bytes = PAGE1_PATH.read_bytes()

@@ -115,6 +115,8 @@ def test_ground_truth_pages(layout_truth):
 def test_system_bbox_containment_and_non_overlap():
     """Verify that system bounding boxes contain their bands and do not overlap."""
     img_path = REPO_ROOT / "fixtures" / "pages" / "page1.jpg"
+    if not img_path.is_file():
+        pytest.skip("sample chart image not in repo (local-only fixture)")
     img_bytes = img_path.read_bytes()
     geom = analyze_page(img_bytes, page=0)
 
@@ -149,6 +151,8 @@ def test_system_bbox_containment_and_non_overlap():
 def test_chord_box_containment_and_beats():
     """Verify chord boxes lie within system bbox and have valid 1-based beat estimations."""
     img_path = REPO_ROOT / "fixtures" / "pages" / "page1.jpg"
+    if not img_path.is_file():
+        pytest.skip("sample chart image not in repo (local-only fixture)")
     img_bytes = img_path.read_bytes()
     geom = analyze_page(img_bytes, page=0)
 
