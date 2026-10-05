@@ -152,16 +152,69 @@ class MeasureArrangement(BaseModel):
     measure_index: int
     tonic_pc: int = Field(description="Tonic pitch class in force for this measure (for movable-do jianpu)")
     key_name: str
-    chords: list[ResolvedChord]
+    chords: list[ResolvedChord] = Field(description="SOUNDING chords in the chosen key (all instruments)")
     rh: list[Event] = Field(default_factory=list)
     lh: list[Event] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- song form
+SectionRole = Literal["intro", "verse", "prechorus", "chorus", "bridge", "interlude", "outro", "unknown"]
+
+
+class SectionPlan(BaseModel):
+    """Song-form role and intensity of one measure; drives texture choice per section."""
+
+    measure_index: int
+    section_id: str = Field(description="Stable id of the section instance, e.g. 'intro', 'A1', 'B1', 'A2', 'B2', 'outro'")
+    role: SectionRole = "unknown"
+    energy: int = Field(1, ge=0, le=3, description="0 = very soft/sparse … 3 = climax")
+    is_section_start: bool = False
+    is_section_end: bool = False
+    source: Literal["label", "heuristic", "llm"] = "heuristic"
+
+
+# --------------------------------------------------------------------------- ukulele
+UkeStrokeKind = Literal["down", "up", "chuck", "pluck", "rest"]
+
+
+class UkeShape(BaseModel):
+    """A fingering diagram for standard re-entrant tuning G4 C4 E4 A4."""
+
+    name: str = Field(description="Chord name as the player fingers it (shape key, i.e. relative to the capo)")
+    frets: tuple[int, int, int, int] = Field(description="Strings G, C, E, A (4th→1st); 0 = open, -1 = muted; relative to the capo")
+    fingers: tuple[int, int, int, int] = Field(description="0 = open/unused, 1 index … 4 pinky; same string order")
+    barre: Optional[int] = Field(None, description="Fret of an index-finger barre, if any")
+    base_fret: int = Field(1, ge=1, description="Fret number shown at the top of the diagram")
+
+
+class UkeStroke(BaseModel):
+    onset: float = Field(description="0-based beat offset inside the measure")
+    duration: float = Field(description="Length in beats until the next stroke/rest")
+    kind: UkeStrokeKind
+    strings: list[int] = Field(default_factory=list, description="For 'pluck': string numbers 1..4 (1 = A, 4 = high G); several = pinch")
+    accent: bool = False
+
+
+class UkeMeasure(BaseModel):
+    measure_index: int
+    shapes: list[str] = Field(default_factory=list, description="Shape name per chord of MeasureArrangement.chords, same order")
+    technique: Literal["strum", "pick", "hold", "rest"] = "strum"
+    pattern_id: str = Field("", description="Key into Arrangement.pattern_legend; constant within a section where possible")
+    strokes: list[UkeStroke] = Field(default_factory=list)
 
 
 class Arrangement(BaseModel):
     instrument: Instrument = "piano"
     difficulty: Difficulty = "intermediate"
-    start_key: str
+    start_key: str = Field(description="SOUNDING start key chosen by the user")
     style: str = ""
     measures: list[MeasureArrangement]
     notes: list[str] = Field(default_factory=list, description="Human-readable remarks for the player")
     issues: list[QualityIssue] = Field(default_factory=list)
+    sections: list[SectionPlan] = Field(default_factory=list, description="One per measure (may be empty for piano)")
+    # ukulele / fretted instruments
+    capo: int = Field(0, ge=0, le=7, description="Capo fret; sounding pitch = shape pitch + capo")
+    shape_key: Optional[str] = Field(None, description="Key the player fingers in at the start (start_key − capo)")
+    uke_measures: list[UkeMeasure] = Field(default_factory=list, description="Parallel to measures for instrument='ukulele'")
+    uke_shapes: dict[str, UkeShape] = Field(default_factory=dict, description="Shape name → diagram, for every shape used")
+    pattern_legend: dict[str, str] = Field(default_factory=dict, description="pattern_id → human-readable pattern, e.g. '↓ ↓↑ ×↑ ↓↑'")
