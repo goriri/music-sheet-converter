@@ -418,7 +418,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (e.deltaMode === 1) { dx *= 16; dy *= 16; } // lines → px
       else if (e.deltaMode === 2) { const vp = lbViewportSize(); dx *= vp.w; dy *= vp.h; }
       if (e.ctrlKey || e.metaKey) {
-        const factor = Math.exp(-Math.max(-60, Math.min(60, dy)) * 0.006);
+        const factor = Math.exp(-Math.max(-50, Math.min(50, dy)) * 0.003);
         const p = lbLocalPoint(e.clientX, e.clientY);
         lbZoomTo(lbState.scale * factor, p.x, p.y);
       } else {
