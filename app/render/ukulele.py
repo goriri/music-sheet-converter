@@ -617,6 +617,54 @@ def render_uke_system_strip(
             "is_pickup_bar": is_pickup_bar,
         })
 
+    # Pass 1b: badge geometry (section caption + key-change mark). Badges that sit
+    # inside a measure reserve space on the chord-name line so names are never covered.
+    for info in m_infos:
+        m = info["m"]
+        uke_m = info["uke_m"]
+        arr_m = info["arr_m"]
+        sec = info["sec"]
+        mx0 = info["mx0"]
+        info["badges"] = []
+        info["badge_floor"] = None
+        short_pid = alias_map.get(uke_m.pattern_id, "") if uke_m and uke_m.pattern_id else ""
+        cap_text = format_section_label(sec, short_pid) if (sec and (sec.is_section_start or m.index == 0)) else ""
+        badge_reserved_right = mx0 + info["pad"]
+        in_measure = False
+        if cap_text:
+            font_sec = get_font(size=int(round(11 * scale)), bold=True)
+            tb_sec = draw.textbbox((0, 0), cap_text, font=font_sec)
+            sec_w = (tb_sec[2] - tb_sec[0]) + 10.0 * scale
+            sec_h = 16.0 * scale
+            # If margin on left is wide enough, put in margin; otherwise inside measure
+            if info["m_idx"] == 0 and mx0 >= sec_w + 6.0 * scale:
+                bx0 = max(4.0, mx0 - sec_w - 4.0 * scale)
+                by0 = 5.0 * scale
+            else:
+                bx0 = mx0 + 4.0 * scale
+                by0 = 4.0 * scale
+                in_measure = True
+                badge_reserved_right = max(badge_reserved_right, bx0 + sec_w + 6.0 * scale)
+            info["badges"].append(([bx0, by0, bx0 + sec_w, by0 + sec_h], cap_text,
+                                   (239, 246, 255), (191, 219, 254), (29, 78, 216), font_sec))
+        if m.index in kc_map and arr_m:
+            if arrangement.capo and arrangement.capo > 0:
+                shape_pc = (KEY_NAME_TO_PC.get(arr_m.key_name, 0) - arrangement.capo) % 12
+                sk = canonical_key_for_pc(shape_pc)
+            else:
+                sk = arr_m.key_name
+            kc_text = f"转 {sk} 调指法"
+            font_kc = get_font(size=int(round(11 * scale)), bold=True)
+            tb_kc = draw.textbbox((0, 0), kc_text, font=font_kc)
+            kcw = (tb_kc[2] - tb_kc[0]) + 10.0 * scale
+            kx0 = badge_reserved_right
+            info["badges"].append(([kx0, 4.0 * scale, kx0 + kcw, 20.0 * scale], kc_text,
+                                   (254, 243, 199), (251, 191, 36), (180, 83, 9), font_kc))
+            badge_reserved_right = kx0 + kcw + 6.0 * scale
+            in_measure = True
+        if in_measure:
+            info["badge_floor"] = badge_reserved_right
+
     # Pass 2: Collect all chord items across the system strip
     all_chord_items: list[dict] = []
     for info in m_infos:
@@ -661,12 +709,15 @@ def render_uke_system_strip(
                     "mx1": mx1,
                     "is_carried_over": (not has_printed_chords),
                     "omit": False,
+                    "floor": info["badge_floor"],
                 })
 
     # Measure chord glyph bounding boxes
     for item in all_chord_items:
         tb = draw.textbbox((0, 0), item["name"], font=item["font"])
         item["w"] = float(tb[2] - tb[0])
+        if item["floor"] is not None and item["x"] < item["floor"]:
+            item["x"] = item["floor"]
 
     # Global collision resolution across adjacent chords
     cn = len(all_chord_items)
@@ -700,11 +751,13 @@ def render_uke_system_strip(
                 curr["x"] = max(curr["mx0"] + 2.0 * scale, curr["x"] - shift)
                 nxt["x"] = min(nxt["mx1"] - nxt["w"] - 2.0 * scale, nxt["x"] + shift)
 
-    # Strictly enforce left-to-right order without overlap
+    # Strictly enforce left-to-right order without overlap (and never under a badge)
     cur_right = 0.0
     for item in all_chord_items:
         if item["omit"]:
             continue
+        if item["floor"] is not None and item["x"] < item["floor"]:
+            item["x"] = item["floor"]
         if item["x"] < cur_right + 4.0 * scale:
             item["x"] = cur_right + 4.0 * scale
         cur_right = item["x"] + item["w"]
@@ -735,54 +788,10 @@ def render_uke_system_strip(
         if m_idx == 0:
             draw.line([(mx0, 0), (mx0, strip_h)], fill=bar_color, width=1)
 
-        # 2. Section Caption Badge
-        short_pid = alias_map.get(uke_m.pattern_id, "") if uke_m and uke_m.pattern_id else ""
-        cap_text = format_section_label(sec, short_pid) if (sec and (sec.is_section_start or m.index == 0)) else ""
-
-        badge_reserved_right = mx0 + pad
-
-        if cap_text:
-            font_sec = get_font(size=int(round(11 * scale)), bold=True)
-            tb_sec = draw.textbbox((0, 0), cap_text, font=font_sec)
-            sec_w = (tb_sec[2] - tb_sec[0]) + 10.0 * scale
-            sec_h = 16.0 * scale
-
-            # If margin on left is wide enough, put in margin; otherwise inside measure
-            if m_idx == 0 and mx0 >= sec_w + 6.0 * scale:
-                bx0 = max(4.0, mx0 - sec_w - 4.0 * scale)
-                bx1 = bx0 + sec_w
-                by0 = 5.0 * scale
-                by1 = by0 + sec_h
-                draw.rounded_rectangle([bx0, by0, bx1, by1], radius=3.0 * scale, fill=(239, 246, 255), outline=(191, 219, 254))
-                draw.text((bx0 + 5.0 * scale, by0 + 1.0 * scale), cap_text, font=font_sec, fill=(29, 78, 216))
-            else:
-                bx0 = mx0 + 4.0 * scale
-                bx1 = bx0 + sec_w
-                by0 = 4.0 * scale
-                by1 = by0 + sec_h
-                draw.rounded_rectangle([bx0, by0, bx1, by1], radius=3.0 * scale, fill=(239, 246, 255), outline=(191, 219, 254))
-                draw.text((bx0 + 5.0 * scale, by0 + 1.0 * scale), cap_text, font=font_sec, fill=(29, 78, 216))
-                badge_reserved_right = max(badge_reserved_right, bx1 + 6.0 * scale)
-
-        # 3. Key Change Mark Badge
-        if m.index in kc_map and arr_m:
-            if arrangement.capo and arrangement.capo > 0:
-                shape_pc = (KEY_NAME_TO_PC.get(arr_m.key_name, 0) - arrangement.capo) % 12
-                sk = canonical_key_for_pc(shape_pc)
-            else:
-                sk = arr_m.key_name
-            kc_text = f"转 {sk} 调指法"
-            font_kc = get_font(size=int(round(11 * scale)), bold=True)
-            tb_kc = draw.textbbox((0, 0), kc_text, font=font_kc)
-            kcw = (tb_kc[2] - tb_kc[0]) + 10.0 * scale
-            kch = 16.0 * scale
-            kx0 = badge_reserved_right
-            kx1 = kx0 + kcw
-            ky0 = 4.0 * scale
-            ky1 = ky0 + kch
-            draw.rounded_rectangle([kx0, ky0, kx1, ky1], radius=3.0 * scale, fill=(254, 243, 199), outline=(251, 191, 36))
-            draw.text((kx0 + 5.0 * scale, ky0 + 1.0 * scale), kc_text, font=font_kc, fill=(180, 83, 9))
-            badge_reserved_right = kx1 + 6.0 * scale
+        # 2./3. Section caption + key-change badges (geometry computed before chords)
+        for (rect, text, fill, outline, tcolor, font_b) in info["badges"]:
+            draw.rounded_rectangle(rect, radius=3.0 * scale, fill=fill, outline=outline)
+            draw.text((rect[0] + 5.0 * scale, rect[1] + 1.0 * scale), text, font=font_b, fill=tcolor)
 
         # 4. Line 2: Strokes & Rhythm
         if not uke_m or not uke_m.strokes:
