@@ -265,9 +265,9 @@ class ChordStackLayout:
     max_w: float  # Max width of digits and accidentals
 
 
-def compute_stack_height(max_notes: int, line_spacing: float = 18.0) -> float:
+def compute_stack_height(max_notes: int, line_spacing: float = 18.0, scale: float = 1.0) -> float:
     """Return required height in pixels for a stack of up to max_notes."""
-    base_h = 44.0
+    base_h = 44.0 * scale
     if max_notes <= 1:
         return base_h
     return base_h + (max_notes - 1) * line_spacing
@@ -282,6 +282,7 @@ def draw_jianpu_note(
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
     acc_font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
     color: Tuple[int, int, int] = (0, 0, 0),
+    scale: float = 1.0,
 ) -> Tuple[float, float, float]:
     """Draw a single jianpu note (accidental + digit + octave dots).
 
@@ -291,7 +292,7 @@ def draw_jianpu_note(
     if note.accidental:
         draw.text((cur_x, y), note.accidental, font=acc_font, fill=color)
         bbox_acc = draw.textbbox((cur_x, y), note.accidental, font=acc_font)
-        cur_x += (bbox_acc[2] - bbox_acc[0]) + 1.0
+        cur_x += (bbox_acc[2] - bbox_acc[0]) + 1.0 * scale
 
     digit_str = str(note.degree)
     draw.text((cur_x, y), digit_str, font=font, fill=color)
@@ -302,22 +303,23 @@ def draw_jianpu_note(
     top_y = float(bbox[1])
     bottom_y = float(bbox[3])
 
+    dot_r = 1.8 * scale
     if note.octave_dots > 0:
         for i in range(note.octave_dots):
-            dot_y = float(bbox[1]) - 4.0 - i * 5.0
+            dot_y = float(bbox[1]) - (4.0 + i * 5.0) * scale
             draw.ellipse(
-                [center_x - 1.8, dot_y - 1.8, center_x + 1.8, dot_y + 1.8],
+                [center_x - dot_r, dot_y - dot_r, center_x + dot_r, dot_y + dot_r],
                 fill=color,
             )
-            top_y = min(top_y, dot_y - 2.0)
+            top_y = min(top_y, dot_y - 2.0 * scale)
     elif note.octave_dots < 0:
         for i in range(abs(note.octave_dots)):
-            dot_y = float(bbox[3]) + 4.0 + i * 5.0
+            dot_y = float(bbox[3]) + (4.0 + i * 5.0) * scale
             draw.ellipse(
-                [center_x - 1.8, dot_y - 1.8, center_x + 1.8, dot_y + 1.8],
+                [center_x - dot_r, dot_y - dot_r, center_x + dot_r, dot_y + dot_r],
                 fill=color,
             )
-            bottom_y = max(bottom_y, dot_y + 2.0)
+            bottom_y = max(bottom_y, dot_y + 2.0 * scale)
 
     width = (cur_x + digit_w) - x
     return width, top_y, bottom_y
@@ -336,6 +338,7 @@ def draw_chord_stack(
     color: Tuple[int, int, int] = (0, 0, 0),
     finger_color: Tuple[int, int, int] = (25, 118, 210),  # Material Blue
     draw_finger: bool = True,
+    scale: float = 1.0,
 ) -> ChordStackLayout:
     """Draw a stacked chord (lowest note at bottom, each with its own dots).
 
@@ -353,7 +356,9 @@ def draw_chord_stack(
     for i, note in enumerate(sorted_notes):
         digit_y = base_y - i * line_spacing
         digit_y_positions.append(digit_y)
-        w, top_y, bot_y = draw_jianpu_note(draw, x, digit_y, note, font, acc_font, color=color)
+        w, top_y, bot_y = draw_jianpu_note(
+            draw, x, digit_y, note, font, acc_font, color=color, scale=scale
+        )
         max_w = max(max_w, w)
         overall_top = min(overall_top, top_y)
         overall_bottom = max(overall_bottom, bot_y)
@@ -365,15 +370,20 @@ def draw_chord_stack(
             if f_num is not None:
                 f_str = str(f_num)
                 if hand == "rh":
-                    fy = overall_top - 14.0
-                    draw.text((x + 2, fy), f_str, font=finger_font, fill=finger_color)
+                    fy = overall_top - 14.0 * scale
+                    draw.text((x + 2.0 * scale, fy), f_str, font=finger_font, fill=finger_color)
                     overall_top = fy
         else:
             # Multi-note chord stack: draw fingers vertically next to each note
             for i, note in enumerate(sorted_notes):
                 if note.finger is not None:
-                    fy = digit_y_positions[i] + 7.0
-                    draw.text((x + max_w + 3.0, fy), str(note.finger), font=finger_font, fill=finger_color)
+                    fy = digit_y_positions[i] + 7.0 * scale
+                    draw.text(
+                        (x + max_w + 3.0 * scale, fy),
+                        str(note.finger),
+                        font=finger_font,
+                        fill=finger_color,
+                    )
 
     return ChordStackLayout(
         notes=list(sorted_notes),
@@ -417,14 +427,16 @@ def draw_augmentation_dot(
     center_y: float,
     dot_radius: float = 2.0,
     color: Tuple[int, int, int] = (0, 0, 0),
+    scale: float = 1.0,
 ) -> None:
     """Draw augmentation dot '.' for dotted rhythms."""
+    r = dot_radius * scale
     draw.ellipse(
         [
-            x - dot_radius,
-            center_y - dot_radius,
-            x + dot_radius,
-            center_y + dot_radius,
+            x - r,
+            center_y - r,
+            x + r,
+            center_y + r,
         ],
         fill=color,
     )
@@ -437,9 +449,10 @@ def draw_underline_beam(
     y: float,
     width: float = 1.8,
     color: Tuple[int, int, int] = (0, 0, 0),
+    scale: float = 1.0,
 ) -> None:
     """Draw a horizontal underline beam line."""
-    draw.line([(x0, y), (x1, y)], fill=color, width=int(round(width)))
+    draw.line([(x0, y), (x1, y)], fill=color, width=max(1, int(round(width * scale))))
 
 
 def draw_tie(
@@ -449,10 +462,11 @@ def draw_tie(
     y: float,
     arc_height: float = 7.0,
     color: Tuple[int, int, int] = (0, 0, 0),
+    scale: float = 1.0,
 ) -> None:
     """Draw a curved tie arc between two notes."""
     mid_x = (x0 + x1) / 2.0
-    control_y = y - arc_height
+    control_y = y - arc_height * scale
     points = []
     steps = 14
     for s in range(steps + 1):
@@ -460,4 +474,5 @@ def draw_tie(
         px = (1 - t) ** 2 * x0 + 2 * (1 - t) * t * mid_x + t**2 * x1
         py = (1 - t) ** 2 * y + 2 * (1 - t) * t * control_y + t**2 * y
         points.append((px, py))
-    draw.line(points, fill=color, width=1)
+    draw.line(points, fill=color, width=max(1, int(round(1.0 * scale))))
+

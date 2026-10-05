@@ -27,7 +27,12 @@ from app.models import (
     UkeStroke,
 )
 from app.render.jianpu import get_font
-from app.render.overlay import calc_event_x, find_whitest_row
+from app.render.overlay import (
+    calc_event_x,
+    find_system_cut_row,
+    find_whitest_row,
+    images_to_pdf_bytes,
+)
 from app.theory.keys import KEY_NAME_TO_PC, canonical_key_for_pc
 
 # Chinese names for song-form roles
@@ -295,6 +300,7 @@ def draw_chord_diagram(
     font_name = get_font(size=int(round(string_spacing * 0.65)), bold=True)
     tb_name = draw.textbbox((0, 0), chord_name, font=font_name)
     w_name = tb_name[2] - tb_name[0]
+    h_name = tb_name[3] - tb_name[1]
     draw.text((cx - w_name / 2.0, y), chord_name, font=font_name, fill=(176, 0, 0))
 
     if shape is None:
@@ -302,13 +308,14 @@ def draw_chord_diagram(
         draw.text((cx - 20.0 * scale, y + 26.0 * scale), "(无指法)", font=font_sub, fill=(130, 130, 130))
         return 50.0 * scale
 
-    y_nut = y + 36.0 * scale
+    indic_r = string_spacing * 0.18
+    y_indic = y + max(h_name + 4.0 * scale, 22.0 * scale) + indic_r
+    y_nut = y_indic + indic_r + 6.0 * scale
     fret_h = string_spacing * 1.05
     fret_y = [y_nut + (k + 1) * fret_h for k in range(4)]
 
     # 2. Indicators above nut: 'O' for open, '×' for muted
-    y_indic = y_nut - 10.0 * scale
-    indic_r = string_spacing * 0.18
+
     for i in range(4):
         fret = shape.frets[i]
         if fret == 0:
@@ -376,14 +383,12 @@ def draw_chord_diagram(
                 # Finger 1 label on barre
                 font_barre = get_font(size=int(round(string_spacing * 0.44)), bold=True)
                 barre_cx = (bx0 + bx1) / 2.0
-                tb_b = draw.textbbox((0, 0), "1", font=font_barre)
-                bw = tb_b[2] - tb_b[0]
-                bh = tb_b[3] - tb_b[1]
                 draw.text(
-                    (barre_cx - bw / 2.0, fret_mid_y - bh / 2.0 - 1.0),
+                    (barre_cx, fret_mid_y),
                     "1",
                     font=font_barre,
                     fill=(255, 255, 255),
+                    anchor="mm",
                 )
 
     # 7. Dots with Large High-Contrast Finger Numbers
@@ -405,15 +410,12 @@ def draw_chord_diagram(
                         fill=(30, 30, 30),
                     )
                     if f_num > 0:
-                        text_f = str(f_num)
-                        tb_f = draw.textbbox((0, 0), text_f, font=font_f)
-                        fw = tb_f[2] - tb_f[0]
-                        fh = tb_f[3] - tb_f[1]
                         draw.text(
-                            (dot_x - fw / 2.0, dot_y - fh / 2.0 - 1.0),
-                            text_f,
+                            (dot_x, dot_y),
+                            str(f_num),
                             font=font_f,
                             fill=(255, 255, 255),
+                            anchor="mm",
                         )
             # Supplemental finger number below the grid
             if f_num > 0:
@@ -436,6 +438,7 @@ def make_uke_header_band(
     sheet: Optional[ParsedSheet],
     arrangement: Arrangement,
     page_systems: Sequence[System],
+    scale: Optional[float] = None,
 ) -> Image.Image:
     """Create a comprehensive top header band for a single ukulele page.
 
@@ -444,7 +447,8 @@ def make_uke_header_band(
     2. Pattern legend line (patterns used on this page + notation guide)
     3. Chord diagrams for all distinct shapes used on THIS page (first-appearance order).
     """
-    scale = max(1.0, min(1.6, width / 1100.0))
+    if scale is None:
+        scale = max(1.0, min(1.6, width / 1100.0))
     margin = max(36.0 * scale, width * 0.04)
 
     # 1. Title line
@@ -507,7 +511,7 @@ def make_uke_header_band(
     usable_w = width - 2 * margin
     max_per_row = max(1, int((usable_w + col_gap) // (col_w + col_gap)))
 
-    row_h = (target_grid_w / 3.0) * 4.2 + 62.0 * scale
+    row_h = (target_grid_w / 3.0) * 4.2 + 72.0 * scale
     y_title = 12.0 * scale
     y_legend = 40.0 * scale
     y_diag_start = 68.0 * scale
@@ -550,6 +554,7 @@ def render_uke_system_strip(
     page_width: int,
     arrangement: Arrangement,
     sheet: Optional[ParsedSheet] = None,
+    scale: Optional[float] = None,
 ) -> Image.Image:
     """Render a compact accompaniment strip for one system row.
 
@@ -560,8 +565,10 @@ def render_uke_system_strip(
       held dashes -, underline rhythm beams.
     Strip height: ~78 px (scaled with resolution, much smaller than piano's 170-200 px).
     """
-    scale = max(1.0, min(1.6, page_width / 1100.0))
+    if scale is None:
+        scale = max(1.0, min(1.6, page_width / 1100.0))
     strip_h = int(round(UKE_STRIP_HEIGHT * scale))
+
     strip = Image.new("RGB", (page_width, strip_h), color=(255, 255, 255))
     draw = ImageDraw.Draw(strip)
 
@@ -784,9 +791,10 @@ def render_uke_system_strip(
         is_pickup_bar = info["is_pickup_bar"]
 
         # 1. Bar lines
-        draw.line([(mx1, 0), (mx1, strip_h)], fill=bar_color, width=1)
+        bar_w = max(1, int(round(1 * scale)))
+        draw.line([(mx1, 0), (mx1, strip_h)], fill=bar_color, width=bar_w)
         if m_idx == 0:
-            draw.line([(mx0, 0), (mx0, strip_h)], fill=bar_color, width=1)
+            draw.line([(mx0, 0), (mx0, strip_h)], fill=bar_color, width=bar_w)
 
         # 2./3. Section caption + key-change badges (geometry computed before chords)
         for (rect, text, fill, outline, tcolor, font_b) in info["badges"]:
@@ -879,13 +887,16 @@ def render_uke_page(
     systems: Sequence[System],
     sheet: ParsedSheet,
     arrangement: Arrangement,
+    scale: Optional[float] = None,
 ) -> list[Image.Image]:
     """Overlay ukulele accompaniment strips onto a single page and split if height > 1.6x original."""
     w, h = page_img.size
     orig_h = h
+    if scale is None:
+        scale = max(1.0, min(1.6, w / 1100.0))
 
     if not systems:
-        header_band = make_uke_header_band(w, sheet, arrangement, [])
+        header_band = make_uke_header_band(w, sheet, arrangement, [], scale=scale)
         res = Image.new("RGB", (w, h + header_band.height), color=(255, 255, 255))
         res.paste(header_band, (0, 0))
         res.paste(page_img, (0, header_band.height))
@@ -905,14 +916,8 @@ def render_uke_page(
         s_next = sorted_systems[i + 1]
         curr_y1 = int(round((s_curr.bbox[3] if s_curr.bbox else (i + 1) / k) * h))
         next_y0 = int(round((s_next.bbox[1] if s_next.bbox else (i + 1) / k) * h))
-
-        if curr_y1 >= next_y0:
-            nominal_cut = (curr_y1 + next_y0) // 2
-            cut_y = nominal_cut
-        else:
-            nominal_cut = int(round((curr_y1 + next_y0) / 2.0))
-            cut_y = find_whitest_row(gray, nominal_cut, delta, curr_y1, next_y0)
-
+        nominal_cut = int(round((curr_y1 + next_y0) / 2.0))
+        cut_y = find_system_cut_row(gray, curr_y1, next_y0, nominal_y=nominal_cut, delta=delta)
         cut_y = max(min_cut, min(h - (k - i), cut_y))
         cuts.append(cut_y)
         min_cut = cut_y + 1
@@ -920,7 +925,7 @@ def render_uke_page(
     last_sys = sorted_systems[-1]
     last_y1 = int(round((last_sys.bbox[3] if last_sys.bbox else 1.0) * h))
     nominal_last_cut = min(h, last_y1 + int(round(0.015 * h)))
-    cut_last = find_whitest_row(gray, nominal_last_cut, delta, last_y1, h)
+    cut_last = find_system_cut_row(gray, last_y1, min(h, last_y1 + 2 * delta), nominal_y=nominal_last_cut, delta=delta)
     cut_last = max(min_cut, min(h, cut_last))
     cuts.append(cut_last)
 
@@ -931,8 +936,8 @@ def render_uke_page(
         y_prev = cut_y
     page_slices.append(page_img.crop((0, y_prev, w, h)))
 
-    header_band = make_uke_header_band(w, sheet, arrangement, sorted_systems)
-    strips = [render_uke_system_strip(s, w, arrangement, sheet) for s in sorted_systems]
+    header_band = make_uke_header_band(w, sheet, arrangement, sorted_systems, scale=scale)
+    strips = [render_uke_system_strip(s, w, arrangement, sheet, scale=scale) for s in sorted_systems]
 
     total_h = header_band.height + sum(sl.height for sl in page_slices) + sum(st.height for st in strips)
 
@@ -958,7 +963,7 @@ def render_uke_page(
     p1_systems = sorted_systems[:split_idx]
     p1_slices = page_slices[:split_idx]
     p1_strips = strips[:split_idx]
-    p1_header = make_uke_header_band(w, sheet, arrangement, p1_systems)
+    p1_header = make_uke_header_band(w, sheet, arrangement, p1_systems, scale=scale)
     p1_h = p1_header.height + sum(sl.height for sl in p1_slices) + sum(st.height for st in p1_strips)
     res1 = Image.new("RGB", (w, p1_h), color=(255, 255, 255))
     cur_y = 0
@@ -974,7 +979,7 @@ def render_uke_page(
     p2_systems = sorted_systems[split_idx:k]
     p2_slices = page_slices[split_idx:k]
     p2_strips = strips[split_idx:k]
-    p2_header = make_uke_header_band(w, sheet, arrangement, p2_systems)
+    p2_header = make_uke_header_band(w, sheet, arrangement, p2_systems, scale=scale)
     p2_h = p2_header.height + sum(sl.height for sl in p2_slices) + sum(st.height for st in p2_strips) + page_slices[k].height
     res2 = Image.new("RGB", (w, p2_h), color=(255, 255, 255))
     cur_y = 0
@@ -1003,6 +1008,20 @@ def render_uke_pages(
 
     for page_idx, page_bytes in enumerate(pages):
         page_img = Image.open(io.BytesIO(page_bytes)).convert("RGB")
+        native_w, native_h = page_img.size
+        S = max(1.0, min(3.0, 2400.0 / float(native_w)))
+        native_scale = max(1.0, min(1.6, float(native_w) / 1100.0))
+        uke_scale = S * native_scale
+
+        if abs(S - 1.0) > 1e-4:
+            target_w = int(round(native_w * S))
+            target_h = int(round(native_h * S))
+            from PIL import ImageFilter
+
+            page_img = page_img.resize((target_w, target_h), Image.Resampling.LANCZOS).filter(
+                ImageFilter.UnsharpMask(radius=1.5, percent=100, threshold=3)
+            )
+
         page_systems = [s for s in sheet.systems if s.page == page_idx]
 
         rendered_subpages = render_uke_page(
@@ -1010,6 +1029,7 @@ def render_uke_pages(
             systems=page_systems,
             sheet=sheet,
             arrangement=arrangement,
+            scale=uke_scale,
         )
         output_pages.extend(rendered_subpages)
 
@@ -1023,17 +1043,5 @@ def render_uke_pdf(
 ) -> bytes:
     """Render multi-page PDF bytes from sheet music pages and ukulele accompaniment."""
     rendered_images = render_uke_pages(pages, sheet, arrangement)
-    if not rendered_images:
-        return b""
+    return images_to_pdf_bytes(rendered_images)
 
-    buf = io.BytesIO()
-    first_img = rendered_images[0]
-    remaining = rendered_images[1:]
-    first_img.save(
-        buf,
-        format="PDF",
-        save_all=True,
-        append_images=remaining,
-        resolution=150.0,
-    )
-    return buf.getvalue()
