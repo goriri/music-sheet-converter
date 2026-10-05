@@ -91,8 +91,59 @@ document.addEventListener("DOMContentLoaded", () => {
   const reSelectDifficulty = document.getElementById("re-select-difficulty");
   const btnReRender = document.getElementById("btn-re-render");
 
+  // Main Tabs & History Elements
+  let currentStep = 1;
+  let currentMainView = "creator"; // "creator" | "history"
+
+  const tabBtnCreate = document.getElementById("tab-btn-create");
+  const tabBtnHistory = document.getElementById("tab-btn-history");
+  const stepsNavContainer = document.getElementById("steps-nav-container");
+  const sectionHistory = document.getElementById("section-history");
+  const historyLoading = document.getElementById("history-loading");
+  const historyError = document.getElementById("history-error");
+  const historyErrorMsg = document.getElementById("history-error-msg");
+  const historyEmpty = document.getElementById("history-empty");
+  const historyGrid = document.getElementById("history-grid");
+  const historyTotalCount = document.getElementById("history-total-count");
+  const historyLoadMoreContainer = document.getElementById("history-load-more-container");
+  const btnLoadMoreHistory = document.getElementById("btn-load-more-history");
+  const btnRefreshHistory = document.getElementById("btn-refresh-history");
+  const btnRetryHistory = document.getElementById("btn-retry-history");
+  const btnEmptyStart = document.getElementById("btn-empty-start");
+
+  // Delete Confirmation Dialog Elements
+  const deleteConfirmDialog = document.getElementById("delete-confirm-dialog");
+  const deleteDialogTitle = document.getElementById("delete-dialog-title");
+  const deleteDialogMessage = document.getElementById("delete-dialog-message");
+  const dialogBtnCancel = document.getElementById("dialog-btn-cancel");
+  const dialogBtnConfirm = document.getElementById("dialog-btn-confirm");
+
+  function setMainView(view) {
+    currentMainView = view;
+    if (view === "history") {
+      if (tabBtnCreate) tabBtnCreate.classList.remove("active");
+      if (tabBtnHistory) tabBtnHistory.classList.add("active");
+      if (stepsNavContainer) stepsNavContainer.classList.add("hidden");
+      stepSections.forEach((sec) => sec.classList.add("hidden"));
+      if (sectionHistory) sectionHistory.classList.remove("hidden");
+      if (historyState.items.length === 0) {
+        fetchHistory(false);
+      }
+    } else {
+      if (tabBtnCreate) tabBtnCreate.classList.add("active");
+      if (tabBtnHistory) tabBtnHistory.classList.remove("active");
+      if (stepsNavContainer) stepsNavContainer.classList.remove("hidden");
+      if (sectionHistory) sectionHistory.classList.add("hidden");
+      setStep(currentStep);
+    }
+  }
+
+  if (tabBtnCreate) tabBtnCreate.onclick = () => setMainView("creator");
+  if (tabBtnHistory) tabBtnHistory.onclick = () => setMainView("history");
+
   // Switch Active Step
   function setStep(stepNum) {
+    currentStep = stepNum;
     stepNavs.forEach((nav, idx) => {
       const n = idx + 1;
       nav.classList.remove("active", "completed");
@@ -1819,6 +1870,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const result = await resp.json();
       displayRenderResult(result, key, diff);
       setStep(4);
+      if (currentSheetId) {
+        delete historyState.sheetDetails[currentSheetId];
+      }
     } catch (err) {
       showRenderError(err.message);
     } finally {
@@ -1902,23 +1956,508 @@ document.addEventListener("DOMContentLoaded", () => {
     setStep(3);
   });
 
-  // Auto-load sheet from URL parameter (e.g. ?sheet_id=xxx)
-  const urlParams = new URLSearchParams(window.location.search);
-  const initialSheetId = urlParams.get("sheet_id");
-  if (initialSheetId) {
-    currentSheetId = initialSheetId;
-    fetch(`/api/sheets/${initialSheetId}`)
-      .then((r) => r.json())
-      .then((state) => {
-        if (state.status === "ready" && state.parsed) {
-          currentParsedSheet = state.parsed;
-          renderStep3();
-          setStep(3);
+  // --- Modern Dialog Confirmation ---
+  const historyState = {
+    items: [],
+    nextCursor: null,
+    isLoading: false,
+    expandedSheetIds: new Set(),
+    sheetDetails: {},
+  };
+
+  function showConfirmDialog(title, message) {
+    return new Promise((resolve) => {
+      if (!deleteConfirmDialog || typeof deleteConfirmDialog.showModal !== "function") {
+        const ok = window.confirm(message);
+        resolve(ok);
+        return;
+      }
+      if (deleteDialogTitle) deleteDialogTitle.textContent = title;
+      if (deleteDialogMessage) deleteDialogMessage.textContent = message;
+
+      const handleConfirm = () => {
+        cleanup();
+        deleteConfirmDialog.close();
+        resolve(true);
+      };
+      const handleCancel = () => {
+        cleanup();
+        deleteConfirmDialog.close();
+        resolve(false);
+      };
+      const handleClose = () => {
+        cleanup();
+        resolve(false);
+      };
+
+      function cleanup() {
+        if (dialogBtnConfirm) dialogBtnConfirm.removeEventListener("click", handleConfirm);
+        if (dialogBtnCancel) dialogBtnCancel.removeEventListener("click", handleCancel);
+        deleteConfirmDialog.removeEventListener("close", handleClose);
+      }
+
+      if (dialogBtnConfirm) dialogBtnConfirm.addEventListener("click", handleConfirm);
+      if (dialogBtnCancel) dialogBtnCancel.addEventListener("click", handleCancel);
+      deleteConfirmDialog.addEventListener("close", handleClose, { once: true });
+
+      deleteConfirmDialog.showModal();
+    });
+  }
+
+  // --- Format & Translation Helpers ---
+  function formatDateTime(isoString) {
+    if (!isoString) return "未知时间";
+    try {
+      const d = new Date(isoString);
+      if (isNaN(d.getTime())) return isoString;
+      return d.toLocaleString("zh-CN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch (_) {
+      return isoString;
+    }
+  }
+
+  function translateInstrument(inst) {
+    if (inst === "piano") return "钢琴";
+    if (inst === "ukulele") return "尤克里里";
+    if (inst === "guitar") return "吉他";
+    return inst || "伴奏";
+  }
+
+  function translateDifficulty(diff) {
+    if (diff === "beginner") return "初级";
+    if (diff === "intermediate") return "中级";
+    if (diff === "advanced") return "高级";
+    return diff || "";
+  }
+
+  function formatCapoAndShape(render) {
+    const capo = render.capo || 0;
+    const shape = render.shape_key || render.start_key;
+    if (render.instrument === "ukulele" || capo > 0) {
+      if (capo > 0) {
+        return `变调夹 ${capo} 品 · 按 ${shape} 调指法`;
+      } else {
+        return `按 ${shape} 调指法（无变调夹）`;
+      }
+    }
+    return "";
+  }
+
+  // --- Fetch & Render History ---
+  async function fetchHistory(isNextPage = false) {
+    if (historyState.isLoading) return;
+    historyState.isLoading = true;
+
+    if (!isNextPage) {
+      if (historyLoading) historyLoading.classList.remove("hidden");
+      if (historyError) historyError.classList.add("hidden");
+      if (historyEmpty) historyEmpty.classList.add("hidden");
+      if (historyLoadMoreContainer) historyLoadMoreContainer.classList.add("hidden");
+    } else {
+      if (btnLoadMoreHistory) btnLoadMoreHistory.textContent = "正在加载...";
+    }
+
+    const cursorParam = isNextPage && historyState.nextCursor ? `&cursor=${encodeURIComponent(historyState.nextCursor)}` : "";
+    try {
+      const resp = await fetch(`/api/history?limit=20${cursorParam}`);
+      if (!resp.ok) {
+        throw new Error(`加载历史记录失败 (HTTP ${resp.status})`);
+      }
+      const data = await resp.json();
+      const newItems = data.items || [];
+      if (isNextPage) {
+        historyState.items = historyState.items.concat(newItems);
+      } else {
+        historyState.items = newItems;
+      }
+      historyState.nextCursor = data.next_cursor || null;
+
+      if (historyLoading) historyLoading.classList.add("hidden");
+      if (historyState.items.length === 0) {
+        if (historyEmpty) historyEmpty.classList.remove("hidden");
+        if (historyGrid) historyGrid.innerHTML = "";
+      } else {
+        if (historyEmpty) historyEmpty.classList.add("hidden");
+        renderHistoryList();
+      }
+
+      if (historyState.nextCursor) {
+        if (historyLoadMoreContainer) historyLoadMoreContainer.classList.remove("hidden");
+        if (btnLoadMoreHistory) btnLoadMoreHistory.textContent = "加载更多历史记录 ↓";
+      } else {
+        if (historyLoadMoreContainer) historyLoadMoreContainer.classList.add("hidden");
+      }
+    } catch (err) {
+      if (historyLoading) historyLoading.classList.add("hidden");
+      if (!isNextPage) {
+        if (historyError) historyError.classList.remove("hidden");
+        if (historyErrorMsg) historyErrorMsg.textContent = err.message || "加载历史记录失败，请稍后重试";
+      } else {
+        alert(`加载更多失败: ${err.message}`);
+        if (btnLoadMoreHistory) btnLoadMoreHistory.textContent = "加载更多历史记录 ↓";
+      }
+    } finally {
+      historyState.isLoading = false;
+    }
+  }
+
+  async function fetchSheetDetail(sheetId, force = false) {
+    if (!force && historyState.sheetDetails[sheetId]) {
+      return historyState.sheetDetails[sheetId];
+    }
+    try {
+      const resp = await fetch(`/api/history/${encodeURIComponent(sheetId)}`);
+      if (!resp.ok) {
+        throw new Error(`获取曲谱版本详情失败 (HTTP ${resp.status})`);
+      }
+      const data = await resp.json();
+      historyState.sheetDetails[sheetId] = data;
+
+      // Update render_count in sheet item
+      const item = historyState.items.find((i) => i.sheet_id === sheetId);
+      if (item && data.renders) {
+        item.render_count = data.renders.length;
+      }
+      renderHistoryList();
+      return data;
+    } catch (err) {
+      console.error(`Error loading sheet detail ${sheetId}:`, err);
+      return null;
+    }
+  }
+
+  function renderHistoryList() {
+    if (!historyGrid) return;
+    historyGrid.innerHTML = "";
+
+    historyState.items.forEach((sheet) => {
+      const card = document.createElement("div");
+      card.className = "history-card";
+      card.id = `history-card-${sheet.sheet_id}`;
+
+      const isExpanded = historyState.expandedSheetIds.has(sheet.sheet_id);
+
+      // Card Main Row
+      const mainRow = document.createElement("div");
+      mainRow.className = "history-card-main";
+
+      // Thumbnail
+      const thumbWrapper = document.createElement("div");
+      thumbWrapper.className = "history-thumb-wrapper";
+      if (sheet.thumb_url) {
+        const thumbImg = document.createElement("img");
+        thumbImg.className = "history-thumb";
+        thumbImg.src = sheet.thumb_url;
+        thumbImg.alt = sheet.title || "曲谱缩略图";
+        thumbImg.loading = "lazy";
+        thumbWrapper.appendChild(thumbImg);
+      } else {
+        const placeholder = document.createElement("div");
+        placeholder.className = "history-thumb-placeholder";
+        placeholder.textContent = "🎼";
+        thumbWrapper.appendChild(placeholder);
+      }
+      mainRow.appendChild(thumbWrapper);
+
+      // Info
+      const info = document.createElement("div");
+      info.className = "history-info";
+
+      const title = document.createElement("h4");
+      title.className = "history-title";
+      title.textContent = sheet.title || "未命名曲谱";
+      info.appendChild(title);
+
+      const metaLine = document.createElement("div");
+      metaLine.className = "history-meta-line";
+      metaLine.innerHTML = `
+        <span>⏱️ ${formatDateTime(sheet.created_at)}</span>
+        <span>📄 ${sheet.page_count || 1} 页</span>
+      `;
+      info.appendChild(metaLine);
+
+      const badges = document.createElement("div");
+      badges.className = "history-badges";
+      if (sheet.status === "parsing") {
+        badges.innerHTML = `<span class="badge badge-warning">解析中 ⏳</span>`;
+      } else if (sheet.status === "error") {
+        badges.innerHTML = `<span class="badge badge-danger">解析失败 ❌</span>`;
+      } else {
+        const rCount = sheet.render_count || 0;
+        badges.innerHTML = `<span class="badge badge-success">已就绪 · ${rCount} 个伴奏版本</span>`;
+      }
+      info.appendChild(badges);
+      mainRow.appendChild(info);
+
+      // Actions
+      const actions = document.createElement("div");
+      actions.className = "history-actions";
+
+      const btnRegen = document.createElement("button");
+      btnRegen.type = "button";
+      btnRegen.className = "btn btn-primary btn-sm";
+      btnRegen.textContent = "用新设置生成 🎶";
+      btnRegen.title = "在编辑器中打开这首曲谱并生成新的伴奏版本";
+      btnRegen.onclick = (e) => {
+        e.stopPropagation();
+        openSheetForRegenerate(sheet.sheet_id);
+      };
+      actions.appendChild(btnRegen);
+
+      const btnToggle = document.createElement("button");
+      btnToggle.type = "button";
+      btnToggle.className = "btn btn-secondary btn-sm";
+      btnToggle.textContent = isExpanded ? "收起 ▲" : "查看版本 ▼";
+      btnToggle.onclick = (e) => {
+        e.stopPropagation();
+        toggleSheetExpand(sheet.sheet_id);
+      };
+      actions.appendChild(btnToggle);
+
+      const btnDel = document.createElement("button");
+      btnDel.type = "button";
+      btnDel.className = "btn btn-danger btn-sm";
+      btnDel.textContent = "删除 ✕";
+      btnDel.title = "从历史记录中删除此曲谱";
+      btnDel.onclick = (e) => {
+        e.stopPropagation();
+        promptDeleteSheet(sheet.sheet_id, sheet.title);
+      };
+      actions.appendChild(btnDel);
+
+      mainRow.appendChild(actions);
+      card.appendChild(mainRow);
+
+      // Expanded Panel (Renders list)
+      if (isExpanded) {
+        const rendersPanel = document.createElement("div");
+        rendersPanel.className = "history-renders-panel";
+
+        const detail = historyState.sheetDetails[sheet.sheet_id];
+        if (!detail) {
+          rendersPanel.innerHTML = `
+            <div style="text-align: center; padding: 20px; color: var(--text-muted);">
+              <div class="spinner" style="width: 24px; height: 24px; border-width: 2px; margin-bottom: 8px;"></div>
+              正在加载伴奏版本...
+            </div>
+          `;
+          fetchSheetDetail(sheet.sheet_id);
         } else {
-          setStep(2);
-          startPolling(initialSheetId);
+          const renders = detail.renders || [];
+          if (renders.length === 0) {
+            rendersPanel.innerHTML = `
+              <div style="text-align: center; padding: 16px; color: var(--text-muted); font-size: 0.9rem;">
+                暂无已生成的伴奏版本。点击右上角「用新设置生成」立即制作伴奏！
+              </div>
+            `;
+          } else {
+            const list = document.createElement("div");
+            list.className = "history-renders-list";
+
+            renders.forEach((render) => {
+              const row = document.createElement("div");
+              row.className = "render-row";
+
+              const rowInfo = document.createElement("div");
+              rowInfo.className = "render-row-info";
+
+              const instName = translateInstrument(render.instrument);
+              const diffName = translateDifficulty(render.difficulty);
+              const keyName = render.start_key ? `${render.start_key} 调` : "";
+              const capoStr = formatCapoAndShape(render);
+
+              rowInfo.innerHTML = `
+                <span class="render-tag">🎵 ${instName} (${diffName})</span>
+                <span style="font-weight: 500;">${keyName}</span>
+                ${capoStr ? `<span style="color: #166534; font-size: 0.85rem; background: #dcfce7; padding: 2px 6px; border-radius: 4px;">${capoStr}</span>` : ""}
+                <span class="render-time">⏱️ ${formatDateTime(render.created_at)}</span>
+              `;
+              row.appendChild(rowInfo);
+
+              const rowActions = document.createElement("div");
+              rowActions.className = "render-row-actions";
+
+              // Preview button
+              if (render.preview_urls && render.preview_urls.length > 0) {
+                const btnPrev = document.createElement("button");
+                btnPrev.type = "button";
+                btnPrev.className = "btn btn-secondary btn-sm";
+                btnPrev.textContent = "打开预览 🔍";
+                btnPrev.onclick = () => {
+                  openRenderPreviewModal(sheet.title, render);
+                };
+                rowActions.appendChild(btnPrev);
+              }
+
+              // Download PDF
+              if (render.pdf_url) {
+                const btnPdf = document.createElement("a");
+                btnPdf.href = render.pdf_url;
+                btnPdf.target = "_blank";
+                btnPdf.download = `${sheet.title || "曲谱伴奏"}_${render.name}.pdf`;
+                btnPdf.className = "btn btn-primary btn-sm";
+                btnPdf.textContent = "下载 PDF ⬇️";
+                rowActions.appendChild(btnPdf);
+              }
+
+              // Delete single render button
+              const btnDelRender = document.createElement("button");
+              btnDelRender.type = "button";
+              btnDelRender.className = "btn btn-danger btn-sm";
+              btnDelRender.textContent = "删除";
+              btnDelRender.title = "删除此伴奏版本";
+              btnDelRender.onclick = () => {
+                promptDeleteRender(sheet.sheet_id, render.name);
+              };
+              rowActions.appendChild(btnDelRender);
+
+              row.appendChild(rowActions);
+              list.appendChild(row);
+            });
+
+            rendersPanel.appendChild(list);
+          }
         }
-      })
-      .catch((err) => console.error("Failed to load initial sheet:", err));
+
+        card.appendChild(rendersPanel);
+      }
+
+      historyGrid.appendChild(card);
+    });
+  }
+
+  function toggleSheetExpand(sheetId) {
+    if (historyState.expandedSheetIds.has(sheetId)) {
+      historyState.expandedSheetIds.delete(sheetId);
+    } else {
+      historyState.expandedSheetIds.add(sheetId);
+      if (!historyState.sheetDetails[sheetId]) {
+        fetchSheetDetail(sheetId);
+      }
+    }
+    renderHistoryList();
+  }
+
+  function openRenderPreviewModal(sheetTitle, render) {
+    if (!render.preview_urls || render.preview_urls.length === 0) return;
+    const title = `🔍 ${sheetTitle || "乐谱伴奏"} · ${translateInstrument(render.instrument)} (${render.start_key}调 ${translateDifficulty(render.difficulty)})`;
+    const firstUrl = render.preview_urls[0];
+
+    openLightbox(title, (canvas) => {
+      const ctx = canvas.getContext("2d");
+      const img = new Image();
+      img.onload = () => {
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+      };
+      img.src = firstUrl;
+    });
+  }
+
+  async function promptDeleteSheet(sheetId, title) {
+    const confirmed = await showConfirmDialog(
+      "确认删除曲谱记录",
+      "确定删除？删除后所有人都将看不到这条记录"
+    );
+    if (!confirmed) return;
+
+    try {
+      const resp = await fetch(`/api/history/${encodeURIComponent(sheetId)}`, {
+        method: "DELETE",
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || `删除失败 (HTTP ${resp.status})`);
+      }
+      historyState.items = historyState.items.filter((item) => item.sheet_id !== sheetId);
+      delete historyState.sheetDetails[sheetId];
+      historyState.expandedSheetIds.delete(sheetId);
+      renderHistoryList();
+      if (historyState.items.length === 0) {
+        if (historyEmpty) historyEmpty.classList.remove("hidden");
+      }
+    } catch (err) {
+      alert(`删除曲谱失败: ${err.message}`);
+    }
+  }
+
+  async function promptDeleteRender(sheetId, renderName) {
+    const confirmed = await showConfirmDialog(
+      "确认删除伴奏版本",
+      "确定删除该伴奏版本？"
+    );
+    if (!confirmed) return;
+
+    try {
+      const resp = await fetch(
+        `/api/history/${encodeURIComponent(sheetId)}/renders/${encodeURIComponent(renderName)}`,
+        { method: "DELETE" }
+      );
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || `删除版本失败 (HTTP ${resp.status})`);
+      }
+      await fetchSheetDetail(sheetId, true);
+    } catch (err) {
+      alert(`删除版本失败: ${err.message}`);
+    }
+  }
+
+  async function openSheetForRegenerate(sheetId) {
+    currentSheetId = sheetId;
+    window.history.pushState({}, "", `?sheet=${encodeURIComponent(sheetId)}`);
+    setMainView("creator");
+
+    setStep(2);
+    parsingStatusTitle.textContent = "正在加载曲谱信息...";
+    parsingStatusDesc.textContent = "正在从服务器加载小节、和弦与设置...";
+    progressBarFill.style.width = "40%";
+    parsingErrorBox.classList.add("hidden");
+
+    try {
+      const resp = await fetch(`/api/sheets/${encodeURIComponent(sheetId)}`);
+      if (!resp.ok) {
+        throw new Error(`加载曲谱失败 (HTTP ${resp.status})`);
+      }
+      const state = await resp.json();
+      if (state.status === "ready" && state.parsed) {
+        currentParsedSheet = state.parsed;
+        renderStep3();
+        setStep(3);
+      } else if (state.status === "parsing") {
+        startPolling(sheetId);
+      } else if (state.status === "error") {
+        showParsingError(state.error || "曲谱解析错误");
+      } else {
+        startPolling(sheetId);
+      }
+    } catch (err) {
+      showParsingError(err.message);
+    }
+  }
+
+  if (btnRefreshHistory) btnRefreshHistory.onclick = () => fetchHistory(false);
+  if (btnRetryHistory) btnRetryHistory.onclick = () => fetchHistory(false);
+  if (btnEmptyStart) btnEmptyStart.onclick = () => { setMainView("creator"); setStep(1); };
+  if (btnLoadMoreHistory) btnLoadMoreHistory.onclick = () => fetchHistory(true);
+
+  // Auto-load sheet from URL parameter (e.g. ?sheet=xxx or ?sheet_id=xxx)
+  const urlParams = new URLSearchParams(window.location.search);
+  const initialSheetId = urlParams.get("sheet") || urlParams.get("sheet_id");
+  const initialView = urlParams.get("view");
+  if (initialSheetId) {
+    openSheetForRegenerate(initialSheetId);
+  } else if (initialView === "history") {
+    setMainView("history");
+  } else {
+    setMainView("creator");
   }
 });

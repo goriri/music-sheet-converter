@@ -1281,3 +1281,48 @@ def test_render_ukulele_success_200_and_sections_cached_once(client, setup_test_
 
 
 
+
+
+def test_api_history_endpoints_full_lifecycle(client, setup_test_environment):
+    """Integration test verifying /api/history endpoints through full upload and render flow."""
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("test_sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    assert resp.status_code == 200
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        if client.get(f"/api/sheets/{sheet_id}").json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    # 1. History list has entry
+    h_res = client.get("/api/history")
+    assert h_res.status_code == 200
+    items = h_res.json()["items"]
+    assert any(it["sheet_id"] == sheet_id for it in items)
+
+    # 2. Render sheet
+    r_res = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "F#", "difficulty": "intermediate", "instrument": "piano"},
+    )
+    assert r_res.status_code == 200
+
+    # 3. Sheet history detail
+    detail = client.get(f"/api/history/{sheet_id}")
+    assert detail.status_code == 200
+    d_data = detail.json()
+    assert d_data["sheet_id"] == sheet_id
+    assert len(d_data["renders"]) == 1
+    assert d_data["renders"][0]["name"] == "F#_intermediate_piano"
+
+    # 4. Soft delete sheet
+    del_res = client.delete(f"/api/history/{sheet_id}")
+    assert del_res.status_code == 200
+
+    # 5. Verify hidden
+    assert client.get(f"/api/history/{sheet_id}").status_code == 404
+    h_res2 = client.get("/api/history")
+    assert not any(it["sheet_id"] == sheet_id for it in h_res2.json()["items"])

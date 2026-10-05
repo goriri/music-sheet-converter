@@ -9,10 +9,18 @@
 <body>
   <header class="app-header">
     <div class="container">
-      <h1>🎹 台湾谱伴奏生成器</h1>
-      <p>智能识别简谱旋律与级数和弦，自动生成带指法与织体的钢琴即兴伴奏谱</p>
+      <div class="header-top-row">
+        <div>
+          <h1>🎹 台湾谱伴奏生成器</h1>
+          <p>智能识别简谱旋律与级数和弦，自动生成带指法与织体的钢琴即兴伴奏谱</p>
+        </div>
+        <nav class="main-tabs" aria-label="页面功能切换">
+          <button type="button" id="tab-btn-create" class="main-tab-btn active">➕ 制作伴奏</button>
+          <button type="button" id="tab-btn-history" class="main-tab-btn">📜 历史记录</button>
+        </nav>
+      </div>
 
-      <nav class="steps-nav">
+      <nav class="steps-nav" id="steps-nav-container">
         <div class="step-item active" id="step-nav-1">
           <span class="step-num">1</span> 上传乐谱
         </div>
@@ -269,7 +277,69 @@
       <!-- Preview Images -->
       <div id="render-previews" class="preview-container"></div>
     </section>
+
+    <!-- History View -->
+    <section id="section-history" class="card hidden">
+      <div class="card-title flex-between">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span>📚 全站生成历史</span>
+          <span id="history-total-count" class="badge badge-secondary" style="display: none;"></span>
+        </div>
+        <button type="button" id="btn-refresh-history" class="btn btn-secondary btn-sm" title="刷新列表">
+          🔄 刷新
+        </button>
+      </div>
+      <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 20px;">
+        所有用户制作与生成的曲谱历史记录均在此公开展示。点击卡片可展开查看生成的各个伴奏版本，下载 PDF 或用新设置重新生成。
+      </p>
+
+      <!-- History Loading Spinner -->
+      <div id="history-loading" class="history-loading-box">
+        <div class="spinner"></div>
+        <p>正在加载历史记录...</p>
+      </div>
+
+      <!-- History Error State -->
+      <div id="history-error" class="hidden" style="text-align: center; padding: 40px 20px;">
+        <div style="font-size: 2.5rem; margin-bottom: 12px;">⚠️</div>
+        <h3 id="history-error-msg" style="color: var(--danger); margin-bottom: 12px;">加载历史记录失败</h3>
+        <button type="button" id="btn-retry-history" class="btn btn-secondary">重试</button>
+      </div>
+
+      <!-- History Empty State -->
+      <div id="history-empty" class="hidden" style="text-align: center; padding: 48px 20px;">
+        <div style="font-size: 3rem; margin-bottom: 12px;">📂</div>
+        <h3 style="margin-bottom: 8px; color: var(--text-main);">暂无历史记录</h3>
+        <p style="color: var(--text-muted); margin-bottom: 20px;">目前还没有制作过伴奏谱，立即上传一份乐谱体验吧！</p>
+        <button type="button" id="btn-empty-start" class="btn btn-primary">➕ 上传乐谱制作伴奏</button>
+      </div>
+
+      <!-- History Sheet Grid / List -->
+      <div id="history-grid" class="history-grid"></div>
+
+      <!-- Load More Button -->
+      <div id="history-load-more-container" class="hidden" style="margin-top: 24px; text-align: center;">
+        <button type="button" id="btn-load-more-history" class="btn btn-secondary">
+          加载更多历史记录 ↓
+        </button>
+      </div>
+    </section>
   </main>
+
+  <!-- Delete Confirmation Modal Dialog -->
+  <dialog id="delete-confirm-dialog" class="modern-dialog">
+    <div class="dialog-content">
+      <div class="dialog-header">
+        <span class="dialog-icon">⚠️</span>
+        <h3 id="delete-dialog-title" class="dialog-title">确认删除</h3>
+      </div>
+      <p id="delete-dialog-message" class="dialog-message">确定删除？删除后所有人都将看不到这条记录</p>
+      <div class="dialog-actions">
+        <button type="button" id="dialog-btn-cancel" class="btn btn-secondary">取消</button>
+        <button type="button" id="dialog-btn-confirm" class="btn btn-danger">确定删除</button>
+      </div>
+    </div>
+  </dialog>
 
   <!-- Lightbox Modal for Full Resolution Zoom and Pan -->
   <div id="lightbox-modal" class="lightbox-modal hidden">

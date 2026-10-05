@@ -135,6 +135,9 @@ def get_sheet_status(sheet_id: str):
         time.sleep(0.02)
         state = storage.get_json(state_path)
 
+    if state.get("deleted"):
+        raise HTTPException(status_code=404, detail=f"Sheet '{sheet_id}' not found")
+
     # Check for timeout if currently parsing (> 15 minutes)
     if state.get("status") == "parsing":
         updated_at_str = state.get("updated_at") or state.get("created_at")
@@ -478,6 +481,51 @@ def serve_file(path: str, request: Request):
         headers["Content-Disposition"] = "inline; filename=accompaniment.pdf"
 
     return Response(content=data, media_type=media_type, headers=headers)
+
+
+# --------------------------------------------------------------------------- Public History Endpoints
+@app.get("/api/history")
+def get_history(cursor: Optional[str] = None, limit: int = 20):
+    """Retrieve public history list ordered newest first with cursor pagination."""
+    from app.history import ensure_lazy_backfill, list_history
+
+    if limit <= 0 or limit > 100:
+        limit = 20
+    storage = get_storage()
+    ensure_lazy_backfill(storage)
+    items, next_cursor = list_history(storage, cursor=cursor, limit=limit)
+    return {"items": items, "next_cursor": next_cursor}
+
+
+@app.get("/api/history/{sheet_id}")
+def get_sheet_history_endpoint(sheet_id: str):
+    """Retrieve full history details and renders for a single sheet."""
+    from app.history import get_sheet_history, validate_sheet_id
+
+    validate_sheet_id(sheet_id)
+    storage = get_storage()
+    return get_sheet_history(sheet_id, storage=storage)
+
+
+@app.delete("/api/history/{sheet_id}")
+def delete_sheet_history_endpoint(sheet_id: str):
+    """Soft delete a sheet from public history."""
+    from app.history import soft_delete_sheet, validate_sheet_id
+
+    validate_sheet_id(sheet_id)
+    storage = get_storage()
+    return soft_delete_sheet(sheet_id, storage=storage)
+
+
+@app.delete("/api/history/{sheet_id}/renders/{render_name}")
+def delete_render_history_endpoint(sheet_id: str, render_name: str):
+    """Soft delete a single render version of a sheet."""
+    from app.history import soft_delete_render, validate_render_name, validate_sheet_id
+
+    validate_sheet_id(sheet_id)
+    validate_render_name(render_name)
+    storage = get_storage()
+    return soft_delete_render(sheet_id, render_name, storage=storage)
 
 
 # Mount static UI files at root

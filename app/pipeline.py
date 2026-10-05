@@ -83,7 +83,29 @@ def ingest_uploaded_files(
         store.put_bytes(path, page_bytes, content_type="image/png")
         page_paths.append(path)
 
+    # Generate thumbnail and create history index entry
+    thumb_path = f"sheets/{sheet_id}/thumb.jpg"
+    try:
+        from app.history import create_history_entry, generate_thumbnail_bytes
+        thumb_bytes = generate_thumbnail_bytes(all_page_bytes[0])
+        store.put_bytes(thumb_path, thumb_bytes, content_type="image/jpeg")
+    except Exception as t_err:
+        logger.warning(f"Failed to generate thumbnail for {sheet_id}: {t_err}")
+
     now_iso = datetime.now(timezone.utc).isoformat()
+    history_key = None
+    try:
+        from app.history import create_history_entry
+        history_key = create_history_entry(
+            sheet_id=sheet_id,
+            created_at=now_iso,
+            page_count=len(page_paths),
+            storage=store,
+            thumb_path=thumb_path,
+        )
+    except Exception as h_err:
+        logger.warning(f"Failed to create history entry for {sheet_id}: {h_err}")
+
     state = {
         "sheet_id": sheet_id,
         "status": "queued",
@@ -91,6 +113,8 @@ def ingest_uploaded_files(
         "error": None,
         "page_count": len(page_paths),
         "pages": page_paths,
+        "history_key": history_key,
+        "thumb_path": thumb_path,
         "created_at": now_iso,
         "updated_at": now_iso,
     }
@@ -179,6 +203,14 @@ def _do_parse_sheet(
         # Save parsed sheet
         parsed_dict = parsed_sheet.model_dump()
         store.put_json(f"sheets/{sheet_id}/parsed.json", parsed_dict)
+
+        # Update title in history index
+        try:
+            from app.history import extract_title, update_history_title
+            title = extract_title(parsed_sheet)
+            update_history_title(sheet_id, title, store)
+        except Exception as t_err:
+            logger.warning(f"Failed to update history title for {sheet_id}: {t_err}")
 
         # Mark ready
         state["status"] = "ready"
@@ -750,6 +782,28 @@ def render(
         else:
             arr_dict = arrangement.model_dump()
         store.put_json(f"{render_folder}/arrangement.json", arr_dict)
+
+        # Write render metadata
+        try:
+            from app.history import write_render_meta
+            rev_cnt = len([
+                i for i in all_issues
+                if (i.severity if isinstance(i, QualityIssue) else i.get("severity", "")) == "needs_review"
+            ])
+            write_render_meta(
+                sheet_id=sheet_id,
+                start_key=start_key,
+                difficulty=difficulty,
+                instrument=instrument,
+                capo=arrangement.capo or 0,
+                shape_key=arrangement.shape_key or start_key,
+                pdf_url=f"/api/files/{quote(pdf_path, safe='/')}",
+                preview_urls=preview_urls,
+                needs_review_count=rev_cnt,
+                storage=store,
+            )
+        except Exception as meta_err:
+            logger.warning(f"Failed to write render meta for {sheet_id}: {meta_err}")
 
         issues_data = [
             i.model_dump() if isinstance(i, QualityIssue) else i

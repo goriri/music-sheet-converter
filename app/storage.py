@@ -37,8 +37,18 @@ class Storage(ABC):
         pass
 
     @abstractmethod
-    def list(self, prefix: str) -> list[str]:
+    def list(self, prefix: str, *, max_results: Optional[int] = None) -> list[str]:
         """List all paths matching the prefix in storage."""
+        pass
+
+    @abstractmethod
+    def delete(self, path: str) -> None:
+        """Delete the file or object at the given path."""
+        pass
+
+    @abstractmethod
+    def delete_prefix(self, prefix: str) -> None:
+        """Delete all files or objects matching the given prefix."""
         pass
 
 
@@ -57,9 +67,10 @@ class LocalStorage(Storage):
         return resolved
 
     def put_bytes(self, path: str, data: bytes, content_type: Optional[str] = None) -> None:
+        import uuid
         target = self._resolve(path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        temp_file = target.with_name(f".{target.name}.tmp.{os.getpid()}")
+        temp_file = target.with_name(f".{target.name}.tmp.{os.getpid()}.{uuid.uuid4().hex}")
         temp_file.write_bytes(data)
         temp_file.replace(target)
 
@@ -73,7 +84,23 @@ class LocalStorage(Storage):
         target = self._resolve(path)
         return target.is_file()
 
-    def list(self, prefix: str) -> list[str]:
+    def delete(self, path: str) -> None:
+        target = self._resolve(path)
+        if target.is_file():
+            target.unlink(missing_ok=True)
+
+    def delete_prefix(self, prefix: str) -> None:
+        clean_prefix = prefix.strip("/")
+        if not self.base_dir.exists() or not clean_prefix:
+            return
+        for root, _, files in os.walk(self.base_dir):
+            for file in files:
+                full_path = Path(root) / file
+                rel_path = str(full_path.relative_to(self.base_dir)).replace(os.sep, "/")
+                if rel_path.startswith(clean_prefix):
+                    full_path.unlink(missing_ok=True)
+
+    def list(self, prefix: str, *, max_results: Optional[int] = None) -> list[str]:
         clean_prefix = prefix.strip("/")
         results: list[str] = []
         if not self.base_dir.exists():
@@ -85,7 +112,10 @@ class LocalStorage(Storage):
                 rel_path = str(full_path.relative_to(self.base_dir)).replace(os.sep, "/")
                 if not clean_prefix or rel_path.startswith(clean_prefix):
                     results.append(rel_path)
-        return sorted(results)
+        results.sort()
+        if max_results is not None:
+            return results[:max_results]
+        return results
 
 
 class GCSStorage(Storage):
@@ -123,9 +153,23 @@ class GCSStorage(Storage):
         blob = self.bucket.blob(clean)
         return blob.exists()
 
-    def list(self, prefix: str) -> list[str]:
+    def delete(self, path: str) -> None:
+        clean = path.strip("/")
+        blob = self.bucket.blob(clean)
+        try:
+            blob.delete()
+        except Exception:
+            pass
+
+    def delete_prefix(self, prefix: str) -> None:
         clean_prefix = prefix.strip("/")
-        blobs = self.client.list_blobs(self.bucket_name, prefix=clean_prefix)
+        blobs = list(self.client.list_blobs(self.bucket_name, prefix=clean_prefix))
+        if blobs:
+            self.bucket.delete_blobs(blobs)
+
+    def list(self, prefix: str, *, max_results: Optional[int] = None) -> list[str]:
+        clean_prefix = prefix.strip("/")
+        blobs = self.client.list_blobs(self.bucket_name, prefix=clean_prefix, max_results=max_results)
         return sorted([b.name for b in blobs])
 
 
