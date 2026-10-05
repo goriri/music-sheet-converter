@@ -757,6 +757,188 @@ def _is_bar_number_band(
     return (grey_ratio >= 0.18) or (local_bg < page_top_bg - 12)
 
 
+def _classify_text_bands_and_split(
+    bin_img: np.ndarray,
+    suppressed_cands: list[dict],
+    chords_below: bool,
+    is_tall_bar: bool,
+    u_curr: float,
+    sheet_left: float,
+    sheet_right: float,
+    h: int,
+    w: int,
+) -> tuple[list[int], list[list[tuple[float, float]]]]:
+    """Compute vertical split boundaries between systems and classify text bands.
+
+    Between two melody lines (y_curr and y_next), classifies text bands:
+    - Upper system owns lyric lines (CJK text lines) and 'Bs:' lines below its melody.
+    - Lower system owns chord boxes and section/texture labels above its melody.
+    The split point is placed at the whitest row between the last band of the upper
+    system and the first band of the lower system.
+    """
+    num_sys = len(suppressed_cands)
+    split_ys: list[int] = [0]
+    sys_lyric_bands: list[list[tuple[float, float]]] = [[] for _ in range(num_sys)]
+
+    for i in range(num_sys - 1):
+        y_curr = int(suppressed_cands[i]["y_mean"])
+        y_next = int(suppressed_cands[i + 1]["y_mean"])
+        if chords_below:
+            split_ys.append(max(int(y_curr + 55), int(y_next - (35 if is_tall_bar else 22))))
+        else:
+            mel_bot = y_curr + max(16, int(round(1.1 * u_curr)))
+            mel_top = y_next - 6
+            if mel_top <= mel_bot:
+                split_ys.append((y_curr + y_next) // 2)
+                continue
+
+            sub = bin_img[mel_bot:mel_top, int(sheet_left):int(sheet_right)]
+            proj = np.sum(sub > 0, axis=1)
+            thresh = max(10, int(0.012 * (sheet_right - sheet_left)))
+            active = (proj > thresh).astype(np.uint8)
+            k_size = max(3, int(round(0.25 * u_curr)))
+            kernel = np.ones((k_size, 1), np.uint8)
+            closed = cv2.morphologyEx(active, cv2.MORPH_CLOSE, kernel)
+
+            bands: list[tuple[int, int]] = []
+            in_b = False
+            start = 0
+            vals = closed.ravel()
+            for idx, val in enumerate(vals):
+                if val and not in_b:
+                    in_b = True
+                    start = idx
+                elif not val and in_b:
+                    in_b = False
+                    if idx - start >= max(5, int(0.3 * u_curr)):
+                        bands.append((mel_bot + start, mel_bot + idx))
+            if in_b and len(vals) - start >= max(5, int(0.3 * u_curr)):
+                bands.append((mel_bot + start, mel_bot + len(vals)))
+
+            band_info: list[dict] = []
+            for by0, by1 in bands:
+                crop = bin_img[by0:by1, int(sheet_left):int(sheet_right)]
+                cnts, _ = cv2.findContours(crop, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                boxes = 0
+                cjk = 0
+                x_max = 0
+                for cnt in cnts:
+                    cx, cy, cw, ch = cv2.boundingRect(cnt)
+                    area = cv2.contourArea(cnt)
+                    rect = area / float(cw * ch) if cw * ch > 0 else 0
+                    if (
+                        cw >= max(26, int(1.4 * u_curr))
+                        and ch >= max(10, int(0.55 * u_curr))
+                        and rect >= 0.62
+                        and area >= 200
+                    ):
+                        boxes += 1
+                    elif (
+                        max(8, int(0.4 * u_curr)) <= cw <= int(2.2 * u_curr)
+                        and max(8, int(0.45 * u_curr)) <= ch <= int(2.2 * u_curr)
+                        and 0.35 <= cw / float(ch) <= 2.2
+                        and area >= 15
+                    ):
+                        cjk += 1
+                    if cx + cw > x_max:
+                        x_max = cx + cw
+                band_info.append({
+                    "y": (by0, by1),
+                    "boxes": boxes,
+                    "cjk": cjk,
+                    "x_max": x_max + int(sheet_left),
+                })
+
+            n = len(band_info)
+            owners: list[Optional[str]] = [None] * n
+
+            for idx, b in enumerate(band_info):
+                by0, by1 = b["y"]
+                if b["boxes"] >= 1:
+                    owners[idx] = "lower"
+                elif b["cjk"] >= 4 and (by0 - y_curr) < (y_next - by1):
+                    owners[idx] = "upper"
+                elif (y_next - by1) <= max(14, int(1.0 * u_curr)) and b["cjk"] < 4:
+                    owners[idx] = "lower"
+
+            for idx in range(1, n):
+                if owners[idx] is None and owners[idx - 1] == "upper":
+                    gap = band_info[idx]["y"][0] - band_info[idx - 1]["y"][1]
+                    by0, by1 = band_info[idx]["y"]
+                    if gap <= max(16, int(1.0 * u_curr)) and (by0 - y_curr) < (y_next - by1):
+                        owners[idx] = "upper"
+
+            for idx in range(n - 2, -1, -1):
+                if owners[idx] is None and owners[idx + 1] == "lower":
+                    gap = band_info[idx + 1]["y"][0] - band_info[idx]["y"][1]
+                    if gap <= max(12, int(0.7 * u_curr)) or band_info[idx]["x_max"] < 0.40 * w:
+                        owners[idx] = "lower"
+
+            for idx in range(n):
+                if owners[idx] is None:
+                    by0, by1 = band_info[idx]["y"]
+                    owners[idx] = "upper" if (by0 - y_curr) < (y_next - by1) else "lower"
+
+            up = [band_info[j]["y"] for j in range(len(band_info)) if owners[j] == "upper"]
+            dn = [band_info[j]["y"] for j in range(len(band_info)) if owners[j] == "lower"]
+
+            if up:
+                for ub in up:
+                    sys_lyric_bands[i].append((round(ub[0] / float(h), 4), round(ub[1] / float(h), 4)))
+
+            last_up = max([b[1] for b in up]) if up else mel_bot
+            first_dn = min([b[0] for b in dn]) if dn else mel_top
+
+            if first_dn <= last_up:
+                split_ys.append((last_up + first_dn) // 2)
+            else:
+                gap_proj = np.sum(bin_img[last_up:first_dn, int(sheet_left):int(sheet_right)] > 0, axis=1)
+                min_val = np.min(gap_proj)
+                min_indices = np.where(gap_proj == min_val)[0]
+                center_idx = len(gap_proj) // 2
+                best_idx = min_indices[np.argmin(np.abs(min_indices - center_idx))]
+                split_ys.append(last_up + best_idx)
+
+    # For the last system, detect lyrics below its melody if not chords_below
+    if not chords_below and num_sys > 0:
+        y_last = int(suppressed_cands[-1]["y_mean"])
+        mel_bot_last = y_last + max(16, int(round(1.1 * u_curr)))
+        typical_margin = (
+            int(np.median([split_ys[j + 1] - int(suppressed_cands[j]["y_mean"]) for j in range(num_sys - 1)]))
+            if num_sys > 1
+            else (160 if is_tall_bar else 90)
+        )
+        max_search = min(h, y_last + max(typical_margin, (160 if is_tall_bar else 90)))
+        if max_search > mel_bot_last:
+            sub_last = bin_img[mel_bot_last:max_search, int(sheet_left):int(sheet_right)]
+            proj_last = np.sum(sub_last > 0, axis=1)
+            thresh = max(10, int(0.012 * (sheet_right - sheet_left)))
+            active_last = (proj_last > thresh).astype(np.uint8)
+            k_size = max(3, int(round(0.25 * u_curr)))
+            kernel = np.ones((k_size, 1), np.uint8)
+            closed_last = cv2.morphologyEx(active_last, cv2.MORPH_CLOSE, kernel)
+            in_b = False
+            start = 0
+            vals = closed_last.ravel()
+            for idx, val in enumerate(vals):
+                if val and not in_b:
+                    in_b = True
+                    start = idx
+                elif not val and in_b:
+                    in_b = False
+                    if idx - start >= max(5, int(0.3 * u_curr)):
+                        by0 = mel_bot_last + start
+                        by1 = mel_bot_last + idx
+                        sys_lyric_bands[-1].append((round(by0 / float(h), 4), round(by1 / float(h), 4)))
+            if in_b and len(vals) - start >= max(5, int(0.3 * u_curr)):
+                by0 = mel_bot_last + start
+                by1 = mel_bot_last + len(vals)
+                sys_lyric_bands[-1].append((round(by0 / float(h), 4), round(by1 / float(h), 4)))
+
+    split_ys.append(h)
+    return split_ys, sys_lyric_bands
+
+
 def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
     """Analyze a music sheet page using classical CV to extract layout geometry.
 
@@ -883,8 +1065,8 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
         has_text_lines = False
         processed_cands: list[dict] = []
         for c in raw_clusters:
-            if scaled_page:
-                y_sub_thresh = 12 if is_tall_bar else (6.5 if is_boxed_page else (3.5 if chords_below else 6.0))
+            if scaled_page or is_boxed_page:
+                y_sub_thresh = 12 if is_tall_bar else (6.5 if (is_boxed_page and scaled_page) else (10.0 if is_boxed_page else (3.5 if chords_below else 6.0)))
                 sub_groups = _cluster_by_detrended_y(c, y_sub_thresh, is_boxed_page=is_boxed_page)
                 best_group = max(sub_groups, key=lambda sg: _bar_group_key(sg, chords_below=chords_below))
                 y_mean = float(np.mean([b[1] for b in best_group]))
@@ -1035,22 +1217,18 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
         systems: list[GSystem] = []
         num_sys = len(suppressed_cands)
 
-        # Compute vertical split boundaries between systems
-        split_ys: list[int] = [0]
-        for i in range(num_sys - 1):
-            y_curr = int(suppressed_cands[i]["y_mean"])
-            y_next = int(suppressed_cands[i + 1]["y_mean"])
-            if chords_below:
-                # System i+1 starts just above its own melody line (preventing absorbing chords)
-                split_ys.append(max(int(y_curr + 55), int(y_next - (35 if is_tall_bar else 22))))
-            else:
-                sub_proj = np.sum(bin_img[y_curr:y_next, int(0.1 * w):int(0.9 * w)] > 0, axis=1)
-                if len(sub_proj) > 0:
-                    min_idx = int(np.argmin(sub_proj))
-                    split_ys.append(y_curr + min_idx)
-                else:
-                    split_ys.append((y_curr + y_next) // 2)
-        split_ys.append(h)
+        # Compute vertical split boundaries between systems and classify text bands
+        split_ys, sys_detected_lyrics = _classify_text_bands_and_split(
+            bin_img=bin_img,
+            suppressed_cands=suppressed_cands,
+            chords_below=chords_below,
+            is_tall_bar=is_tall_bar,
+            u_curr=u_curr,
+            sheet_left=sheet_left,
+            sheet_right=sheet_right,
+            h=h,
+            w=w,
+        )
 
         # Global header band
         first_y_mean = int(suppressed_cands[0]["y_mean"])
@@ -1285,16 +1463,19 @@ def analyze_page(image: bytes, page: int = 0) -> PageGeometry:
 
             # Lyric bands
             lyric_bands: list[tuple[float, float]] = []
-            lyric_y0_px = mel_y1 if is_chord_only else (chord_y1_px if chords_below else mel_y1)
-            lyric_y1_px = y_bot
-            if lyric_y1_px > lyric_y0_px:
-                lyric_proj = np.sum(bin_img[lyric_y0_px:lyric_y1_px, int(sheet_left):int(sheet_right)] > 0, axis=1)
-                if len(lyric_proj) > 0 and np.max(lyric_proj) > 30:
-                    lyr_peak = lyric_y0_px + int(np.argmax(lyric_proj))
-                    lyric_bands.append((
-                        round(max(lyric_y0_px, lyr_peak - 12) / float(h), 4),
-                        round(min(lyric_y1_px, lyr_peak + 12) / float(h), 4),
-                    ))
+            if chords_below or is_chord_only:
+                lyric_y0_px = mel_y1 if is_chord_only else chord_y1_px
+                lyric_y1_px = y_bot
+                if lyric_y1_px > lyric_y0_px:
+                    lyric_proj = np.sum(bin_img[lyric_y0_px:lyric_y1_px, int(sheet_left):int(sheet_right)] > 0, axis=1)
+                    if len(lyric_proj) > 0 and np.max(lyric_proj) > 30:
+                        lyr_peak = lyric_y0_px + int(np.argmax(lyric_proj))
+                        lyric_bands.append((
+                            round(max(lyric_y0_px, lyr_peak - 12) / float(h), 4),
+                            round(min(lyric_y1_px, lyr_peak + 12) / float(h), 4),
+                        ))
+            else:
+                lyric_bands = sys_detected_lyrics[s_idx]
 
             # Exclude any chord box falling inside lyric bands
             if lyric_bands and chord_boxes:

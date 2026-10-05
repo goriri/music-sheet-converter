@@ -585,6 +585,45 @@ def test_bar_number_band_and_margin_labels():
     assert all(cb.bbox[0] * 1000 >= 180 for cb in boxes)
 
 
+def test_system_bbox_contains_lyric_bands():
+    """Verify system bounding boxes contain lyric lines under melody on boxed and unboxed charts."""
+    # 1. Taiwanese boxed chart: diaole page 1 (rows 2..9 have lyrics below melody)
+    diaole_p1 = REPO_ROOT / "fixtures" / "pages" / "page1.jpg"
+    if diaole_p1.exists():
+        geom = analyze_page(diaole_p1.read_bytes(), page=0)
+        h = geom.height
+        assert len(geom.systems) == 10
+        # Rows 2 to 9 have lyrics
+        for idx in range(2, 10):
+            sys_geom = geom.systems[idx]
+            assert len(sys_geom.lyric_bands) >= 1, f"Row {idx} should have lyric bands detected"
+            for ly0, ly1 in sys_geom.lyric_bands:
+                # Lyric band must be below melody start
+                assert ly0 >= sys_geom.melody_band[0], f"Row {idx}: lyric band {ly0} above melody {sys_geom.melody_band[0]}"
+                # System bbox must fully contain the lyric band
+                assert sys_geom.bbox[1] <= ly0, f"Row {idx}: lyric y0 {ly0} above system bbox y0 {sys_geom.bbox[1]}"
+                assert sys_geom.bbox[3] >= ly1, f"Row {idx}: lyric y1 {ly1} below system bbox y1 {sys_geom.bbox[3]}"
+            # The next system (if any) must not start before these lyrics end
+            if idx < 9:
+                next_sys = geom.systems[idx + 1]
+                assert next_sys.bbox[1] >= sys_geom.lyric_bands[-1][1], (
+                    f"Row {idx + 1} bbox starts at {next_sys.bbox[1]}, absorbing row {idx} lyrics ending at {sys_geom.lyric_bands[-1][1]}"
+                )
+
+    # 2. Mainland chart: tinghai page 1 (all 12 systems have lyrics below melody)
+    tinghai_p1 = REPO_ROOT / "fixtures" / "external" / "tinghai" / "page1.jpg"
+    if tinghai_p1.exists():
+        geom_th = analyze_page(tinghai_p1.read_bytes(), page=0)
+        assert len(geom_th.systems) == 12
+        for idx, sys_geom in enumerate(geom_th.systems):
+            assert len(sys_geom.lyric_bands) >= 1, f"Tinghai row {idx} should have lyric bands"
+            for ly0, ly1 in sys_geom.lyric_bands:
+                assert ly0 >= sys_geom.melody_band[0], f"Tinghai row {idx}: lyric {ly0} above melody {sys_geom.melody_band[0]}"
+                assert sys_geom.bbox[1] <= ly0, f"Tinghai row {idx}: lyric y0 {ly0} above sys y0 {sys_geom.bbox[1]}"
+                assert sys_geom.bbox[3] >= ly1, f"Tinghai row {idx}: lyric y1 {ly1} below sys y1 {sys_geom.bbox[3]}"
+
+
+
 
 
 
