@@ -348,10 +348,18 @@
       <div class="lightbox-header">
         <span id="lightbox-title" class="lightbox-title">🔍 乐谱高清大图</span>
         <div class="lightbox-toolbar">
-          <button type="button" id="lightbox-zoom-out" class="btn btn-secondary btn-sm" title="缩小 (−)">−</button>
-          <span id="lightbox-zoom-level" class="lightbox-zoom-text">100%</span>
-          <button type="button" id="lightbox-zoom-in" class="btn btn-secondary btn-sm" title="放大 (+)">+</button>
-          <button type="button" id="lightbox-zoom-reset" class="btn btn-secondary btn-sm" title="适应窗口/重置">适应</button>
+          <div id="lightbox-pager" class="lightbox-pager hidden">
+            <button type="button" id="lightbox-prev" class="btn btn-secondary btn-sm lb-btn" title="上一页 (PageUp)" aria-label="上一页">‹</button>
+            <span id="lightbox-page-text" class="lightbox-zoom-text">1 / 1</span>
+            <button type="button" id="lightbox-next" class="btn btn-secondary btn-sm lb-btn" title="下一页 (PageDown)" aria-label="下一页">›</button>
+          </div>
+          <div class="lightbox-zoom-group">
+            <button type="button" id="lightbox-zoom-out" class="btn btn-secondary btn-sm lb-btn" title="缩小 (−)" aria-label="缩小">−</button>
+            <button type="button" id="lightbox-zoom-actual" class="lightbox-zoom-text lb-zoom-pill" title="按原始像素显示 (1)"><span id="lightbox-zoom-level">100%</span></button>
+            <button type="button" id="lightbox-zoom-in" class="btn btn-secondary btn-sm lb-btn" title="放大 (+)" aria-label="放大">+</button>
+          </div>
+          <button type="button" id="lightbox-fit-width" class="btn btn-secondary btn-sm" title="宽度适应窗口 (W)">适应宽度</button>
+          <button type="button" id="lightbox-zoom-reset" class="btn btn-secondary btn-sm" title="整页显示 (0)">整页</button>
           <button type="button" id="lightbox-close" class="btn btn-danger btn-sm" title="关闭 (Esc)">✕ 关闭</button>
         </div>
       </div>
@@ -359,9 +367,10 @@
         <div id="lightbox-canvas-container" class="lightbox-canvas-container">
           <canvas id="lightbox-canvas" class="lightbox-canvas"></canvas>
         </div>
+        <div id="lightbox-loading" class="lightbox-loading hidden">加载中…</div>
       </div>
       <div class="lightbox-footer">
-        <span>💡 支持鼠标滚轮缩放、左键按住拖拽平移，触屏双指缩放，按 Esc 退出</span>
+        <span>💡 滚轮 / 双指滑动：上下浏览 · Ctrl(⌘)+滚轮 或 双指捏合：以指针为中心缩放 · 拖拽平移 · 双击放大/还原 · 键盘 + − 0 W、方向键、PageUp/PageDown · Esc 关闭</span>
       </div>
     </div>
   </div>

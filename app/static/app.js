@@ -164,6 +164,19 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // --- Lightbox Implementation (Zoom & Pan) ---
+  // Viewer model: the canvas sits at the viewport's top-left; we apply
+  // translate(tx, ty) scale(s) with transform-origin 0 0. A screen point (px, py)
+  // inside the viewport maps to image point ((px - tx) / s, (py - ty) / s).
+  const lightboxFitWidthBtn = document.getElementById("lightbox-fit-width");
+  const lightboxZoomActual = document.getElementById("lightbox-zoom-actual");
+  const lightboxPager = document.getElementById("lightbox-pager");
+  const lightboxPrev = document.getElementById("lightbox-prev");
+  const lightboxNext = document.getElementById("lightbox-next");
+  const lightboxPageText = document.getElementById("lightbox-page-text");
+  const lightboxLoading = document.getElementById("lightbox-loading");
+
+  const LB_STEP = 1.25; // button / keyboard zoom step
+  const LB_PAD = 16; // viewport padding used for "fit" modes
   const lbState = {
     scale: 1.0,
     translateX: 0,
@@ -171,129 +184,326 @@ document.addEventListener("DOMContentLoaded", () => {
     isDragging: false,
     startX: 0,
     startY: 0,
+    pages: null, // array of image URLs for multi-page previews
+    pageIdx: 0,
+    loadToken: 0,
   };
 
-  function updateLightboxTransform() {
+  function lbViewportSize() {
+    const r = lightboxViewport.getBoundingClientRect();
+    return { w: r.width, h: r.height };
+  }
+
+  function lbImageSize() {
+    return { w: lightboxCanvas.width || 1, h: lightboxCanvas.height || 1 };
+  }
+
+  function lbFitScales() {
+    const vp = lbViewportSize();
+    const img = lbImageSize();
+    const fitWidth = Math.max(0.01, (vp.w - LB_PAD * 2) / img.w);
+    const fitPage = Math.max(0.01, Math.min(fitWidth, (vp.h - LB_PAD * 2) / img.h));
+    return { fitWidth, fitPage };
+  }
+
+  function lbScaleLimits() {
+    const { fitPage, fitWidth } = lbFitScales();
+    // Never smaller than half a page; up to 4x the fit-width view or 3x native pixels.
+    return { min: Math.min(fitPage * 0.5, 1), max: Math.max(fitWidth * 4, 3) };
+  }
+
+  // Keep the image reachable: centre it on an axis where it is smaller than the
+  // viewport, otherwise do not allow panning past its edges (plus padding).
+  function lbClampTranslate() {
+    const vp = lbViewportSize();
+    const img = lbImageSize();
+    const w = img.w * lbState.scale;
+    const h = img.h * lbState.scale;
+    if (w + LB_PAD * 2 <= vp.w) {
+      lbState.translateX = (vp.w - w) / 2;
+    } else {
+      lbState.translateX = Math.min(LB_PAD, Math.max(vp.w - w - LB_PAD, lbState.translateX));
+    }
+    if (h + LB_PAD * 2 <= vp.h) {
+      lbState.translateY = (vp.h - h) / 2;
+    } else {
+      lbState.translateY = Math.min(LB_PAD, Math.max(vp.h - h - LB_PAD, lbState.translateY));
+    }
+  }
+
+  function updateLightboxTransform(animate = false) {
     if (!lightboxCanvasContainer) return;
+    lbClampTranslate();
+    lightboxCanvasContainer.classList.toggle("animating", !!animate);
     lightboxCanvasContainer.style.transform = `translate(${lbState.translateX}px, ${lbState.translateY}px) scale(${lbState.scale})`;
     if (lightboxZoomLevel) {
       lightboxZoomLevel.textContent = `${Math.round(lbState.scale * 100)}%`;
     }
   }
 
-  function resetLightboxTransform() {
-    lbState.scale = 1.0;
-    lbState.translateX = 0;
-    lbState.translateY = 0;
-    updateLightboxTransform();
+  // Zoom to `newScale` keeping the image point under viewport point (px, py) fixed.
+  function lbZoomTo(newScale, px, py, animate = false) {
+    const { min, max } = lbScaleLimits();
+    const s = Math.min(max, Math.max(min, newScale));
+    if (px === undefined) {
+      const vp = lbViewportSize();
+      px = vp.w / 2;
+      py = vp.h / 2;
+    }
+    const ix = (px - lbState.translateX) / lbState.scale;
+    const iy = (py - lbState.translateY) / lbState.scale;
+    lbState.scale = s;
+    lbState.translateX = px - ix * s;
+    lbState.translateY = py - iy * s;
+    updateLightboxTransform(animate);
   }
 
-  function openLightbox(title, drawFn) {
-    if (!lightboxModal) return;
+  function lbFitWidth(animate = false) {
+    lbState.scale = lbFitScales().fitWidth;
+    lbState.translateX = LB_PAD;
+    lbState.translateY = LB_PAD; // start reading at the top of the page
+    updateLightboxTransform(animate);
+  }
+
+  function lbFitPage(animate = false) {
+    lbState.scale = lbFitScales().fitPage;
+    updateLightboxTransform(animate); // clamp centres it
+  }
+
+  // Default view: tall pages open at fit-width (readable, scroll down);
+  // wide crops (rows / measures) open fully visible.
+  function lbDefaultView(animate = false) {
+    const img = lbImageSize();
+    if (img.h > img.w) lbFitWidth(animate);
+    else lbFitPage(animate);
+  }
+
+  function resetLightboxTransform() {
+    lbFitPage(true);
+  }
+
+  function lbPanBy(dx, dy, animate = false) {
+    lbState.translateX -= dx;
+    lbState.translateY -= dy;
+    updateLightboxTransform(animate);
+  }
+
+  function lbLocalPoint(clientX, clientY) {
+    const r = lightboxViewport.getBoundingClientRect();
+    return { x: clientX - r.left, y: clientY - r.top };
+  }
+
+  function lbUpdatePager() {
+    if (!lightboxPager) return;
+    const n = lbState.pages ? lbState.pages.length : 0;
+    lightboxPager.classList.toggle("hidden", n <= 1);
+    if (n > 1) {
+      lightboxPageText.textContent = `${lbState.pageIdx + 1} / ${n}`;
+      lightboxPrev.disabled = lbState.pageIdx <= 0;
+      lightboxNext.disabled = lbState.pageIdx >= n - 1;
+    }
+  }
+
+  function lbShowPage(idx) {
+    if (!lbState.pages || !lbState.pages.length) return;
+    idx = Math.max(0, Math.min(lbState.pages.length - 1, idx));
+    lbState.pageIdx = idx;
+    lbUpdatePager();
+    const token = ++lbState.loadToken;
+    if (lightboxLoading) lightboxLoading.classList.remove("hidden");
+    const img = new Image();
+    img.onload = () => {
+      if (token !== lbState.loadToken) return; // a newer page was requested
+      lightboxCanvas.width = img.naturalWidth || img.width;
+      lightboxCanvas.height = img.naturalHeight || img.height;
+      lightboxCanvas.getContext("2d").drawImage(img, 0, 0);
+      if (lightboxLoading) lightboxLoading.classList.add("hidden");
+      lbDefaultView();
+    };
+    img.onerror = () => {
+      if (token !== lbState.loadToken) return;
+      if (lightboxLoading) {
+        lightboxLoading.textContent = "图片加载失败，请稍后重试";
+        lightboxLoading.classList.remove("hidden");
+      }
+    };
+    if (lightboxLoading) lightboxLoading.textContent = "加载中…";
+    img.src = lbState.pages[idx];
+  }
+
+  function lbOpenModal(title) {
     if (lightboxTitle) lightboxTitle.textContent = title || "🔍 乐谱高清大图";
     lightboxModal.classList.remove("hidden");
-    resetLightboxTransform();
+    document.body.style.overflow = "hidden";
+  }
+
+  // Synchronous draw into the canvas (crops of the original page).
+  function openLightbox(title, drawFn) {
+    if (!lightboxModal) return;
+    lbState.pages = null;
+    lbState.loadToken++;
+    lbUpdatePager();
+    if (lightboxLoading) lightboxLoading.classList.add("hidden");
+    lbOpenModal(title);
     if (drawFn && lightboxCanvas) {
       drawFn(lightboxCanvas);
     }
+    lbDefaultView();
+  }
+
+  // Multi-page image viewer (rendered accompaniment previews).
+  function openImagePager(title, urls, startIdx = 0) {
+    if (!lightboxModal || !urls || !urls.length) return;
+    lbState.pages = urls.slice();
+    lbOpenModal(title);
+    lbShowPage(startIdx);
   }
 
   function closeLightbox() {
     if (lightboxModal) lightboxModal.classList.add("hidden");
+    document.body.style.overflow = "";
+    lbState.loadToken++;
+  }
+
+  function lbIsOpen() {
+    return lightboxModal && !lightboxModal.classList.contains("hidden");
   }
 
   if (lightboxClose) lightboxClose.onclick = closeLightbox;
   if (lightboxBackdrop) lightboxBackdrop.onclick = closeLightbox;
+  if (lightboxZoomIn) lightboxZoomIn.onclick = () => lbZoomTo(lbState.scale * LB_STEP, undefined, undefined, true);
+  if (lightboxZoomOut) lightboxZoomOut.onclick = () => lbZoomTo(lbState.scale / LB_STEP, undefined, undefined, true);
+  if (lightboxZoomActual) lightboxZoomActual.onclick = () => lbZoomTo(1.0, undefined, undefined, true);
+  if (lightboxZoomReset) lightboxZoomReset.onclick = resetLightboxTransform;
+  if (lightboxFitWidthBtn) lightboxFitWidthBtn.onclick = () => lbFitWidth(true);
+  if (lightboxPrev) lightboxPrev.onclick = () => lbShowPage(lbState.pageIdx - 1);
+  if (lightboxNext) lightboxNext.onclick = () => lbShowPage(lbState.pageIdx + 1);
+
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && lightboxModal && !lightboxModal.classList.contains("hidden")) {
-      closeLightbox();
+    if (!lbIsOpen()) return;
+    const tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    const vp = lbViewportSize();
+    switch (e.key) {
+      case "Escape": closeLightbox(); break;
+      case "+": case "=": lbZoomTo(lbState.scale * LB_STEP, undefined, undefined, true); break;
+      case "-": case "_": lbZoomTo(lbState.scale / LB_STEP, undefined, undefined, true); break;
+      case "0": lbFitPage(true); break;
+      case "1": lbZoomTo(1.0, undefined, undefined, true); break;
+      case "w": case "W": lbFitWidth(true); break;
+      case "ArrowUp": lbPanBy(0, -vp.h * 0.15, true); break;
+      case "ArrowDown": lbPanBy(0, vp.h * 0.15, true); break;
+      case "ArrowLeft": lbPanBy(-vp.w * 0.15, 0, true); break;
+      case "ArrowRight": lbPanBy(vp.w * 0.15, 0, true); break;
+      case "PageUp": lbShowPage(lbState.pageIdx - 1); break;
+      case "PageDown": lbShowPage(lbState.pageIdx + 1); break;
+      default: return;
     }
+    e.preventDefault();
   });
 
-  if (lightboxZoomIn) {
-    lightboxZoomIn.onclick = () => {
-      lbState.scale = Math.min(lbState.scale * 1.25, 6.0);
-      updateLightboxTransform();
-    };
-  }
-  if (lightboxZoomOut) {
-    lightboxZoomOut.onclick = () => {
-      lbState.scale = Math.max(lbState.scale / 1.25, 0.25);
-      updateLightboxTransform();
-    };
-  }
-  if (lightboxZoomReset) {
-    lightboxZoomReset.onclick = resetLightboxTransform;
-  }
+  window.addEventListener("resize", () => {
+    if (lbIsOpen()) updateLightboxTransform();
+  });
 
   if (lightboxViewport) {
+    // Wheel: plain wheel / two-finger swipe scrolls the page; Ctrl/⌘ + wheel and
+    // trackpad pinch (reported as ctrlKey wheel) zoom around the pointer. The zoom
+    // amount is proportional to the wheel delta, so trackpads (many small events)
+    // and mice (few large events) both feel controlled.
     lightboxViewport.addEventListener("wheel", (e) => {
       e.preventDefault();
-      const zoomFactor = e.deltaY < 0 ? 1.15 : (1 / 1.15);
-      lbState.scale = Math.min(Math.max(lbState.scale * zoomFactor, 0.25), 6.0);
-      updateLightboxTransform();
+      let dx = e.deltaX;
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) { dx *= 16; dy *= 16; } // lines → px
+      else if (e.deltaMode === 2) { const vp = lbViewportSize(); dx *= vp.w; dy *= vp.h; }
+      if (e.ctrlKey || e.metaKey) {
+        const factor = Math.exp(-Math.max(-60, Math.min(60, dy)) * 0.006);
+        const p = lbLocalPoint(e.clientX, e.clientY);
+        lbZoomTo(lbState.scale * factor, p.x, p.y);
+      } else {
+        if (e.shiftKey && !dx) { dx = dy; dy = 0; }
+        lbPanBy(dx, dy);
+      }
     }, { passive: false });
 
-    lightboxViewport.addEventListener("mousedown", (e) => {
-      if (e.button !== 0) return;
-      lbState.isDragging = true;
-      lbState.startX = e.clientX - lbState.translateX;
-      lbState.startY = e.clientY - lbState.translateY;
-      lightboxViewport.classList.add("dragging");
-    });
-
-    window.addEventListener("mousemove", (e) => {
-      if (!lbState.isDragging) return;
-      lbState.translateX = e.clientX - lbState.startX;
-      lbState.translateY = e.clientY - lbState.startY;
-      updateLightboxTransform();
-    });
-
-    window.addEventListener("mouseup", () => {
-      if (lbState.isDragging) {
-        lbState.isDragging = false;
-        if (lightboxViewport) lightboxViewport.classList.remove("dragging");
+    lightboxViewport.addEventListener("dblclick", (e) => {
+      const p = lbLocalPoint(e.clientX, e.clientY);
+      const { fitWidth, fitPage } = lbFitScales();
+      const base = Math.max(fitWidth, fitPage);
+      if (lbState.scale > base * 1.4) {
+        lbDefaultView(true);
+      } else {
+        lbZoomTo(base * 2, p.x, p.y, true);
       }
     });
 
-    let lastTouchDist = 0;
-    lightboxViewport.addEventListener("touchstart", (e) => {
-      if (e.touches.length === 1) {
+    // Pointer events: one pointer pans, two pointers pinch-zoom around their midpoint.
+    const pointers = new Map();
+    let pinchDist = 0;
+    let pinchMid = null;
+
+    lightboxViewport.addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      lightboxViewport.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 1) {
         lbState.isDragging = true;
-        lbState.startX = e.touches[0].clientX - lbState.translateX;
-        lbState.startY = e.touches[0].clientY - lbState.translateY;
-      } else if (e.touches.length === 2) {
+        lbState.startX = e.clientX;
+        lbState.startY = e.clientY;
+        lightboxViewport.classList.add("dragging");
+      } else if (pointers.size === 2) {
         lbState.isDragging = false;
-        lastTouchDist = Math.hypot(
-          e.touches[0].clientX - e.touches[1].clientX,
-          e.touches[0].clientY - e.touches[1].clientY
-        );
+        const [a, b] = [...pointers.values()];
+        pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+        pinchMid = lbLocalPoint((a.x + b.x) / 2, (a.y + b.y) / 2);
       }
-    }, { passive: true });
-
-    lightboxViewport.addEventListener("touchmove", (e) => {
-      if (e.touches.length === 1 && lbState.isDragging) {
-        lbState.translateX = e.touches[0].clientX - lbState.startX;
-        lbState.translateY = e.touches[0].clientY - lbState.startY;
-        updateLightboxTransform();
-      } else if (e.touches.length === 2) {
-        const dist = Math.hypot(
-          e.touches[0].clientX - e.touches[1].clientX,
-          e.touches[0].clientY - e.touches[1].clientY
-        );
-        if (lastTouchDist > 0) {
-          const factor = dist / lastTouchDist;
-          lbState.scale = Math.min(Math.max(lbState.scale * factor, 0.25), 6.0);
-          updateLightboxTransform();
-        }
-        lastTouchDist = dist;
-      }
-    }, { passive: true });
-
-    lightboxViewport.addEventListener("touchend", () => {
-      lbState.isDragging = false;
-      lastTouchDist = 0;
     });
+
+    lightboxViewport.addEventListener("pointermove", (e) => {
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        const dist = Math.hypot(a.x - b.x, a.y - b.y);
+        const mid = lbLocalPoint((a.x + b.x) / 2, (a.y + b.y) / 2);
+        if (pinchDist > 0 && pinchMid) {
+          // pan with the midpoint, then zoom around it
+          lbState.translateX += mid.x - pinchMid.x;
+          lbState.translateY += mid.y - pinchMid.y;
+          lbZoomTo(lbState.scale * (dist / pinchDist), mid.x, mid.y);
+        }
+        pinchDist = dist;
+        pinchMid = mid;
+      } else if (lbState.isDragging) {
+        const dx = e.clientX - lbState.startX;
+        const dy = e.clientY - lbState.startY;
+        lbState.startX = e.clientX;
+        lbState.startY = e.clientY;
+        lbState.translateX += dx;
+        lbState.translateY += dy;
+        updateLightboxTransform();
+      }
+    });
+
+    const endPointer = (e) => {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) {
+        pinchDist = 0;
+        pinchMid = null;
+      }
+      if (pointers.size === 1) {
+        const [p] = [...pointers.values()];
+        lbState.isDragging = true;
+        lbState.startX = p.x;
+        lbState.startY = p.y;
+      } else if (pointers.size === 0) {
+        lbState.isDragging = false;
+        lightboxViewport.classList.remove("dragging");
+      }
+    };
+    lightboxViewport.addEventListener("pointerup", endPointer);
+    lightboxViewport.addEventListener("pointercancel", endPointer);
   }
 
   // --- Step 1: File Selection & Thumbnails ---
@@ -1935,6 +2145,9 @@ document.addEventListener("DOMContentLoaded", () => {
       img.src = url;
       img.alt = `第 ${idx + 1} 页伴奏`;
       img.loading = "lazy";
+      img.title = "点击放大查看";
+      img.style.cursor = "zoom-in";
+      img.onclick = () => openImagePager("🔍 伴奏预览", result.preview_urls, idx);
       card.appendChild(img);
 
       renderPreviews.appendChild(card);
@@ -2347,19 +2560,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function openRenderPreviewModal(sheetTitle, render) {
     if (!render.preview_urls || render.preview_urls.length === 0) return;
     const title = `🔍 ${sheetTitle || "乐谱伴奏"} · ${translateInstrument(render.instrument)} (${render.start_key}调 ${translateDifficulty(render.difficulty)})`;
-    const firstUrl = render.preview_urls[0];
-
-    openLightbox(title, (canvas) => {
-      const ctx = canvas.getContext("2d");
-      const img = new Image();
-      img.onload = () => {
-        canvas.width = img.naturalWidth || img.width;
-        canvas.height = img.naturalHeight || img.height;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0);
-      };
-      img.src = firstUrl;
-    });
+    openImagePager(title, render.preview_urls, 0);
   }
 
   async function promptDeleteSheet(sheetId, title) {

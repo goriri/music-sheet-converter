@@ -977,14 +977,51 @@ body {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.lightbox-zoom-group,
+.lightbox-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: #e2e8f0;
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.lightbox-pager.hidden {
+  display: none;
+}
+
+.lb-btn {
+  min-width: 36px;
+  min-height: 32px;
+  font-size: 1.15rem;
+  line-height: 1;
+  padding: 0 8px;
 }
 
 .lightbox-zoom-text {
   font-size: 0.85rem;
   font-weight: 600;
   color: #475569;
-  min-width: 50px;
+  min-width: 56px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.lb-zoom-pill {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  min-height: 32px;
+  border-radius: 6px;
+}
+
+.lb-zoom-pill:hover {
+  background: #f1f5f9;
 }
 
 .lightbox-viewport {
@@ -994,9 +1031,8 @@ body {
   background: #0f172a;
   user-select: none;
   cursor: grab;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  touch-action: none;
+  overscroll-behavior: contain;
 }
 
 .lightbox-viewport.dragging {
@@ -1004,16 +1040,68 @@ body {
 }
 
 .lightbox-canvas-container {
+  position: absolute;
+  left: 0;
+  top: 0;
   transform-origin: 0 0;
   will-change: transform;
-  display: inline-block;
+}
+
+.lightbox-canvas-container.animating {
+  transition: transform 0.16s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lightbox-canvas-container.animating {
+    transition: none;
+  }
 }
 
 .lightbox-canvas {
   display: block;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
-  image-rendering: -webkit-optimize-contrast;
-  image-rendering: crisp-edges;
+  background: #fff;
+}
+
+.lightbox-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #e2e8f0;
+  font-size: 0.95rem;
+  pointer-events: none;
+}
+
+.lightbox-loading.hidden {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .lightbox-modal {
+    padding: 0;
+  }
+  .lightbox-dialog {
+    width: 100vw;
+    height: 100dvh;
+    border-radius: 0;
+  }
+  .lightbox-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .lightbox-title {
+    font-size: 0.9rem;
+  }
+  .lightbox-toolbar {
+    justify-content: space-between;
+  }
+  .lightbox-dialog .lightbox-footer {
+    display: none;
+  }
 }
 
 .lightbox-footer {
