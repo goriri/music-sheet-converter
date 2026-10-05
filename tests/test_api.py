@@ -26,10 +26,25 @@ from app.models import (
     PageInfo,
     ParsedSheet,
     ResolvedChord,
+    SectionPlan,
     SongHeader,
     System,
+    UkeMeasure,
+    UkeShape,
+    UkeStroke,
 )
 from app.storage import LocalStorage, set_storage
+
+
+_GLOBAL_PLAN_SECTIONS_CALLED: list[int] = []
+
+
+def _mock_plan_sections(sheet, *args, **kwargs):
+    _GLOBAL_PLAN_SECTIONS_CALLED.append(1)
+    return [
+        SectionPlan(measure_index=0, section_id="intro", role="intro", is_section_start=True),
+        SectionPlan(measure_index=1, section_id="intro", role="intro", is_section_start=False),
+    ]
 
 
 def create_sample_parsed_sheet() -> ParsedSheet:
@@ -1129,6 +1144,140 @@ def test_output_sanity_gate_three_unparseable_notes_intercepted_with_409(client,
     )
     assert render_resp.status_code == 409
     assert render_resp.json()["detail"] == "伴奏生成异常，已拦截"
+
+
+def test_render_guitar_rejected_400(client, setup_test_environment):
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    render_resp = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "F", "difficulty": "intermediate", "instrument": "guitar"},
+    )
+    assert render_resp.status_code == 400
+    assert "暂未支持" in render_resp.json()["detail"]
+
+
+def test_render_ukulele_success_200_and_sections_cached_once(client, setup_test_environment, monkeypatch):
+    store = setup_test_environment
+    png_data = create_dummy_png_bytes(200, 200)
+    files = [("files", ("sheet.png", png_data, "image/png"))]
+    resp = client.post("/api/sheets", files=files)
+    sheet_id = resp.json()["sheet_id"]
+
+    for _ in range(50):
+        get_resp = client.get(f"/api/sheets/{sheet_id}")
+        if get_resp.json().get("status") == "ready":
+            break
+        time.sleep(0.05)
+
+    sample_sheet = create_sample_parsed_sheet()
+    sample_sheet.issues = []
+    sample_sheet.key_changes = []
+    store.put_json(f"sheets/{sheet_id}/parsed.json", sample_sheet.model_dump())
+
+    sample_uke_arr = Arrangement(
+        instrument="ukulele",
+        difficulty="intermediate",
+        start_key="F#",
+        capo=1,
+        shape_key="F",
+        measures=[
+            MeasureArrangement(
+                measure_index=0,
+                tonic_pc=6,
+                key_name="F#",
+                chords=[
+                    ResolvedChord(
+                        raw="1",
+                        name="F#",
+                        beat=1.0,
+                        root_pc=6,
+                        bass_pc=6,
+                        pcs=[6, 10, 1],
+                        quality="maj",
+                    )
+                ],
+            ),
+            MeasureArrangement(
+                measure_index=1,
+                tonic_pc=6,
+                key_name="F#",
+                chords=[
+                    ResolvedChord(
+                        raw="5/7",
+                        name="C#/F",
+                        beat=1.0,
+                        root_pc=1,
+                        bass_pc=5,
+                        pcs=[1, 5, 8],
+                        quality="maj",
+                    )
+                ],
+            ),
+        ],
+        uke_measures=[
+            UkeMeasure(
+                measure_index=0,
+                shapes=["F"],
+                pattern_id="P1",
+                strokes=[UkeStroke(onset=0.0, duration=1.0, kind="down")],
+            ),
+            UkeMeasure(
+                measure_index=1,
+                shapes=["C"],
+                pattern_id="P1",
+                strokes=[UkeStroke(onset=0.0, duration=1.0, kind="down")],
+            ),
+        ],
+        uke_shapes={
+            "F": UkeShape(name="F", frets=(2, 0, 1, 0), fingers=(2, 0, 1, 0), base_fret=1),
+            "C": UkeShape(name="C", frets=(0, 0, 0, 3), fingers=(0, 0, 0, 3), base_fret=1),
+        },
+        pattern_legend={"P1": "↓   ↓   ↓   ↓"},
+    )
+
+    _GLOBAL_PLAN_SECTIONS_CALLED.clear()
+    sec_mod = types.ModuleType("app.arrange.sections")
+    sec_mod.plan_sections = _mock_plan_sections
+    monkeypatch.setitem(sys.modules, "app.arrange.sections", sec_mod)
+
+    uke_mod = types.ModuleType("app.arrange.ukulele")
+    uke_mod.arrange_ukulele = lambda sheet, start_key, difficulty, sections=None: sample_uke_arr
+    monkeypatch.setitem(sys.modules, "app.arrange.ukulele", uke_mod)
+
+    render_resp = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "F#", "difficulty": "intermediate", "instrument": "ukulele"},
+    )
+    assert render_resp.status_code == 200, render_resp.text
+    data = render_resp.json()
+    assert data["capo"] == 1
+    assert data["shape_key"] == "F"
+    assert "pdf_url" in data
+    assert len(data["preview_urls"]) > 0
+
+    assert store.exists(f"sheets/{sheet_id}/sections.json")
+    cached_sections = store.get_json(f"sheets/{sheet_id}/sections.json")
+    assert len(cached_sections) == 2
+    assert len(_GLOBAL_PLAN_SECTIONS_CALLED) == 1
+
+    render_resp2 = client.post(
+        f"/api/sheets/{sheet_id}/render",
+        json={"start_key": "F#", "difficulty": "beginner", "instrument": "ukulele"},
+    )
+    assert render_resp2.status_code == 200
+    assert len(_GLOBAL_PLAN_SECTIONS_CALLED) == 1
+
 
 
 

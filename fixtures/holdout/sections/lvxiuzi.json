@@ -1,0 +1,56 @@
+{
+  "slug": "lvxiuzi",
+  "title": "绿袖子",
+  "sections": [
+    {
+      "section_id": "intro",
+      "role": "intro",
+      "start_measure": 0,
+      "end_measure": 7,
+      "energy": 0,
+      "evidence": "Systems 0-1 (mm 0-7). Printed margin label '前奏'. 8-bar instrumental intro in 3/4 time."
+    },
+    {
+      "section_id": "A1",
+      "role": "verse",
+      "start_measure": 8,
+      "end_measure": 16,
+      "energy": 1,
+      "evidence": "Systems 2-3 (mm 8-16). Printed margin label 'A1段'. Pickup bar m8 ('弱起 6.'), followed by 8 bars of theme A."
+    },
+    {
+      "section_id": "A2",
+      "role": "verse",
+      "start_measure": 17,
+      "end_measure": 25,
+      "energy": 1,
+      "evidence": "Systems 4-5 (mm 17-25). Printed margin label 'A2段'. Pickup bar m17 ('弱起 6.'), followed by 8 bars of theme A variation."
+    },
+    {
+      "section_id": "B1",
+      "role": "chorus",
+      "start_measure": 26,
+      "end_measure": 33,
+      "energy": 2,
+      "evidence": "Systems 6-7 (mm 26-33). Printed margin label 'B1段'. 8 bars of theme B (chorus)."
+    },
+    {
+      "section_id": "B2",
+      "role": "chorus",
+      "start_measure": 34,
+      "end_measure": 41,
+      "energy": 2,
+      "evidence": "Systems 8-9 (mm 34-41). Printed margin label 'B2段'. 8 bars of theme B variation."
+    },
+    {
+      "section_id": "interlude1",
+      "role": "interlude",
+      "start_measure": 42,
+      "end_measure": 45,
+      "energy": 1,
+      "evidence": "System 10 (mm 42-45). Printed margin label '间奏'. 4 bars with modal bVII chord (b7m) and key modulation hint '转 1=bB'."
+    }
+  ],
+  "uncertain": [],
+  "notes": "11 systems match printed sheet exactly (total 46 measures, indices 0-45). Section labels 前奏, A1段, A2段, B1段, B2段, 间奏 are printed explicitly in score margins."
+}

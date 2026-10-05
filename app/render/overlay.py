@@ -811,6 +811,11 @@ def render_pages(
 
     Returns a list of PIL Images (each representing an output PDF page).
     """
+    if arrangement.instrument == "ukulele":
+        from app.render.ukulele import render_uke_pages
+
+        return render_uke_pages(pages, sheet, arrangement)
+
     output_pages: list[Image.Image] = []
 
     for page_idx, page_bytes in enumerate(pages):
@@ -836,6 +841,11 @@ def render_pdf(
     arrangement: Arrangement,
 ) -> bytes:
     """Render multi-page PDF bytes from sheet music pages and accompaniment."""
+    if arrangement.instrument == "ukulele":
+        from app.render.ukulele import render_uke_pdf
+
+        return render_uke_pdf(pages, sheet, arrangement)
+
     rendered_images = render_pages(pages, sheet, arrangement)
     if not rendered_images:
         return b""

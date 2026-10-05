@@ -1,0 +1,51 @@
+{
+  "slug": "qinghuaci",
+  "title": "青花瓷",
+  "sections": [
+    {
+      "section_id": "intro",
+      "role": "intro",
+      "start_measure": 0,
+      "end_measure": 4,
+      "energy": 0,
+      "evidence": "Systems 0-1 (mm 0-4). Label 'Tempo (鼓边2.4拍) AG(arp)', '(鼓边2.4拍) Strings in', 'EG(arp)'. Guzheng + strings + electric guitar arpeggio intro. Note: printed row 1 has 3 intro bars compressed into parsed measure 4, ending with pickup '素胚勾'."
+    },
+    {
+      "section_id": "A1",
+      "role": "verse",
+      "start_measure": 5,
+      "end_measure": 12,
+      "energy": 1,
+      "evidence": "Systems 1-3 (mm 5-12). Verse 1: '勒出青花笔锋浓转淡 瓶身描绘的牡丹一如你初妆...你的美一缕飘散去到我去了的地方'. 8 parsed measures, ends with pickup '天青色'."
+    },
+    {
+      "section_id": "B1",
+      "role": "chorus",
+      "start_measure": 13,
+      "end_measure": 20,
+      "energy": 2,
+      "evidence": "Systems 4-6 (mm 13-20). Label '(鼓边2.4拍) Strings in'. 8-bar chorus hook: '等烟雨而我在等你 炊烟袅袅升起隔江千万里...你眼带笑意', ending with instrumental resolution in m20."
+    },
+    {
+      "section_id": "interlude1",
+      "role": "interlude",
+      "start_measure": 21,
+      "end_measure": 24,
+      "energy": 1,
+      "evidence": "Systems 6-7 (mm 21-24). Label '(鼓边2.4拍) Strings in'. Guzheng and strings instrumental interlude (4 parsed measures), ending with pickup '色白花' at end of m24."
+    },
+    {
+      "section_id": "A2",
+      "role": "verse",
+      "start_measure": 25,
+      "end_measure": 30,
+      "energy": 1,
+      "evidence": "Systems 8-9 (mm 25-30). Label '(小鼓边2.4拍) EG(arp)'. Verse 2: '色白花青的锦鲤跃然于碗底...而我路过那江南小镇惹了你 在泼墨'. 6 parsed measures closing page 1."
+    }
+  ],
+  "uncertain": [
+    "Printed row 1 compressed 3 intro bars into parsed measure 4, so intro has 5 parsed measures (0-4) instead of 7 printed bars.",
+    "m20 holds the resolution chord of the chorus with pickup 035 to interlude; interlude begins at m21 (or m20 on the pickup)."
+  ],
+  "notes": "Parsed sheet has 31 measures (indices 0-30). Printed row 1 had 3 intro bars + 2 verse bars, but OCR merged the 3 intro bars into m4."
+}

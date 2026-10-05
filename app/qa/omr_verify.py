@@ -2700,4 +2700,5 @@ def verify_sheet(
 
     new_issues = [iss for iss in new_issues if iss.code != "empty_box_placeholder"]
     verified.issues = new_issues
-    return verified
+    from app.omr.beats import quantize_chord_beats
+    return quantize_chord_beats(verified)

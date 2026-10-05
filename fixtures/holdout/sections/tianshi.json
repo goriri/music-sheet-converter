@@ -1,0 +1,64 @@
+{
+  "slug": "tianshi",
+  "title": "天使",
+  "sections": [
+    {
+      "section_id": "intro",
+      "role": "intro",
+      "start_measure": 0,
+      "end_measure": 4,
+      "energy": 0,
+      "evidence": "System 0 (mm 0-4). Label 'Tempo (小鼓2.4拍)AG(arp)'. Acoustic guitar intro with pickup bar m0. 5 bars total."
+    },
+    {
+      "section_id": "A1",
+      "role": "verse",
+      "start_measure": 5,
+      "end_measure": 12,
+      "energy": 1,
+      "evidence": "Systems 1-2 (mm 5-12). Label '(小鼓2.4拍)AG(arp)'. Verse 1: '你就是我的天使 保护着我的天使...甚至我学会了飞翔'. 8 bars."
+    },
+    {
+      "section_id": "P1",
+      "role": "prechorus",
+      "start_measure": 13,
+      "end_measure": 16,
+      "energy": 2,
+      "evidence": "System 3 (mm 13-16). Label '(小鼓2.4拍) Strings in'. Prechorus: '飞过人间的无常 才懂爱才是宝藏...只要有你就会是天堂'. 4 bars."
+    },
+    {
+      "section_id": "B1",
+      "role": "chorus",
+      "start_measure": 17,
+      "end_measure": 24,
+      "energy": 3,
+      "evidence": "Systems 4-5 (mm 17-24). Label '(小鼓2.4拍) Strings in'. Main chorus hook: '像孩子依赖着肩膀...你是我最初和最后的天堂'. 8 bars."
+    },
+    {
+      "section_id": "interlude1",
+      "role": "interlude",
+      "start_measure": 25,
+      "end_measure": 28,
+      "energy": 1,
+      "evidence": "System 6 (mm 25-28). Label '(小鼓2.4拍) AG'. Instrumental acoustic guitar interlude echoing intro motive. 4 bars."
+    },
+    {
+      "section_id": "A2",
+      "role": "verse",
+      "start_measure": 29,
+      "end_measure": 36,
+      "energy": 1,
+      "evidence": "Systems 7-8 (mm 29-36). Label '(小鼓2.4拍)AG(arp)'. Verse 2: repeat of '你就是我的天使...甚至我学会了飞翔'. 8 bars."
+    },
+    {
+      "section_id": "P2",
+      "role": "prechorus",
+      "start_measure": 37,
+      "end_measure": 40,
+      "energy": 2,
+      "evidence": "System 9 (mm 37-40). Label '(小鼓2.4拍) Strings in'. Prechorus 2: '飞过人间的无常...只要有你就会是天堂'. 4 bars closing page 1."
+    }
+  ],
+  "uncertain": [],
+  "notes": "10 systems match printed sheet exactly (total 41 measures, indices 0-40). start_measure and end_measure are 0-based and inclusive."
+}

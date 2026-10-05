@@ -1,0 +1,50 @@
+{
+  "slug": "qilixiang",
+  "title": "七里香",
+  "sections": [
+    {
+      "section_id": "intro",
+      "role": "intro",
+      "start_measure": 0,
+      "end_measure": 4,
+      "energy": 1,
+      "evidence": "System 0 (mm 0-4). Label 'Tempo(小鼓2.4拍)Strings in', '(三味弦+笛)'. Shamisen and flute instrumental intro with pickup bar m0. 5 bars total."
+    },
+    {
+      "section_id": "A1",
+      "role": "verse",
+      "start_measure": 5,
+      "end_measure": 12,
+      "energy": 1,
+      "evidence": "Systems 1-2 (mm 5-12). Label '(小鼓2.4拍) AG(RHY)'. Verse 1: '窗外的麻雀 在电线杆上多嘴...我用几行字形容你是我的谁'. 8 bars, ending with pickup '秋刀'."
+    },
+    {
+      "section_id": "P1",
+      "role": "prechorus",
+      "start_measure": 13,
+      "end_measure": 20,
+      "energy": 2,
+      "evidence": "Systems 3-4 (mm 13-20). Label '(小鼓2.4拍) Strings in'. Prechorus: '秋刀鱼的滋味 猫跟你都想了解...你说你舍不得吃掉这一种感觉'. 8 bars, leading with pickup '雨下整夜'."
+    },
+    {
+      "section_id": "B1",
+      "role": "chorus",
+      "start_measure": 21,
+      "end_measure": 36,
+      "energy": 3,
+      "evidence": "Systems 5-8 (mm 21-36). Label '(小鼓2.4拍) Strings in'. 16-bar chorus hook in two 8-bar periods: '雨下整夜 我的爱溢出就像雨水...你是我唯一想要了解的'. Full band accompaniment."
+    },
+    {
+      "section_id": "interlude1",
+      "role": "interlude",
+      "start_measure": 37,
+      "end_measure": 40,
+      "energy": 1,
+      "evidence": "System 9 (mm 37-40). Label '(鼓边2.4拍) 6m PN /5 4#m7-5'. Piano ostinato interlude between chorus and verse 2 (closes page 1). 4 bars."
+    }
+  ],
+  "uncertain": [
+    "System 9 (mm 37-40) functions as interlude1 (connecting Chorus 1 to Verse 2 in full song) or outro (ending page 1)."
+  ],
+  "notes": "10 systems match printed sheet exactly (total 41 measures, indices 0-40). start_measure and end_measure are 0-based and inclusive."
+}

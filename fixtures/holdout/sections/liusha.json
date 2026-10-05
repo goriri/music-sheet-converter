@@ -1,0 +1,99 @@
+{
+  "slug": "liusha",
+  "title": "流沙",
+  "sections": [
+    {
+      "section_id": "intro",
+      "role": "intro",
+      "start_measure": 0,
+      "end_measure": 8,
+      "energy": 0,
+      "evidence": "Page 1 Systems 0-1 (mm 0-8). Printed margin label '前奏'. Pickup bar m0 ('弱起 561') followed by 8 bars instrumental intro. 9 bars total."
+    },
+    {
+      "section_id": "A1",
+      "role": "verse",
+      "start_measure": 9,
+      "end_measure": 16,
+      "energy": 1,
+      "evidence": "Page 1 Systems 2-3 (mm 9-16). Printed margin label '主歌'. Verse 1: '并不是真的 路过而已 也不是真的 不会想你 全都不是真的 是骗自己 其实还爱你 爱着你'. 8 bars."
+    },
+    {
+      "section_id": "C1",
+      "role": "bridge",
+      "start_measure": 17,
+      "end_measure": 23,
+      "energy": 2,
+      "evidence": "Page 1 Systems 4-5 (mm 17-23). Printed margin label '桥段'. Pickup bar m17 ('弱起 01') + 6 bars: '我以为我早想清楚 不由自主恍恍惚惚又走回头路 再看一眼有过的幸福'. 7 bars total."
+    },
+    {
+      "section_id": "B1",
+      "role": "chorus",
+      "start_measure": 24,
+      "end_measure": 31,
+      "energy": 2,
+      "evidence": "Page 1 Systems 6-7 (mm 24-31). Printed margin label '副歌'. Chorus 1: '爱情好像流沙 我不挣扎 随它去吧 我不怕 爱情好像流沙 心里的牵挂 不愿放下 oh baby 让我这样吧'. 8 bars."
+    },
+    {
+      "section_id": "interlude1",
+      "role": "interlude",
+      "start_measure": 32,
+      "end_measure": 35,
+      "energy": 1,
+      "evidence": "Page 1 System 8 (mm 32-35). Printed margin label '间奏'. 4-bar piano instrumental interlude."
+    },
+    {
+      "section_id": "C2",
+      "role": "bridge",
+      "start_measure": 36,
+      "end_measure": 41,
+      "energy": 2,
+      "evidence": "Page 1 Systems 9-10 (mm 36-41). Printed margin label '变奏'. Bridge variation: 'NO NO NO NO是一再的做 一再的错 不由我 我一步一步一步一步 慢慢走向流沙'. 6 bars."
+    },
+    {
+      "section_id": "outro",
+      "role": "outro",
+      "start_measure": 42,
+      "end_measure": 46,
+      "energy": 0,
+      "evidence": "Page 1 Systems 11-12 (mm 42-46). Printed margin label '尾奏'. 4-bar piano outro plus final held bar m46 ('1 - - -'). 5 bars total."
+    },
+    {
+      "section_id": "p2_A1",
+      "role": "verse",
+      "start_measure": 47,
+      "end_measure": 54,
+      "energy": 1,
+      "evidence": "Page 2 Systems 13-14 (mm 47-54). Printed margin label '主歌' on chord-only 弹唱版. 8 bars."
+    },
+    {
+      "section_id": "p2_C1",
+      "role": "bridge",
+      "start_measure": 55,
+      "end_measure": 60,
+      "energy": 2,
+      "evidence": "Page 2 Systems 15-16 (mm 55-60). Printed margin label '桥段' on chord-only 弹唱版. 6 bars."
+    },
+    {
+      "section_id": "p2_B1",
+      "role": "chorus",
+      "start_measure": 61,
+      "end_measure": 68,
+      "energy": 2,
+      "evidence": "Page 2 Systems 17-18 (mm 61-68). Printed margin label '副歌' on chord-only 弹唱版. 8 bars."
+    },
+    {
+      "section_id": "p2_outro",
+      "role": "outro",
+      "start_measure": 69,
+      "end_measure": 69,
+      "energy": 0,
+      "evidence": "Page 2 System 19 (m 69). Final resolution bar on chord 1."
+    }
+  ],
+  "uncertain": [
+    "Page 2 is a separate 弹唱版 (chord-only arrangement). Annotations include both pages mapped to global measure indices 0-69.",
+    "Section C1 (mm 17-23) is labeled '桥段' (bridge) in the score, though structurally functioning as a prechorus to the chorus."
+  ],
+  "notes": "Page 1 (mm 0-46) is 专业版; Page 2 (mm 47-69) is 弹唱版. Section labels are printed explicitly in score margins."
+}

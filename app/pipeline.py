@@ -13,7 +13,7 @@ from urllib.parse import quote
 from fastapi import HTTPException
 from PIL import Image, ImageOps
 
-from app.models import Arrangement, Difficulty, ParsedSheet, QualityIssue
+from app.models import Arrangement, Difficulty, ParsedSheet, QualityIssue, SectionPlan
 from app.storage import Storage, get_storage
 
 logger = logging.getLogger(__name__)
@@ -532,9 +532,9 @@ def render(
 ) -> dict[str, Any]:
     """Render accompaniment PDF and preview images.
 
-    Instrument other than 'piano' -> HTTP 400 '暂未支持'.
+    Supports 'piano' and 'ukulele'. Other instruments -> HTTP 400 '暂未支持'.
     """
-    if instrument != "piano":
+    if instrument not in ("piano", "ukulele"):
         raise HTTPException(status_code=400, detail="暂未支持")
 
     store = storage or get_storage()
@@ -608,37 +608,89 @@ def render(
     trace_id = uuid.uuid4().hex[:12]
 
     try:
-        # Lazy import arrangement & render modules
-        from app.arrange.piano import arrange
         from app.render.overlay import render_pages, render_pdf
 
-        arrangement = arrange(sheet, start_key, difficulty)
+        if instrument == "piano":
+            # Lazy import piano arrangement
+            from app.arrange.piano import arrange
 
-        # QA arrangement check & repair
-        import os
-        try:
-            from app.qa.arrange_check import ArrangementQAError, check_and_repair
+            arrangement = arrange(sheet, start_key, difficulty)
+
+            # QA arrangement check & repair
+            import os
             try:
-                arrangement = check_and_repair(
-                    sheet,
-                    arrangement,
-                    use_llm=os.environ.get("QA_LLM_REVIEW") == "1",
-                )
-            except ArrangementQAError as qa_err:
-                raise HTTPException(status_code=500, detail=f"编配自动修复失败：{qa_err}")
-        except HTTPException:
-            raise
-        except Exception as exc:
-            if isinstance(arrangement, Arrangement):
-                arrangement.issues.append(
-                    QualityIssue(
-                        stage="arrange",
-                        severity="info",
-                        code="arrange_qa_unavailable",
-                        message="编配自动校验服务暂不可用",
-                        detail={"error": str(exc)},
+                from app.qa.arrange_check import ArrangementQAError, check_and_repair
+                try:
+                    arrangement = check_and_repair(
+                        sheet,
+                        arrangement,
+                        use_llm=os.environ.get("QA_LLM_REVIEW") == "1",
                     )
-                )
+                except ArrangementQAError as qa_err:
+                    raise HTTPException(status_code=500, detail=f"编配自动修复失败：{qa_err}")
+            except HTTPException:
+                raise
+            except Exception as exc:
+                if isinstance(arrangement, Arrangement):
+                    arrangement.issues.append(
+                        QualityIssue(
+                            stage="arrange",
+                            severity="info",
+                            code="arrange_qa_unavailable",
+                            message="编配自动校验服务暂不可用",
+                            detail={"error": str(exc)},
+                        )
+                    )
+        elif instrument == "ukulele":
+            # 1. plan_sections cached at sheets/{id}/sections.json
+            sections = None
+            sections_path = f"sheets/{sheet_id}/sections.json"
+            if store.exists(sections_path):
+                try:
+                    sec_data = store.get_json(sections_path)
+                    sections = [SectionPlan.model_validate(s) for s in sec_data]
+                except Exception as exc:
+                    logger.warning(f"Failed to load cached sections from {sections_path}: {exc}")
+                    sections = None
+
+            if sections is None:
+                try:
+                    from app.arrange.sections import plan_sections
+                    try:
+                        sections = plan_sections(sheet)
+                        if sections:
+                            store.put_json(
+                                sections_path,
+                                [s.model_dump() if isinstance(s, SectionPlan) else s for s in sections],
+                            )
+                    except Exception as exc:
+                        logger.warning(f"plan_sections failed: {exc}")
+                        sections = None
+                except ImportError:
+                    sections = None
+
+            # 2. arrange_ukulele
+            from app.arrange.ukulele import arrange_ukulele
+            arrangement = arrange_ukulele(sheet, start_key, difficulty, sections=sections)
+
+            # 3. check_and_repair_uke (if importable)
+            try:
+                from app.qa.uke_check import check_and_repair_uke
+                arrangement = check_and_repair_uke(sheet, arrangement)
+            except ImportError:
+                pass
+            except Exception as exc:
+                logger.warning(f"check_and_repair_uke failed: {exc}")
+                if isinstance(arrangement, Arrangement):
+                    arrangement.issues.append(
+                        QualityIssue(
+                            stage="arrange",
+                            severity="info",
+                            code="uke_qa_unavailable",
+                            message="尤克里里编配自动校验服务暂不可用",
+                            detail={"error": str(exc)},
+                        )
+                    )
 
         # Output sanity check gate
         check_output_sanity(
@@ -709,6 +761,8 @@ def render(
             "preview_urls": preview_urls,
             "arrangement": arr_dict,
             "issues": issues_data,
+            "capo": arrangement.capo or 0,
+            "shape_key": arrangement.shape_key or start_key,
         }
     except HTTPException:
         raise

@@ -1,0 +1,51 @@
+{
+  "slug": "tingmamadehua",
+  "title": "听妈妈的话",
+  "sections": [
+    {
+      "section_id": "intro",
+      "role": "intro",
+      "start_measure": 0,
+      "end_measure": 3,
+      "energy": 0,
+      "evidence": "System 0 (mm 0-3). Instrumentation label 'Only PN(arp)+Bs in'. Piano arpeggio instrumental intro with pickup lyrics '小朋' on beat 4 of m3."
+    },
+    {
+      "section_id": "A1",
+      "role": "verse",
+      "start_measure": 4,
+      "end_measure": 11,
+      "energy": 1,
+      "evidence": "Systems 1-2 (mm 4-11). Label 'Tempo(鼓边2.4拍)'. Rap verse 1: '友 你是否有很多问号...长大后你就会开始懂了这段话'. 8 bars."
+    },
+    {
+      "section_id": "A2",
+      "role": "verse",
+      "start_measure": 12,
+      "end_measure": 19,
+      "energy": 1,
+      "evidence": "Systems 3-4 (mm 12-19). Label '(小鼓2.4拍)'. Rap verse 2: '长大后我开始明白...把手牵着一起梦游'. 8 bars."
+    },
+    {
+      "section_id": "B1",
+      "role": "chorus",
+      "start_measure": 20,
+      "end_measure": 35,
+      "energy": 2,
+      "evidence": "Systems 5-8 (mm 20-35). Labels '(小鼓2.4拍) PN(arp)', 'PN(unis)'. 16-bar chorus hook in two 8-bar periods: '听妈妈的话 别让她受伤... 天使的魔法 温暖中慈祥'. mm 28-35 marked '(1)'."
+    },
+    {
+      "section_id": "A3",
+      "role": "verse",
+      "start_measure": 36,
+      "end_measure": 39,
+      "energy": 1,
+      "evidence": "System 9 (mm 36-39). Label '(小鼓2.4拍) PN (同上)'. 4-bar rap verse over verse chord progression: '未来音乐是你的王牌...但妈比我更清楚', closing the chart."
+    }
+  ],
+  "uncertain": [
+    "Chorus mm 20-35 can be treated as a single 16-measure chorus B1 or two 8-measure periods (B1 mm 20-27 and B2 mm 28-35).",
+    "System 9 (mm 36-39) can be interpreted as Verse 3 (A3) or Bridge/Outro."
+  ],
+  "notes": "10 systems, 4 measures per system (40 measures total, indices 0-39). start_measure and end_measure are 0-based and inclusive."
+}

@@ -1,0 +1,55 @@
+{
+  "diaole": [
+    {"section_id": "intro", "role": "intro", "start_measure": 0, "end_measure": 7, "energy": 0},
+    {"section_id": "A1", "role": "verse", "start_measure": 8, "end_measure": 15, "energy": 1},
+    {"section_id": "A2", "role": "verse", "start_measure": 16, "end_measure": 23, "energy": 1},
+    {"section_id": "B1", "role": "chorus", "start_measure": 24, "end_measure": 31, "energy": 2},
+    {"section_id": "B2", "role": "chorus", "start_measure": 32, "end_measure": 39, "energy": 2},
+    {"section_id": "interlude1", "role": "interlude", "start_measure": 40, "end_measure": 41, "energy": 1},
+    {"section_id": "C1", "role": "bridge", "start_measure": 42, "end_measure": 51, "energy": 2},
+    {"section_id": "B3", "role": "chorus", "start_measure": 52, "end_measure": 59, "energy": 3},
+    {"section_id": "B4", "role": "chorus", "start_measure": 60, "end_measure": 67, "energy": 3},
+    {"section_id": "outro", "role": "outro", "start_measure": 68, "end_measure": 76, "energy": 0}
+  ],
+  "xiaobaichuan": [
+    {"section_id": "intro", "role": "intro", "start_measure": 0, "end_measure": 7, "energy": 0},
+    {"section_id": "A1", "role": "verse", "start_measure": 8, "end_measure": 15, "energy": 1},
+    {"section_id": "A2", "role": "verse", "start_measure": 16, "end_measure": 23, "energy": 1},
+    {"section_id": "B1", "role": "chorus", "start_measure": 24, "end_measure": 31, "energy": 2},
+    {"section_id": "B2", "role": "chorus", "start_measure": 32, "end_measure": 39, "energy": 2},
+    {"section_id": "A3", "role": "verse", "start_measure": 40, "end_measure": 47, "energy": 1},
+    {"section_id": "A4", "role": "verse", "start_measure": 48, "end_measure": 55, "energy": 1},
+    {"section_id": "B3", "role": "chorus", "start_measure": 56, "end_measure": 63, "energy": 2},
+    {"section_id": "B4", "role": "chorus", "start_measure": 64, "end_measure": 71, "energy": 2}
+  ],
+  "qianlizhiwai": [
+    {"section_id": "intro", "role": "intro", "start_measure": 0, "end_measure": 7, "energy": 0},
+    {"section_id": "A1", "role": "verse", "start_measure": 8, "end_measure": 19, "energy": 1},
+    {"section_id": "prechorus1", "role": "prechorus", "start_measure": 20, "end_measure": 31, "energy": 2},
+    {"section_id": "B1", "role": "chorus", "start_measure": 32, "end_measure": 39, "energy": 2}
+  ],
+  "tinghai": [
+    {"section_id": "intro", "role": "intro", "start_measure": 0, "end_measure": 7, "energy": 0},
+    {"section_id": "A1", "role": "verse", "start_measure": 8, "end_measure": 19, "energy": 1},
+    {"section_id": "A2", "role": "verse", "start_measure": 20, "end_measure": 31, "energy": 1},
+    {"section_id": "B1", "role": "chorus", "start_measure": 32, "end_measure": 47, "energy": 2},
+    {"section_id": "B2", "role": "chorus", "start_measure": 48, "end_measure": 63, "energy": 2},
+    {"section_id": "interlude1", "role": "interlude", "start_measure": 64, "end_measure": 67, "energy": 1}
+  ],
+  "diandao": [
+    {"section_id": "intro", "role": "intro", "start_measure": 0, "end_measure": 7, "energy": 0},
+    {"section_id": "A1", "role": "verse", "start_measure": 8, "end_measure": 23, "energy": 1},
+    {"section_id": "prechorus1", "role": "prechorus", "start_measure": 24, "end_measure": 35, "energy": 2},
+    {"section_id": "B1", "role": "chorus", "start_measure": 36, "end_measure": 47, "energy": 2},
+    {"section_id": "interlude1", "role": "interlude", "start_measure": 48, "end_measure": 59, "energy": 1},
+    {"section_id": "outro", "role": "outro", "start_measure": 60, "end_measure": 67, "energy": 0}
+  ],
+  "yujian": [
+    {"section_id": "intro", "role": "intro", "start_measure": 0, "end_measure": 7, "energy": 0},
+    {"section_id": "A1", "role": "verse", "start_measure": 8, "end_measure": 15, "energy": 1},
+    {"section_id": "interlude1", "role": "interlude", "start_measure": 16, "end_measure": 19, "energy": 1},
+    {"section_id": "A2", "role": "verse", "start_measure": 20, "end_measure": 27, "energy": 1},
+    {"section_id": "B1", "role": "chorus", "start_measure": 28, "end_measure": 35, "energy": 2},
+    {"section_id": "interlude2", "role": "interlude", "start_measure": 36, "end_measure": 43, "energy": 1}
+  ]
+}

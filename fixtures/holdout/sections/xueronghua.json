@@ -1,0 +1,82 @@
+{
+  "slug": "xueronghua",
+  "title": "雪绒花",
+  "sections": [
+    {
+      "section_id": "intro",
+      "role": "intro",
+      "start_measure": 0,
+      "end_measure": 7,
+      "energy": 0,
+      "evidence": "Page 1 Systems 0-1 (mm 0-7). Printed margin label '前奏'. 8-bar instrumental intro in 3/4 waltz time."
+    },
+    {
+      "section_id": "A1",
+      "role": "verse",
+      "start_measure": 8,
+      "end_measure": 15,
+      "energy": 1,
+      "evidence": "Page 1 Systems 2-3 (mm 8-15). Printed margin label '主歌1'. Verse 1: '雪绒花 雪绒花 清晨迎着我开放'. 8 bars."
+    },
+    {
+      "section_id": "A2",
+      "role": "verse",
+      "start_measure": 16,
+      "end_measure": 23,
+      "energy": 1,
+      "evidence": "Page 1 Systems 4-5 (mm 16-23). Printed margin label '主歌2'. Verse 2: '小而白 洁而亮 向我快乐地摇晃'. 8 bars."
+    },
+    {
+      "section_id": "B1",
+      "role": "chorus",
+      "start_measure": 24,
+      "end_measure": 31,
+      "energy": 2,
+      "evidence": "Page 1 Systems 6-7 (mm 24-31). Printed margin label '副歌'. Chorus: '白雪般的花儿 愿你芬芳 永远开花生长'. 8 bars."
+    },
+    {
+      "section_id": "A3",
+      "role": "verse",
+      "start_measure": 32,
+      "end_measure": 39,
+      "energy": 1,
+      "evidence": "Page 1 Systems 8-9 (mm 32-39). Printed margin label '主歌3'. Verse 3: '雪绒花 雪绒花 永远祝福我家乡'. 8 bars."
+    },
+    {
+      "section_id": "p2_A1",
+      "role": "verse",
+      "start_measure": 40,
+      "end_measure": 47,
+      "energy": 1,
+      "evidence": "Page 2 Systems 10-11 (mm 40-47). Printed margin label '主歌1' on chord-only 弹唱版. 8 bars."
+    },
+    {
+      "section_id": "p2_A2",
+      "role": "verse",
+      "start_measure": 48,
+      "end_measure": 55,
+      "energy": 1,
+      "evidence": "Page 2 Systems 12-13 (mm 48-55). Printed margin label '主歌2' on chord-only 弹唱版. 8 bars."
+    },
+    {
+      "section_id": "p2_B1",
+      "role": "chorus",
+      "start_measure": 56,
+      "end_measure": 63,
+      "energy": 2,
+      "evidence": "Page 2 Systems 14-15 (mm 56-63). Printed margin label '副歌' on chord-only 弹唱版. 8 bars."
+    },
+    {
+      "section_id": "p2_A3",
+      "role": "verse",
+      "start_measure": 64,
+      "end_measure": 71,
+      "energy": 1,
+      "evidence": "Page 2 Systems 16-17 (mm 64-71). Printed margin label '主歌3' on chord-only 弹唱版. 8 bars."
+    }
+  ],
+  "uncertain": [
+    "Page 2 is a separate 弹唱版 (chord-only arrangement) of the same song appended as page 2. Annotations include both pages mapped to global measure indices 0-71."
+  ],
+  "notes": "Page 1 (mm 0-39) is 专业版; Page 2 (mm 40-71) is 弹唱版. All section labels are explicitly printed in the score margins."
+}

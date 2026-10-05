@@ -1069,7 +1069,7 @@ def read_sheet(
     warnings_list = list(warnings)
     warnings_list.append("[v2_geometry] Classical CV layout authoritative boundaries")
 
-    return ParsedSheet(
+    sheet = ParsedSheet(
         header=header,
         pages=pages_info,
         systems=all_systems,
@@ -1079,3 +1079,5 @@ def read_sheet(
         layout_confidence=min_confidence,
         layout_source="cv",
     )
+    from app.omr.beats import quantize_chord_beats
+    return quantize_chord_beats(sheet)

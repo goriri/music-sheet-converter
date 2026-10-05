@@ -1,0 +1,48 @@
+{
+  "slug": "kexibushini_lowres",
+  "title": "可惜不是你",
+  "sections": [
+    {
+      "section_id": "intro",
+      "role": "intro",
+      "start_measure": 0,
+      "end_measure": 9,
+      "energy": 0,
+      "evidence": "Systems 0-1 (mm 0-9). Label 'Only PN(arp)Strings in', flute solo. 10-bar instrumental intro ending with vocal pickup '这' on beat 4 of m9."
+    },
+    {
+      "section_id": "A1",
+      "role": "verse",
+      "start_measure": 10,
+      "end_measure": 17,
+      "energy": 1,
+      "evidence": "Systems 2-3 (mm 10-17). Label 'Only PN(arp)'. Verse 1: '这一刻突然觉得好熟悉...不就是我们爱过的证据'. 8 bars."
+    },
+    {
+      "section_id": "A2",
+      "role": "verse",
+      "start_measure": 18,
+      "end_measure": 25,
+      "energy": 1,
+      "evidence": "Systems 4-5 (mm 18-25). Verse 2: '差一点骗了自己骗了你...但我无法完全交出自己'. 8 bars."
+    },
+    {
+      "section_id": "P1",
+      "role": "prechorus",
+      "start_measure": 26,
+      "end_measure": 33,
+      "energy": 2,
+      "evidence": "Systems 6-7 (mm 26-33). Prechorus: '努力为你改变 却改变不了预留的伏线...但闭上双眼 我还看得见'. Ascending melody and harmonic tension towards chorus. 8 bars."
+    },
+    {
+      "section_id": "B1",
+      "role": "chorus",
+      "start_measure": 34,
+      "end_measure": 41,
+      "energy": 3,
+      "evidence": "Systems 8-9 (mm 34-41). Label 'Only PN(arp)Strings in'. Main chorus hook: '可惜不是你 陪我到最后...感谢那是你 牵过我的手'. 8 bars."
+    }
+  ],
+  "uncertain": [],
+  "notes": "10 systems match printed sheet exactly (total 42 measures, indices 0-41). start_measure and end_measure are 0-based and inclusive."
+}

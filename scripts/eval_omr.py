@@ -85,6 +85,7 @@ def evaluate_song(
     total_lcs_matched_chords = 0
     beat_eligible_chords = 0
     beat_matched_chords = 0
+    beat_matched_strict_chords = 0
 
     # Build index of candidate measures by (page_1based, row_in_page_1based)
     cand_by_page_row: dict[tuple[int, int], list[Any]] = {}
@@ -141,11 +142,13 @@ def evaluate_song(
                 if norm_gt in cand_raws:
                     exact_matched_chords += 1
                     beat_eligible_chords += 1
-                    # Check beat match (±0.5)
+                    # Check beat match (±0.5 lenient, and exact strict)
                     cand_match_idx = cand_raws.index(norm_gt)
                     cand_beat = norm_cand_m[cand_match_idx][1]
                     if abs(cand_beat - gt_beat) <= 0.5:
                         beat_matched_chords += 1
+                    if abs(cand_beat - gt_beat) < 1e-4:
+                        beat_matched_strict_chords += 1
                     # Remove matched candidate to prevent double counting
                     cand_raws.pop(cand_match_idx)
                     norm_cand_m.pop(cand_match_idx)
@@ -165,6 +168,7 @@ def evaluate_song(
     total_extras = max(0, total_cand_chords - exact_matched_chords)
     chord_seq_acc = total_lcs_matched_chords / total_gt_chords if total_gt_chords > 0 else 1.0
     beat_acc = beat_matched_chords / beat_eligible_chords if beat_eligible_chords > 0 else 1.0
+    beat_strict_acc = beat_matched_strict_chords / beat_eligible_chords if beat_eligible_chords > 0 else 1.0
 
     # 3. Key change accuracy
     gt_key_changes = gt_data.get("key_changes", [])
@@ -255,6 +259,11 @@ def evaluate_song(
             "matched": beat_matched_chords,
             "eligible": beat_eligible_chords,
             "acc": round(beat_acc, 3),
+        },
+        "beat_strict": {
+            "matched": beat_matched_strict_chords,
+            "eligible": beat_eligible_chords,
+            "acc": round(beat_strict_acc, 3),
         },
         "key_change": {
             "gt_count": len(gt_kc_global),
@@ -380,15 +389,20 @@ def run_evaluation(
                 max(1, sum(r["beat"]["eligible"] for r in results.values())),
                 3
             ),
+            "beat_strict_acc": round(
+                sum(r["beat_strict"]["matched"] for r in results.values()) /
+                max(1, sum(r["beat_strict"]["eligible"] for r in results.values())),
+                3
+            ),
             "key_change_acc": round(sum(r["key_change"]["acc"] for r in results.values()) / len(results), 3),
         }
     else:
         overall = {}
 
     # Print Table
-    sep_len = 114
+    sep_len = 127
     print("\n" + "=" * sep_len)
-    print(f"{'Slug':<15} | {'Rows':<8} | {'M/Row Acc':<10} | {'M/Strict':<10} | {'Chord(Row,M)':<13} | {'Chord Prec':<14} | {'Chord(Seq)':<11} | {'Beat Acc':<9} | {'KeyChg Acc':<10}")
+    print(f"{'Slug':<15} | {'Rows':<8} | {'M/Row Acc':<10} | {'M/Strict':<10} | {'Chord(Row,M)':<13} | {'Chord Prec':<14} | {'Chord(Seq)':<11} | {'Beat Strict':<11} | {'Beat(±0.5)':<10} | {'KeyChg Acc':<10}")
     print("-" * sep_len)
     for s_slug, res in results.items():
         r_str = f"{res['row_count']['candidate']}/{res['row_count']['gt']}"
@@ -397,9 +411,10 @@ def run_evaluation(
         c_acc = f"{res['chord_exact']['acc']*100:.1f}%"
         cp_acc = f"{res['chord_precision']['acc']*100:.1f}% (+{res['chord_precision']['extras']})"
         s_acc = f"{res['chord_seq']['acc']*100:.1f}%"
+        bs_acc = f"{res['beat_strict']['acc']*100:.1f}%"
         b_acc = f"{res['beat']['acc']*100:.1f}%"
         kc_acc = f"{res['key_change']['acc']*100:.1f}%"
-        print(f"{s_slug:<15} | {r_str:<8} | {m_acc:<10} | {ms_acc:<10} | {c_acc:<13} | {cp_acc:<14} | {s_acc:<11} | {b_acc:<9} | {kc_acc:<10}")
+        print(f"{s_slug:<15} | {r_str:<8} | {m_acc:<10} | {ms_acc:<10} | {c_acc:<13} | {cp_acc:<14} | {s_acc:<11} | {bs_acc:<11} | {b_acc:<10} | {kc_acc:<10}")
     print("-" * sep_len)
     if overall:
         m_acc = f"{overall['meas_per_row_acc']*100:.1f}%"
@@ -407,9 +422,10 @@ def run_evaluation(
         c_acc = f"{overall['chord_exact_acc']*100:.1f}%"
         cp_acc = f"{overall['chord_precision_acc']*100:.1f}% (+{overall['total_extras']})"
         s_acc = f"{overall['chord_seq_acc']*100:.1f}%"
+        bs_acc = f"{overall['beat_strict_acc']*100:.1f}%"
         b_acc = f"{overall['beat_acc']*100:.1f}%"
         kc_acc = f"{overall['key_change_acc']*100:.1f}%"
-        print(f"{'OVERALL':<15} | {'-':<8} | {m_acc:<10} | {ms_acc:<10} | {c_acc:<13} | {cp_acc:<14} | {s_acc:<11} | {b_acc:<9} | {kc_acc:<10}")
+        print(f"{'OVERALL':<15} | {'-':<8} | {m_acc:<10} | {ms_acc:<10} | {c_acc:<13} | {cp_acc:<14} | {s_acc:<11} | {bs_acc:<11} | {b_acc:<10} | {kc_acc:<10}")
     print("=" * sep_len + "\n")
 
     eval_output = {"overall": overall, "songs": results}

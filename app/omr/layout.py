@@ -386,8 +386,12 @@ def detect_chord_boxes(
         m_obj = measures[target_m_idx]
         m_width = max(1e-4, m_obj.x1 - m_obj.x0)
         frac = max(0.0, min(0.99, (anchor_norm - m_obj.x0) / m_width))
-        raw_beat = 1.0 + frac * 4.0
-        beat_geo = float(max(1.0, min(4.0, round(raw_beat * 2.0) / 2.0)))
+        raw_beat = 1.0 + max(0.0, frac * 4.0 - 0.45)
+        nearest_whole = round(raw_beat)
+        if abs(raw_beat - nearest_whole) <= 0.30:
+            beat_geo = float(max(1.0, min(4.0, float(nearest_whole))))
+        else:
+            beat_geo = float(max(1.0, min(4.0, round(raw_beat * 2.0) / 2.0)))
 
         bbox_norm: BBox = (
             round(bx / float(img_w), 4),
@@ -581,7 +585,12 @@ def extract_chord_only_boxes(
         m_obj = measures[target_m_idx]
         m_w = max(1e-4, m_obj.x1 - m_obj.x0)
         frac = max(0.0, min(0.99, (anchor_norm - m_obj.x0) / m_w))
-        beat_geo = float(max(1, min(4, int(frac * 4) + 1)))
+        raw_beat = 1.0 + max(0.0, frac * 4.0 - 0.45)
+        nearest_whole = round(raw_beat)
+        if abs(raw_beat - nearest_whole) <= 0.30:
+            beat_geo = float(max(1.0, min(4.0, float(nearest_whole))))
+        else:
+            beat_geo = float(max(1.0, min(4.0, round(raw_beat * 2.0) / 2.0)))
 
         bbox_norm: BBox = (
             round(bx0 / float(img_w), 4),

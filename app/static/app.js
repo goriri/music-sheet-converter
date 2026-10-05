@@ -1850,6 +1850,22 @@ document.addEventListener("DOMContentLoaded", () => {
     reSelectKey.value = key;
     reSelectDifficulty.value = diff;
 
+    const renderCapoBadge = document.getElementById("render-capo-badge");
+    if (renderCapoBadge) {
+      if (selectInstrument.value === "ukulele" || (result.capo !== undefined && result.capo !== null)) {
+        const capo = result.capo || 0;
+        const shapeKey = result.shape_key || key;
+        if (capo > 0) {
+          renderCapoBadge.textContent = `🎸 变调夹 ${capo} 品 · 按 ${shapeKey} 调指法（实际 ${key} 调）`;
+        } else {
+          renderCapoBadge.textContent = `🎸 按 ${shapeKey} 调指法（无变调夹）`;
+        }
+        renderCapoBadge.classList.remove("hidden");
+      } else {
+        renderCapoBadge.classList.add("hidden");
+      }
+    }
+
     renderPreviews.innerHTML = "";
     (result.preview_urls || []).forEach((url, idx) => {
       const card = document.createElement("div");

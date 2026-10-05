@@ -396,7 +396,7 @@ def confirm_sheet_issue(sheet_id: str, request: ConfirmRequest):
 @app.post("/api/sheets/{sheet_id}/render")
 def render_sheet(sheet_id: str, request: RenderRequest):
     """Render accompaniment PDF and preview images."""
-    if request.instrument != "piano":
+    if request.instrument not in ("piano", "ukulele"):
         raise HTTPException(status_code=400, detail="暂未支持")
 
     storage = get_storage()

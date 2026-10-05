@@ -8,3 +8,4 @@ fixtures/holdout/*/
 # third-party chart images: local only
 Weixin Image*
 fixtures/pages/*.jpg
+!fixtures/holdout/sections/
