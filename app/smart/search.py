@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections import Counter
 import concurrent.futures
 from dataclasses import dataclass
+import hashlib
 from html import unescape
 from html.parser import HTMLParser
 import json
@@ -173,6 +174,78 @@ def save_cached_search(res: SearchResult) -> None:
         local_path.write_text(res.model_dump_json(indent=2), encoding="utf-8")
     except Exception as exc:
         logger.warning("Failed saving local search cache for %s: %s", res.title, exc)
+
+
+_URL_CHART_CACHE: dict[str, SourceChart] = {}
+
+
+def get_url_cache_path(url: str) -> Path:
+    """Return local cache path for extracted SourceChart JSON."""
+    base_dir = Path("out/smart_search_cache/urls")
+    url_hash = hashlib.sha256(url.strip().encode("utf-8")).hexdigest()[:20]
+    return base_dir / f"{url_hash}.json"
+
+
+def load_cached_url_chart(url: str) -> Optional[SourceChart]:
+    """Load cached SourceChart for a URL if available (structured fields only, zero text/lyrics)."""
+    if not url:
+        return None
+    u = url.strip()
+    if u in _URL_CHART_CACHE:
+        return _URL_CHART_CACHE[u]
+
+    url_hash = hashlib.sha256(u.encode("utf-8")).hexdigest()[:20]
+    if os.environ.get("BUCKET"):
+        try:
+            from app.storage import get_storage
+
+            storage = get_storage()
+            storage_path = f"cache/smart_search/urls/{url_hash}.json"
+            if storage.exists(storage_path):
+                data = storage.get_json(storage_path)
+                chart = SourceChart.model_validate(data)
+                _URL_CHART_CACHE[u] = chart
+                return chart
+        except Exception as exc:
+            logger.debug("Failed reading URL cache from storage for %s: %s", u, exc)
+
+    local_path = get_url_cache_path(u)
+    if local_path.is_file():
+        try:
+            data = local_path.read_text(encoding="utf-8")
+            chart = SourceChart.model_validate_json(data)
+            _URL_CHART_CACHE[u] = chart
+            return chart
+        except Exception as exc:
+            logger.debug("Failed reading local URL cache %s: %s", local_path, exc)
+
+    return None
+
+
+def save_cached_url_chart(url: str, chart: SourceChart) -> None:
+    """Save extracted SourceChart to URL cache (structured fields only, zero text/lyrics)."""
+    if not url or not chart:
+        return
+    u = url.strip()
+    _URL_CHART_CACHE[u] = chart
+
+    url_hash = hashlib.sha256(u.encode("utf-8")).hexdigest()[:20]
+    if os.environ.get("BUCKET"):
+        try:
+            from app.storage import get_storage
+
+            storage = get_storage()
+            storage_path = f"cache/smart_search/urls/{url_hash}.json"
+            storage.put_json(storage_path, chart.model_dump())
+        except Exception as exc:
+            logger.debug("Failed saving URL cache to storage for %s: %s", u, exc)
+
+    local_path = get_url_cache_path(u)
+    try:
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_text(chart.model_dump_json(indent=2), encoding="utf-8")
+    except Exception as exc:
+        logger.debug("Failed saving local URL cache for %s: %s", u, exc)
 
 
 # --------------------------------------------------------------------------- Theory & Normalization
@@ -355,6 +428,154 @@ class HTMLToText(HTMLParser):
         return "\n".join(non_empty)
 
 
+def extract_markers_from_text(text: str) -> dict[str, Any]:
+    """Scan raw page text for capo and key markers before discarding text.
+
+    Returns:
+        {
+            "capo_fret": Optional[int],
+            "shapes_key": Optional[str],
+            "stated_original_key": Optional[str],
+        }
+    """
+    res: dict[str, Any] = {
+        "capo_fret": None,
+        "shapes_key": None,
+        "stated_original_key": None,
+    }
+    if not text or not isinstance(text, str):
+        return res
+
+    # 1. Capo markers
+    m_capo_zero = re.search(
+        r"(?:变调夹\s*[:：]?\s*(?:不夹|无|0|none)|capo\s*[:：]?\s*(?:none|no|0|off)|\(no capo\))",
+        text,
+        re.IGNORECASE,
+    )
+    if m_capo_zero:
+        res["capo_fret"] = 0
+    else:
+        m_capo = re.search(
+            r"(?:变调夹\s*[:：]?\s*([0-9]{1,2})\s*品?|夹\s*([0-9]{1,2})\s*品|capo\s*(?:fret\s*)?[:：]?\s*([0-9]{1,2}))",
+            text,
+            re.IGNORECASE,
+        )
+        if m_capo:
+            for g in m_capo.groups():
+                if g is not None:
+                    res["capo_fret"] = int(g)
+                    break
+
+    # 2. Stated Original Key (原调 / Key: / 1=)
+    m_orig = re.search(
+        r"(?:原调\s*[:：]?\s*([A-Ga-g][b#♭♯]?(?:m)?)|(?:original\s+)?key\s*[:：]\s*([A-Ga-g][b#♭♯]?(?:m)?)|1\s*=\s*([A-Ga-g][b#♭♯]?))",
+        text,
+        re.IGNORECASE,
+    )
+    if m_orig:
+        for g in m_orig.groups():
+            if g is not None:
+                res["stated_original_key"] = g.strip()
+                break
+
+    # 3. Shapes Key (选调 / Play:)
+    m_shapes = re.search(
+        r"(?:选调\s*[:：]?\s*([A-Ga-g][b#♭♯]?(?:m)?)|play(?:ed)?\s*(?:key)?\s*[:：]\s*([A-Ga-g][b#♭♯]?(?:m)?))",
+        text,
+        re.IGNORECASE,
+    )
+    if m_shapes:
+        for g in m_shapes.groups():
+            if g is not None:
+                res["shapes_key"] = g.strip()
+                break
+
+    return res
+
+
+def compute_sounding_and_played_keys(
+    capo_fret: int = 0,
+    shapes_key: Optional[str] = None,
+    stated_original_key: Optional[str] = None,
+    raw_sections: Optional[list[Any]] = None,
+    default_key_hint: Optional[str] = None,
+) -> tuple[str, str, int, list[str]]:
+    """Compute sounding key, played key, capo fret, and any warning notes.
+
+    Rule:
+    - Never ask the model for 'sounding key' directly.
+    - Compute sounding = shapes_key + capo in code.
+    - When stated_original_key is present and consistent with shapes+capo
+      (or with shapes alone when capo == 0) prefer it.
+    - If inconsistent, record a warning and prefer shapes+capo.
+    """
+    capo = max(0, int(capo_fret or 0))
+
+    shapes_pc: Optional[int] = None
+    if shapes_key:
+        try:
+            shapes_pc = key_name_to_pc(normalize_key_string(str(shapes_key)))
+        except Exception:
+            pass
+
+    stated_pc: Optional[int] = None
+    if stated_original_key:
+        try:
+            stated_pc = key_name_to_pc(normalize_key_string(str(stated_original_key)))
+        except Exception:
+            pass
+
+    # Infer shapes_pc if missing
+    if shapes_pc is None:
+        roots = infer_letter_chord_roots(raw_sections or [])
+        if roots:
+            diatonic_set = {0, 2, 4, 5, 7, 9, 10, 11}
+            best_pc = roots[0]
+            best_score = -1.0
+            for t in range(12):
+                matches = sum(1 for r in roots if ((r - t) % 12) in diatonic_set)
+                bonus = 0.5 if ((roots[0] - t) % 12) == 0 else 0.0
+                if matches + bonus > best_score:
+                    best_score = matches + bonus
+                    best_pc = t
+            shapes_pc = best_pc
+        elif stated_pc is not None and capo == 0:
+            shapes_pc = stated_pc
+        elif default_key_hint:
+            try:
+                shapes_pc = key_name_to_pc(normalize_key_string(default_key_hint))
+            except Exception:
+                shapes_pc = 0
+        else:
+            shapes_pc = 0
+
+    played_key = PC_TO_DEFAULT_KEY_NAME[shapes_pc]
+    computed_sounding_pc = (shapes_pc + capo) % 12
+    computed_sounding_key = PC_TO_DEFAULT_KEY_NAME[computed_sounding_pc]
+
+    warnings: list[str] = []
+    if stated_pc is not None:
+        stated_canon = PC_TO_DEFAULT_KEY_NAME[stated_pc]
+        is_consistent_with_shapes_capo = (stated_pc == computed_sounding_pc)
+        is_consistent_with_shapes_alone = (capo == 0 and stated_pc == shapes_pc)
+
+        if is_consistent_with_shapes_capo or is_consistent_with_shapes_alone:
+            sounding_key = stated_canon
+        else:
+            msg = (
+                f"Stated original key '{stated_original_key}' ({stated_canon}) is inconsistent "
+                f"with shapes key '{played_key}' + capo {capo} (computed {computed_sounding_key}); "
+                f"preferring shapes+capo."
+            )
+            logger.warning(msg)
+            warnings.append(msg)
+            sounding_key = computed_sounding_key
+    else:
+        sounding_key = computed_sounding_key
+
+    return (sounding_key, played_key, capo, warnings)
+
+
 def normalize_source_chart(
     raw_data: dict[str, Any],
     default_key_hint: Optional[str] = None,
@@ -376,36 +597,17 @@ def normalize_source_chart(
         return None
     title = str(raw_data.get("title", "")).strip() or get_registered_domain(url)
 
-    # 1. Parse Capo
-    capo_val = 0
+    # 1. Parse Capo, Shapes Key, Stated Key
+    capo_raw = raw_data.get("capo_fret")
+    if capo_raw is None:
+        capo_raw = raw_data.get("capo", 0)
     try:
-        capo_val = int(raw_data.get("capo", 0) or 0)
+        capo_val = int(capo_raw or 0)
     except Exception:
-        pass
+        capo_val = 0
 
-    # 2. Parse Played Key & Sounding Key
-    played_key_raw = raw_data.get("played_key")
-    key_raw = raw_data.get("key")
-
-    played_key_norm: Optional[str] = None
-    played_pc: Optional[int] = None
-    if played_key_raw:
-        try:
-            k_clean = normalize_key_string(str(played_key_raw))
-            played_pc = key_name_to_pc(k_clean)
-            played_key_norm = PC_TO_DEFAULT_KEY_NAME[played_pc]
-        except Exception:
-            pass
-
-    key_norm: Optional[str] = None
-    key_pc: Optional[int] = None
-    if key_raw:
-        try:
-            k_clean = normalize_key_string(str(key_raw))
-            key_pc = key_name_to_pc(k_clean)
-            key_norm = PC_TO_DEFAULT_KEY_NAME[key_pc]
-        except Exception:
-            pass
+    shapes_key_raw = raw_data.get("shapes_key") or raw_data.get("played_key")
+    stated_key_raw = raw_data.get("stated_original_key") or raw_data.get("key")
 
     raw_sections = raw_data.get("sections", [])
     if not isinstance(raw_sections, list) or not raw_sections:
@@ -427,60 +629,21 @@ def normalize_source_chart(
     is_number = sum(1 for t in all_tokens if re.match(r"^[b#]?[1-7]", t)) > len(all_tokens) / 2
     raw_notation: Literal["letter", "number"] = "number" if is_number else "letter"
 
-    # Determine printed tonic PC and sounding key
+    sounding_key, played_key, capo_val, _key_warnings = compute_sounding_and_played_keys(
+        capo_fret=capo_val,
+        shapes_key=shapes_key_raw,
+        stated_original_key=stated_key_raw,
+        raw_sections=raw_sections,
+        default_key_hint=default_key_hint,
+    )
+
     if raw_notation == "number":
         printed_pc = 0
-        sounding_key = PC_TO_DEFAULT_KEY_NAME[key_pc] if key_pc is not None else (default_key_hint or "C")
-    elif key_pc is not None and played_pc is not None and capo_val > 0:
-        if (played_pc + capo_val) % 12 == key_pc:
-            sounding_key = PC_TO_DEFAULT_KEY_NAME[key_pc]
-            printed_pc = played_pc
-        elif (key_pc + capo_val) % 12 == played_pc:
-            sounding_key = PC_TO_DEFAULT_KEY_NAME[played_pc]
-            printed_pc = key_pc
-        else:
-            sounding_key = PC_TO_DEFAULT_KEY_NAME[key_pc]
-            printed_pc = played_pc
-    elif played_pc is not None and capo_val > 0:
-        sounding_key = PC_TO_DEFAULT_KEY_NAME[(played_pc + capo_val) % 12]
-        printed_pc = played_pc
-    elif key_pc is not None and capo_val > 0:
-        roots = infer_letter_chord_roots(raw_sections)
-        if roots and sum(1 for r in roots if ((r - key_pc) % 12) in {0, 2, 4, 5, 7, 9, 11}) >= len(roots) * 0.6:
-            sounding_key = PC_TO_DEFAULT_KEY_NAME[(key_pc + capo_val) % 12]
-            printed_pc = key_pc
-        else:
-            sounding_key = PC_TO_DEFAULT_KEY_NAME[key_pc]
-            printed_pc = (key_pc - capo_val) % 12
-    elif key_pc is not None:
-        sounding_key = PC_TO_DEFAULT_KEY_NAME[key_pc]
-        printed_pc = played_pc if played_pc is not None else key_pc
-    elif played_pc is not None:
-        sounding_key = PC_TO_DEFAULT_KEY_NAME[played_pc]
-        printed_pc = played_pc
     else:
-        # Detect printed tonic from chord roots
-        roots = infer_letter_chord_roots(raw_sections)
-        if roots:
-            diatonic_set = {0, 2, 4, 5, 7, 9, 10, 11}
-            best_pc = roots[0]
-            best_score = -1.0
-            for t in range(12):
-                matches = sum(1 for r in roots if ((r - t) % 12) in diatonic_set)
-                bonus = 0.5 if ((roots[0] - t) % 12) == 0 else 0.0
-                score = matches + bonus
-                if score > best_score:
-                    best_score = score
-                    best_pc = t
-            printed_pc = best_pc
-        elif default_key_hint:
-            try:
-                printed_pc = key_name_to_pc(default_key_hint)
-            except Exception:
-                printed_pc = 0
-        else:
+        try:
+            printed_pc = key_name_to_pc(played_key)
+        except Exception:
             printed_pc = 0
-        sounding_key = PC_TO_DEFAULT_KEY_NAME[(printed_pc + capo_val) % 12]
 
     # 3. Convert all bars into number notation
     clean_sections: list[SourceSection] = []
@@ -534,7 +697,7 @@ def normalize_source_chart(
         title=title,
         key=sounding_key,
         capo=capo_val,
-        played_key=PC_TO_DEFAULT_KEY_NAME[printed_pc] if printed_pc is not None else played_key_norm,
+        played_key=played_key,
         sections=clean_sections,
         raw_notation=raw_notation,
     )
@@ -827,9 +990,9 @@ class _ExtractedChart(BaseModel):
     has_chart: bool = Field(default=False, description="True ONLY if actual chord progressions exist")
     title_matches: bool = Field(default=False, description="True ONLY if matches requested song title/artist")
     title: str = Field(default="", description="Website name or source title")
-    key: Optional[str] = Field(default=None, description="Original sounding key (原调), e.g. 'D', 'Bb', 'A'")
-    played_key: Optional[str] = Field(default=None, description="Guitar fingering key (选调), e.g. 'C', 'G'")
-    capo: int = Field(default=0, description="Capo fret number")
+    capo_fret: int = Field(default=0, description="Capo fret number (0 if none or not mentioned, look for 'Capo', '变调夹', 'X品', '夹X')")
+    shapes_key: Optional[str] = Field(default=None, description="Key of the chord shapes as written/fingered on the page (选调, e.g. 'C', 'G', 'D')")
+    stated_original_key: Optional[str] = Field(default=None, description="Explicitly stated original song key if present ('原调', 'Key:', '1='), e.g. 'D', 'Bb', 'A'")
     raw_notation: Literal["letter", "number"] = "letter"
     sections: list[_ExtractedSection] = Field(default_factory=list)
 
@@ -882,6 +1045,35 @@ def _fetch_page_content_in_memory(
             timeout=5.0,
         )
         if r.status_code == 200:
+            if "tabs.ultimate-guitar.com" in url or "data-content=" in r.text:
+                ug_m = re.search(r'data-content=["\'](.*?)["\']', r.text)
+                if ug_m:
+                    try:
+                        import html as py_html
+
+                        ug_data = json.loads(py_html.unescape(ug_m.group(1)))
+                        tab_view = ug_data.get("store", {}).get("page", {}).get("data", {}).get("tab_view", {})
+                        meta = tab_view.get("meta", {})
+                        capo = meta.get("capo", 0)
+                        tuning = meta.get("tuning", {}).get("name", "")
+                        tab = tab_view.get("tab", {})
+                        tonality = tab.get("tonality_name") or ""
+                        wiki = tab_view.get("wiki_tab", {})
+                        content = wiki.get("content", "")
+                        if content:
+                            clean_chords = re.sub(r"\[/?(ch|tab)\]", "", content)
+                            lines = [
+                                f"Key: {tonality}" if tonality else "",
+                                f"Capo: {capo}",
+                                f"Tuning: {tuning}" if tuning else "",
+                                clean_chords,
+                            ]
+                            ug_text = "\n".join(l for l in lines if l)
+                            if len(ug_text) >= 100:
+                                return ug_text[:12000]
+                    except Exception as ug_exc:
+                        logger.debug("UG json parse failed for %s: %s", url, ug_exc)
+
             parser = HTMLToText()
             parser.feed(r.text)
             page_text = parser.get_text()
@@ -935,12 +1127,17 @@ def _extract_chart_from_content(
     """Extract structured SourceChart from text content using Gemini with response_schema."""
     from google.genai import types
 
+    # 1. Run cheap regex pass over the page text for capo/原调/选调 markers before discarding
+    markers = extract_markers_from_text(content)
+
     extract_prompt = (
         f"From the chord content below for '{title}' by '{artist}', extract the structured chord chart.\n"
         f"CRITICAL RULES:\n"
         f"- 'has_chart': set to true ONLY if there are explicit chord progressions for this song. If only lyrics, empty text, or chord diagrams without song progression, set to false.\n"
         f"- 'title_matches': set to true ONLY if this content is for '{title}' by '{artist}'. If another song or unrelated page, set to false.\n"
-        f"- 'key': song's original sounding key (原调). 'played_key': guitar fingering key (选调). 'capo': capo fret number (0 if none).\n"
+        f"- 'capo_fret': capo fret number as integer (0 if none or not mentioned, look for 'Capo', '变调夹', 'X品', '夹X').\n"
+        f"- 'shapes_key': key of the chord shapes as written/fingered on the page (选调, e.g. 'C', 'G', 'D').\n"
+        f"- 'stated_original_key': explicitly stated original song key if present ('原调', 'Key:', '1='), e.g. 'D', 'Bb', 'A'. Do NOT calculate the sounding key yourself.\n"
         f"- Group chords into individual measures (bars). Usually 1-2 chords per bar (e.g. [['C'], ['Em7']] or [['1'], ['5/7']]).\n"
         f"- Extract ALL sections in full song performance order (前奏, 主歌, 预副歌, 副歌, 间奏, 桥段, 尾奏).\n"
         f"- Do NOT invent or label sections with '示例' or 'example'.\n"
@@ -971,6 +1168,14 @@ def _extract_chart_from_content(
         if not chart_dict.get("title"):
             chart_dict["title"] = get_registered_domain(real_url)
 
+        # Apply regex marker overrides / validations
+        if markers.get("capo_fret") is not None:
+            chart_dict["capo_fret"] = markers["capo_fret"]
+        if markers.get("stated_original_key") and not chart_dict.get("stated_original_key"):
+            chart_dict["stated_original_key"] = markers["stated_original_key"]
+        if markers.get("shapes_key") and not chart_dict.get("shapes_key"):
+            chart_dict["shapes_key"] = markers["shapes_key"]
+
         return normalize_source_chart(
             chart_dict,
             default_key_hint=default_key,
@@ -995,12 +1200,22 @@ def _process_candidate_url(
     real_url = resolve_redirect_url(raw_url)
     if not is_valid_source_url(real_url, allow_test_urls=False):
         return None
+
+    # Check per-URL cache first (structured fields only)
+    cached_chart = load_cached_url_chart(real_url)
+    if cached_chart is not None:
+        logger.debug("Loaded cached SourceChart for %s", real_url)
+        return cached_chart
+
     content = _fetch_page_content_in_memory(client, model, real_url, title, artist)
     if not content:
         return None
-    return _extract_chart_from_content(
+    chart = _extract_chart_from_content(
         client, model, content, real_url, title, artist, default_key=default_key
     )
+    if chart is not None:
+        save_cached_url_chart(real_url, chart)
+    return chart
 
 
 def _execute_grounded_search(

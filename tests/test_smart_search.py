@@ -488,3 +488,146 @@ def test_sources_must_have_real_urls_and_no_placeholder_hosts():
     }
     assert normalize_source_chart(real_raw) is not None
 
+
+def test_key_capo_extraction_scenarios():
+    """Verify robust key & capo determination:
+    - 'Capo 2 + C shapes → D'
+    - '原调D 选调C 变调夹2品 → D'
+    - '1=D (no capo) → D'
+    - Inconsistent stated key vs shapes+capo records warning and prefers shapes+capo
+    - Regex marker extraction from raw page text
+    - Per-URL chart caching (structured fields only)
+    """
+    from app.smart.search import (
+        compute_sounding_and_played_keys,
+        extract_markers_from_text,
+        load_cached_url_chart,
+        save_cached_url_chart,
+    )
+
+    # 1. 'Capo 2 + C shapes → D'
+    raw_1 = {
+        "url": "https://tabs.ultimate-guitar.com/tab/1462781",
+        "title": "Mayday - Angel",
+        "capo_fret": 2,
+        "shapes_key": "C",
+        "sections": [
+            {"label": "前奏", "bars": [["C"], ["G"], ["Am"], ["F"]]},
+            {"label": "主歌", "bars": [["C"], ["G"], ["Am"], ["F"]]},
+        ],
+    }
+    src1 = normalize_source_chart(raw_1, allow_test_urls=True)
+    assert src1 is not None
+    assert src1.key == "D"
+    assert src1.played_key == "C"
+    assert src1.capo == 2
+    # C shapes in key C: C -> 1, G -> 5, Am -> 6m, F -> 4
+    assert src1.sections[0].bars == [["1"], ["5"], ["6m"], ["4"]]
+
+    # Direct helper check for Capo 2 + C shapes -> D
+    sounding, played, capo, warnings = compute_sounding_and_played_keys(
+        capo_fret=2, shapes_key="C", stated_original_key=None
+    )
+    assert sounding == "D"
+    assert played == "C"
+    assert capo == 2
+    assert not warnings
+
+    # 2. '原调D 选调C 变调夹2品 → D'
+    raw_2 = {
+        "url": "https://chord4.com/tabs/555",
+        "title": "Song",
+        "stated_original_key": "D",
+        "shapes_key": "C",
+        "capo_fret": 2,
+        "sections": [
+            {"label": "前奏", "bars": [["C"], ["G"], ["Am"], ["F"]]},
+            {"label": "主歌", "bars": [["C"], ["G"], ["Am"], ["F"]]},
+        ],
+    }
+    src2 = normalize_source_chart(raw_2, allow_test_urls=True)
+    assert src2 is not None
+    assert src2.key == "D"
+    assert src2.played_key == "C"
+    assert src2.capo == 2
+    assert src2.sections[0].bars == [["1"], ["5"], ["6m"], ["4"]]
+
+    sounding2, played2, capo2, warnings2 = compute_sounding_and_played_keys(
+        capo_fret=2, shapes_key="C", stated_original_key="D"
+    )
+    assert sounding2 == "D"
+    assert played2 == "C"
+    assert capo2 == 2
+    assert not warnings2
+
+    # 3. '1=D (no capo) → D'
+    raw_3 = {
+        "url": "https://chord4.com/tabs/666",
+        "title": "Song",
+        "stated_original_key": "D",
+        "capo_fret": 0,
+        "sections": [
+            {"label": "前奏", "bars": [["D"], ["A"], ["Bm"], ["G"]]},
+            {"label": "主歌", "bars": [["D"], ["A"], ["Bm"], ["G"]]},
+        ],
+    }
+    src3 = normalize_source_chart(raw_3, allow_test_urls=True)
+    assert src3 is not None
+    assert src3.key == "D"
+    assert src3.played_key == "D"
+    assert src3.capo == 0
+    # D shapes in key D: D -> 1, A -> 5, Bm -> 6m, G -> 4
+    assert src3.sections[0].bars == [["1"], ["5"], ["6m"], ["4"]]
+
+    sounding3, played3, capo3, warnings3 = compute_sounding_and_played_keys(
+        capo_fret=0, shapes_key="D", stated_original_key="D"
+    )
+    assert sounding3 == "D"
+    assert played3 == "D"
+    assert capo3 == 0
+    assert not warnings3
+
+    # 4. Inconsistent stated key: stated F vs shapes C + capo 2 -> warns and prefers shapes+capo (D)
+    sounding4, played4, capo4, warnings4 = compute_sounding_and_played_keys(
+        capo_fret=2, shapes_key="C", stated_original_key="F"
+    )
+    assert sounding4 == "D"
+    assert played4 == "C"
+    assert capo4 == 2
+    assert len(warnings4) == 1
+    assert "inconsistent" in warnings4[0].lower()
+
+    # 5. Regex markers extraction from raw page text
+    m1 = extract_markers_from_text("Capo 2nd fret\nKey: D\nChords: C G Am F")
+    assert m1["capo_fret"] == 2
+    assert m1["stated_original_key"] == "D"
+
+    m2 = extract_markers_from_text("原调D 选调C 变调夹2品")
+    assert m2["capo_fret"] == 2
+    assert m2["shapes_key"] == "C"
+    assert m2["stated_original_key"] == "D"
+
+    m3 = extract_markers_from_text("1=D (no capo)\nIntro: D A Bm G")
+    assert m3["capo_fret"] == 0
+    assert m3["stated_original_key"] == "D"
+
+    m4 = extract_markers_from_text("变调夹: 不夹\n1=G")
+    assert m4["capo_fret"] == 0
+    assert m4["stated_original_key"] == "G"
+
+    # 6. Per-URL caching (structured fields only)
+    test_url = "https://tabs.ultimate-guitar.com/tab/1462781"
+    save_cached_url_chart(test_url, src1)
+    cached = load_cached_url_chart(test_url)
+    assert cached is not None
+    assert cached.url == test_url
+    assert cached.key == "D"
+    assert cached.capo == 2
+    assert cached.played_key == "C"
+    assert len(cached.sections) == 2
+    # Verify no lyrics or raw text in serialized dictionary
+    dumped = cached.model_dump()
+    assert "text" not in dumped
+    assert "lyrics" not in dumped
+
+
