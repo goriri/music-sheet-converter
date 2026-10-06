@@ -1435,3 +1435,178 @@ body {
   }
 }
 
+/* --------------------------------------------------------------------------- Smart Creation (智能创建) */
+.badge-info {
+  background: #e0f2fe;
+  color: #0369a1;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  border: 1px solid #bae6fd;
+}
+
+.smart-intro-box {
+  background: var(--bg-hover, #f8fafc);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: var(--radius-md, 8px);
+  padding: 16px 20px;
+  margin-bottom: 24px;
+}
+
+.smart-intro-desc {
+  font-size: 0.95rem;
+  color: var(--text-main, #1e293b);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.smart-modes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.smart-mode-card {
+  background: #ffffff;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  padding: 12px 14px;
+  transition: all 0.2s ease;
+}
+
+.smart-mode-card.active-card {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  box-shadow: 0 1px 3px rgba(59, 130, 246, 0.1);
+}
+
+.smart-mode-icon {
+  font-size: 1.25rem;
+  margin-bottom: 4px;
+}
+
+.smart-mode-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 4px;
+  color: var(--text-main, #1e293b);
+}
+
+.smart-mode-card.active-card .smart-mode-title {
+  color: #1d4ed8;
+}
+
+.smart-mode-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted, #64748b);
+  line-height: 1.4;
+}
+
+.smart-dropzone {
+  border: 2px dashed var(--border-color, #cbd5e1);
+  border-radius: var(--radius-md, 8px);
+  padding: 32px 20px;
+  text-align: center;
+  background: var(--bg-card, #ffffff);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.smart-dropzone:hover,
+.smart-dropzone.dragover {
+  border-color: var(--primary, #3b82f6);
+  background: #f0f7ff;
+}
+
+.dropzone-filename {
+  margin-top: 8px;
+  font-weight: 600;
+  color: #2563eb;
+  font-size: 0.95rem;
+}
+
+/* Smart Report Card in Step 3 */
+.smart-report-card {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-left: 4px solid #3b82f6;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+}
+
+.smart-report-header {
+  margin-bottom: 8px;
+}
+
+.smart-report-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.smart-report-badge {
+  background: #3b82f6;
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.smart-report-summary {
+  font-weight: 600;
+  font-size: 1rem;
+  color: #1e293b;
+}
+
+.smart-report-ratio {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #1d4ed8;
+}
+
+.smart-report-key-decision {
+  font-size: 0.88rem;
+  color: #475569;
+  margin-bottom: 12px;
+}
+
+.smart-disagree-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  margin-bottom: 12px;
+  font-size: 0.85rem;
+}
+
+.smart-disagree-table th,
+.smart-disagree-table td {
+  border: 1px solid #e2e8f0;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.smart-disagree-table th {
+  background: #f1f5f9;
+  font-weight: 600;
+  color: #475569;
+}
+
+.smart-disagree-table tr:nth-child(even) {
+  background: #ffffff;
+}
+
+.smart-report-sources {
+  font-size: 0.82rem;
+  color: #64748b;
+  margin-top: 10px;
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 8px;
+}
+
+.sources-list a {
+  color: #2563eb;
+  text-decoration: underline;
+  margin-right: 12px;
+}
+

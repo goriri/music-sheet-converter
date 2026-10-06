@@ -118,27 +118,158 @@ document.addEventListener("DOMContentLoaded", () => {
   const dialogBtnCancel = document.getElementById("dialog-btn-cancel");
   const dialogBtnConfirm = document.getElementById("dialog-btn-confirm");
 
+  // Smart Creation Elements
+  const tabBtnSmart = document.getElementById("tab-btn-smart");
+  const sectionSmart = document.getElementById("section-smart");
+  const smartForm = document.getElementById("smart-form");
+  const smartDropzone = document.getElementById("smart-dropzone");
+  const smartAudioInput = document.getElementById("smart-audio-input");
+  const smartDropzoneText = document.getElementById("smart-dropzone-text");
+  const smartDropzoneFilename = document.getElementById("smart-dropzone-filename");
+  const smartInputTitle = document.getElementById("smart-input-title");
+  const smartInputArtist = document.getElementById("smart-input-artist");
+  const smartFormError = document.getElementById("smart-form-error");
+  const btnStartSmart = document.getElementById("btn-start-smart");
+  const smartProgressBox = document.getElementById("smart-progress-box");
+  const smartProgressTitle = document.getElementById("smart-progress-title");
+  const smartProgressDesc = document.getElementById("smart-progress-desc");
+  const smartProgressFill = document.getElementById("smart-progress-fill");
+  const smartErrorBox = document.getElementById("smart-error-box");
+  const smartErrorMsg = document.getElementById("smart-error-msg");
+  const btnRetrySmart = document.getElementById("btn-retry-smart");
+
+  const smartReportContainer = document.getElementById("smart-report-container");
+  const smartReportBadge = document.getElementById("smart-report-badge");
+  const smartReportSummary = document.getElementById("smart-report-summary");
+  const smartReportRatio = document.getElementById("smart-report-ratio");
+  const smartReportKeyDecision = document.getElementById("smart-report-key-decision");
+  const smartReportDisagreements = document.getElementById("smart-report-disagreements");
+  const smartDisagreeTbody = document.getElementById("smart-disagree-tbody");
+  const smartReportSources = document.getElementById("smart-report-sources");
+  const smartSourcesList = document.getElementById("smart-sources-list");
+
+  let smartSelectedAudioFile = null;
+  let smartPollInterval = null;
+
+  function escapeHtml(str) {
+    if (!str) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function renderSmartReport(report) {
+    if (!smartReportContainer) return;
+    if (!report) {
+      smartReportContainer.classList.add("hidden");
+      return;
+    }
+    smartReportContainer.classList.remove("hidden");
+
+    let badgeText = "智能核对报告";
+    if (report.mode === "audio+search") {
+      badgeText = "音频 + 全网多源核对";
+    } else if (report.mode === "search_only") {
+      badgeText = "全网和弦来源整理";
+    } else if (report.mode === "audio_only") {
+      badgeText = "音频直接转录";
+    }
+    if (smartReportBadge) smartReportBadge.textContent = badgeText;
+
+    const pct = Math.round((report.agreement_ratio || 1.0) * 100);
+    if (smartReportRatio) {
+      smartReportRatio.textContent = report.mode === "audio+search" ? `一致率 ${pct}%` : "";
+    }
+
+    if (smartReportSummary) {
+      if (report.mode === "audio+search") {
+        smartReportSummary.textContent = `共对比 ${report.n_agree + report.n_disagree} 小节（${report.n_agree} 小节一致 / ${report.n_disagree} 小节分歧）`;
+      } else if (report.mode === "search_only") {
+        smartReportSummary.textContent = `根据网络和弦谱整理生成 · 未经音频核对`;
+      } else {
+        smartReportSummary.textContent = `根据音频转录生成 · 未与网络和弦核对`;
+      }
+    }
+
+    if (smartReportKeyDecision) {
+      smartReportKeyDecision.textContent = report.key_decision ? `调性：${report.key_decision}` : "";
+    }
+
+    // Disagreements table
+    if (smartReportDisagreements && smartDisagreeTbody) {
+      const items = report.disagreements || [];
+      if (items.length > 0) {
+        smartReportDisagreements.classList.remove("hidden");
+        smartDisagreeTbody.innerHTML = "";
+        items.forEach(d => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>第 ${d.measure_index + 1} 小节</td>
+            <td style="color: #64748b;">${escapeHtml(d.audio)}</td>
+            <td style="color: #64748b;">${escapeHtml(d.search)}</td>
+            <td style="font-weight: 700; color: #1d4ed8;">${escapeHtml(d.chosen)}</td>
+            <td style="font-size: 0.82rem; color: #475569;">${escapeHtml(d.reason)}</td>
+          `;
+          smartDisagreeTbody.appendChild(tr);
+        });
+      } else {
+        smartReportDisagreements.classList.add("hidden");
+        smartDisagreeTbody.innerHTML = "";
+      }
+    }
+
+    // Sources links
+    if (smartReportSources && smartSourcesList) {
+      const sources = report.sources || [];
+      if (sources.length > 0) {
+        smartReportSources.classList.remove("hidden");
+        smartSourcesList.innerHTML = sources
+          .map(s => `<a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(s.title || s.url)}</a>`)
+          .join(" ");
+      } else {
+        smartReportSources.classList.add("hidden");
+        smartSourcesList.innerHTML = "";
+      }
+    }
+  }
+
   function setMainView(view) {
     currentMainView = view;
     if (view === "history") {
       if (tabBtnCreate) tabBtnCreate.classList.remove("active");
+      if (tabBtnSmart) tabBtnSmart.classList.remove("active");
       if (tabBtnHistory) tabBtnHistory.classList.add("active");
       if (stepsNavContainer) stepsNavContainer.classList.add("hidden");
       stepSections.forEach((sec) => sec.classList.add("hidden"));
+      if (sectionSmart) sectionSmart.classList.add("hidden");
       if (sectionHistory) sectionHistory.classList.remove("hidden");
       if (historyState.items.length === 0) {
         fetchHistory(false);
       }
+    } else if (view === "smart") {
+      if (tabBtnCreate) tabBtnCreate.classList.remove("active");
+      if (tabBtnHistory) tabBtnHistory.classList.remove("active");
+      if (tabBtnSmart) tabBtnSmart.classList.add("active");
+      if (stepsNavContainer) stepsNavContainer.classList.add("hidden");
+      stepSections.forEach((sec) => sec.classList.add("hidden"));
+      if (sectionHistory) sectionHistory.classList.add("hidden");
+      if (sectionSmart) sectionSmart.classList.remove("hidden");
     } else {
       if (tabBtnCreate) tabBtnCreate.classList.add("active");
+      if (tabBtnSmart) tabBtnSmart.classList.remove("active");
       if (tabBtnHistory) tabBtnHistory.classList.remove("active");
       if (stepsNavContainer) stepsNavContainer.classList.remove("hidden");
       if (sectionHistory) sectionHistory.classList.add("hidden");
+      if (sectionSmart) sectionSmart.classList.add("hidden");
       setStep(currentStep);
     }
   }
 
   if (tabBtnCreate) tabBtnCreate.onclick = () => setMainView("creator");
+  if (tabBtnSmart) tabBtnSmart.onclick = () => setMainView("smart");
   if (tabBtnHistory) tabBtnHistory.onclick = () => setMainView("history");
 
   // Switch Active Step
@@ -695,15 +826,16 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         const state = await resp.json();
 
-        if (state.status === "parsing") {
-          parsingStatusTitle.textContent = "正在进行智能乐谱识别...";
-          parsingStatusDesc.textContent = "视觉模型正在识别小节线、简谱旋律、调号与级数和弦...";
+        if (state.status === "parsing" || state.status === "smart_running") {
+          parsingStatusTitle.textContent = state.mode === "smart" ? "正在智能创建乐谱..." : "正在进行智能乐谱识别...";
+          parsingStatusDesc.textContent = state.progress_text || (state.mode === "smart" ? "音频转录与全网和弦核对中..." : "视觉模型正在识别小节线、简谱旋律、调号与级数和弦...");
           const pct = Math.min(Math.round((state.progress || 0.3) * 100), 90);
           progressBarFill.style.width = `${pct}%`;
         } else if (state.status === "ready") {
           clearInterval(pollInterval);
           progressBarFill.style.width = "100%";
           currentParsedSheet = state.parsed;
+          renderSmartReport(state.smart_report);
           renderStep3();
           setStep(3);
         } else if (state.status === "error") {
@@ -711,6 +843,165 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       } catch (err) {
         showParsingError(err.message);
+      }
+    }, 2000);
+  }
+
+  // --- Smart Creation Event Handlers ---
+  if (smartDropzone && smartAudioInput) {
+    smartDropzone.addEventListener("click", () => smartAudioInput.click());
+
+    smartDropzone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      smartDropzone.classList.add("dragover");
+    });
+
+    smartDropzone.addEventListener("dragleave", () => {
+      smartDropzone.classList.remove("dragover");
+    });
+
+    smartDropzone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      smartDropzone.classList.remove("dragover");
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        handleSmartAudioSelected(e.dataTransfer.files[0]);
+      }
+    });
+
+    smartAudioInput.addEventListener("change", () => {
+      if (smartAudioInput.files && smartAudioInput.files.length > 0) {
+        handleSmartAudioSelected(smartAudioInput.files[0]);
+      }
+    });
+  }
+
+  function handleSmartAudioSelected(file) {
+    const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
+    const allowed = [".mp3", ".m4a", ".wav", ".flac", ".ogg", ".aac"];
+    if (!allowed.includes(ext)) {
+      if (smartFormError) {
+        smartFormError.textContent = `不支持的文件格式 "${ext}"。仅支持 ${allowed.join(", ")}`;
+        smartFormError.classList.remove("hidden");
+      }
+      return;
+    }
+    if (file.size > 30 * 1024 * 1024) {
+      if (smartFormError) {
+        smartFormError.textContent = "音频文件大小不能超过 30MB";
+        smartFormError.classList.remove("hidden");
+      }
+      return;
+    }
+    smartSelectedAudioFile = file;
+    if (smartFormError) smartFormError.classList.add("hidden");
+    if (smartDropzoneText) smartDropzoneText.classList.add("hidden");
+    if (smartDropzoneFilename) {
+      smartDropzoneFilename.textContent = `已选择音频：${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
+      smartDropzoneFilename.classList.remove("hidden");
+    }
+  }
+
+  if (btnStartSmart) {
+    btnStartSmart.addEventListener("click", async () => {
+      const title = (smartInputTitle ? smartInputTitle.value : "").trim();
+      const artist = (smartInputArtist ? smartInputArtist.value : "").trim();
+
+      if (!smartSelectedAudioFile && !title && !artist) {
+        if (smartFormError) {
+          smartFormError.textContent = "请上传音频文件，或输入歌名 / 歌手进行智能创建";
+          smartFormError.classList.remove("hidden");
+        }
+        return;
+      }
+      if (smartFormError) smartFormError.classList.add("hidden");
+
+      // Switch to progress UI
+      if (smartForm) smartForm.classList.add("hidden");
+      if (smartProgressBox) smartProgressBox.classList.remove("hidden");
+      if (smartErrorBox) smartErrorBox.classList.add("hidden");
+      if (smartProgressFill) smartProgressFill.style.width = "5%";
+      if (smartProgressTitle) smartProgressTitle.textContent = "正在智能创建乐谱...";
+      if (smartProgressDesc) smartProgressDesc.textContent = "正在提交任务与上传音频...";
+
+      const formData = new FormData();
+      if (smartSelectedAudioFile) {
+        formData.append("file", smartSelectedAudioFile);
+      }
+      if (title) formData.append("title", title);
+      if (artist) formData.append("artist", artist);
+
+      try {
+        const resp = await fetch("/api/smart", {
+          method: "POST",
+          body: formData,
+        });
+        if (!resp.ok) {
+          const errData = await resp.json().catch(() => ({}));
+          throw new Error(errData.detail || `提交失败 (HTTP ${resp.status})`);
+        }
+        const data = await resp.json();
+        const sheetId = data.sheet_id;
+        currentSheetId = sheetId;
+        pollSmartProgress(sheetId);
+      } catch (err) {
+        showSmartError(err.message);
+      }
+    });
+  }
+
+  function showSmartError(msg) {
+    if (smartPollInterval) clearInterval(smartPollInterval);
+    if (smartErrorMsg) smartErrorMsg.textContent = `智能创建出错: ${msg}`;
+    if (smartErrorBox) smartErrorBox.classList.remove("hidden");
+    if (smartProgressTitle) smartProgressTitle.textContent = "创建未完成";
+  }
+
+  if (btnRetrySmart) {
+    btnRetrySmart.addEventListener("click", () => {
+      if (smartPollInterval) clearInterval(smartPollInterval);
+      if (smartProgressBox) smartProgressBox.classList.add("hidden");
+      if (smartForm) smartForm.classList.remove("hidden");
+    });
+  }
+
+  function pollSmartProgress(sheetId) {
+    if (smartPollInterval) clearInterval(smartPollInterval);
+
+    smartPollInterval = setInterval(async () => {
+      try {
+        const resp = await fetch(`/api/sheets/${sheetId}`);
+        if (!resp.ok) {
+          throw new Error(`获取状态失败 (HTTP ${resp.status})`);
+        }
+        const state = await resp.json();
+
+        if (state.status === "smart_running" || state.status === "parsing") {
+          const pct = Math.min(Math.max(5, Math.round((state.progress || 0.1) * 100)), 95);
+          if (smartProgressFill) smartProgressFill.style.width = `${pct}%`;
+          if (smartProgressDesc) smartProgressDesc.textContent = state.progress_text || "正在处理中...";
+        } else if (state.status === "ready") {
+          clearInterval(smartPollInterval);
+          if (smartProgressFill) smartProgressFill.style.width = "100%";
+          currentParsedSheet = state.parsed;
+          renderSmartReport(state.smart_report);
+          setMainView("creator");
+          renderStep3();
+          setStep(3);
+
+          // Reset smart form for subsequent runs
+          if (smartProgressBox) smartProgressBox.classList.add("hidden");
+          if (smartForm) smartForm.classList.remove("hidden");
+          smartSelectedAudioFile = null;
+          if (smartAudioInput) smartAudioInput.value = "";
+          if (smartDropzoneText) smartDropzoneText.classList.remove("hidden");
+          if (smartDropzoneFilename) smartDropzoneFilename.classList.add("hidden");
+          if (smartInputTitle) smartInputTitle.value = "";
+          if (smartInputArtist) smartInputArtist.value = "";
+        } else if (state.status === "error") {
+          showSmartError(state.error || "未知创建错误");
+        }
+      } catch (err) {
+        showSmartError(err.message);
       }
     }, 2000);
   }
@@ -2631,6 +2922,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const state = await resp.json();
       if (state.status === "ready" && state.parsed) {
         currentParsedSheet = state.parsed;
+        renderSmartReport(state.smart_report);
         renderStep3();
         setStep(3);
       } else if (state.status === "parsing") {

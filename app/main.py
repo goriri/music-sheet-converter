@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import unquote
 
-from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -29,6 +29,9 @@ app.add_middleware(
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 MAX_FILES = 12
+
+ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".flac", ".ogg", ".aac"}
+MAX_AUDIO_SIZE = 30 * 1024 * 1024  # 30 MB
 
 
 class RenderRequest(BaseModel):
@@ -120,6 +123,66 @@ async def upload_sheets(
     return {"sheet_id": sheet_id}
 
 
+@app.post("/api/smart")
+async def create_smart_sheet(
+    file: Optional[UploadFile] = File(default=None),
+    title: Optional[str] = Form(default=""),
+    artist: Optional[str] = Form(default=""),
+):
+    """Start smart sheet creation (智能创建) via audio upload and/or web consensus."""
+    clean_title = (title or "").strip()
+    clean_artist = (artist or "").strip()
+    has_file = file is not None and bool(file.filename)
+
+    if not has_file and not clean_title and not clean_artist:
+        raise HTTPException(
+            status_code=400,
+            detail="请提供音频文件或输入歌名/歌手进行智能创建",
+        )
+
+    audio_bytes: Optional[bytes] = None
+    audio_ext = ".mp3"
+
+    if has_file and file is not None:
+        filename = file.filename or ""
+        ext = Path(filename).suffix.lower()
+        if ext not in ALLOWED_AUDIO_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的音频文件格式 '{ext}'。允许格式: {', '.join(sorted(ALLOWED_AUDIO_EXTENSIONS))}",
+            )
+        content = await file.read()
+        if len(content) > MAX_AUDIO_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"音频文件超过 30MB 限制 ({len(content)} 字节)",
+            )
+        if len(content) == 0:
+            if not clean_title and not clean_artist:
+                raise HTTPException(status_code=400, detail="上传的音频文件为空")
+        else:
+            audio_bytes = content
+            audio_ext = ext
+
+    import uuid
+    from app.smart.service import start_smart
+
+    sheet_id = uuid.uuid4().hex[:12]
+    storage = get_storage()
+
+    start_smart(
+        sheet_id=sheet_id,
+        title=clean_title,
+        artist=clean_artist,
+        audio_bytes=audio_bytes,
+        audio_ext=audio_ext,
+        storage=storage,
+        background=True,
+    )
+
+    return {"sheet_id": sheet_id}
+
+
 @app.get("/api/sheets/{sheet_id}")
 def get_sheet_status(sheet_id: str):
     """Retrieve sheet parsing status and ParsedSheet when ready."""
@@ -162,6 +225,12 @@ def get_sheet_status(sheet_id: str):
             state["parsed"] = None
     else:
         state["parsed"] = None
+
+    report_path = f"sheets/{sheet_id}/smart_report.json"
+    if storage.exists(report_path):
+        state["smart_report"] = storage.get_json(report_path)
+    else:
+        state["smart_report"] = None
 
     return state
 
@@ -451,6 +520,10 @@ def serve_file(path: str, request: Request):
         raise HTTPException(status_code=400, detail="Invalid path or path traversal detected")
 
     clean_path = unquote(path).strip("/")
+
+    # Security check: private/ files (such as raw user audio) are strictly forbidden from public access
+    if "private" in clean_path.split("/") or clean_path.startswith("private/") or "/private/" in clean_path:
+        raise HTTPException(status_code=403, detail="Access denied: private files cannot be accessed")
 
     # Security check: must reside inside sheets/ and must not contain directory traversal
     parts = clean_path.split("/")

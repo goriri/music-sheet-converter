@@ -16,6 +16,7 @@
         </div>
         <nav class="main-tabs" aria-label="页面功能切换">
           <button type="button" id="tab-btn-create" class="main-tab-btn active">➕ 制作伴奏</button>
+          <button type="button" id="tab-btn-smart" class="main-tab-btn">✨ 智能创建</button>
           <button type="button" id="tab-btn-history" class="main-tab-btn">📜 历史记录</button>
         </nav>
       </div>
@@ -87,6 +88,39 @@
         <div class="flex-between gap-12">
           <button type="button" id="btn-save-parsed" class="btn btn-secondary btn-sm">💾 保存修改</button>
           <button type="button" id="btn-trigger-render" class="btn btn-success">生成伴奏谱 🎶</button>
+        </div>
+      </div>
+
+      <!-- Smart Creation Cross-Check Report -->
+      <div id="smart-report-container" class="smart-report-card hidden">
+        <div class="smart-report-header flex-between">
+          <div class="smart-report-title-group">
+            <span class="smart-report-badge" id="smart-report-badge">核对报告</span>
+            <span id="smart-report-summary" class="smart-report-summary"></span>
+          </div>
+          <div id="smart-report-ratio" class="smart-report-ratio"></div>
+        </div>
+        <div id="smart-report-key-decision" class="smart-report-key-decision"></div>
+        <div id="smart-report-disagreements" class="smart-report-disagreements hidden">
+          <h4 style="margin: 12px 0 8px 0; font-size: 0.95rem; color: var(--text-main);">小节和弦核对与裁决明细：</h4>
+          <div class="table-responsive">
+            <table class="smart-disagree-table">
+              <thead>
+                <tr>
+                  <th>小节</th>
+                  <th>音频转录</th>
+                  <th>网络共识</th>
+                  <th>最终采纳</th>
+                  <th>裁决依据</th>
+                </tr>
+              </thead>
+              <tbody id="smart-disagree-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="smart-report-sources" class="smart-report-sources hidden">
+          <span class="sources-label">参考网络来源：</span>
+          <span id="smart-sources-list" class="sources-list"></span>
         </div>
       </div>
 
@@ -276,6 +310,82 @@
 
       <!-- Preview Images -->
       <div id="render-previews" class="preview-container"></div>
+    </section>
+
+    <!-- Smart Creation View -->
+    <section id="section-smart" class="card hidden">
+      <div class="card-title flex-between">
+        <span>✨ 智能创建简谱与和弦</span>
+        <span class="badge badge-info" style="font-size: 0.8rem; font-weight: normal;">音频转录 + 全网和弦核对</span>
+      </div>
+
+      <div class="smart-intro-box">
+        <p class="smart-intro-desc">
+          无需乐谱图片！上传音频或输入歌名歌手，系统将自动转录旋律与和弦，并与全网优质和弦谱进行多源交叉核对，生成高精度台湾简谱。
+        </p>
+        <div class="smart-modes-grid">
+          <div class="smart-mode-card">
+            <div class="smart-mode-icon">🎵</div>
+            <div class="smart-mode-title">仅音频文件</div>
+            <div class="smart-mode-desc">自动音频转录，识别歌曲调性、节拍、旋律简谱及级数和弦</div>
+          </div>
+          <div class="smart-mode-card">
+            <div class="smart-mode-icon">🌐</div>
+            <div class="smart-mode-title">仅歌名 / 歌手</div>
+            <div class="smart-mode-desc">多源检索全网和弦谱，凝聚段落结构与和弦走向</div>
+          </div>
+          <div class="smart-mode-card active-card">
+            <div class="smart-mode-icon">✨</div>
+            <div class="smart-mode-title">音频 + 歌名/歌手 (推荐)</div>
+            <div class="smart-mode-desc">音频转录结合全网和弦核对，自动裁决争议小节，精度最高</div>
+          </div>
+        </div>
+      </div>
+
+      <form id="smart-form" class="smart-form" onsubmit="return false;">
+        <div class="form-group" style="margin-bottom: 20px;">
+          <label class="form-label" for="smart-audio-input" style="font-weight: 600; margin-bottom: 8px; display: block;">音频文件（可选，支持 MP3、M4A、WAV、FLAC、OGG、AAC，最大 30MB）</label>
+          <div id="smart-dropzone" class="smart-dropzone">
+            <div class="dropzone-icon">🎧</div>
+            <div id="smart-dropzone-text" class="dropzone-text">点击选择音频文件，或将音频拖拽至此处</div>
+            <div id="smart-dropzone-filename" class="dropzone-filename hidden"></div>
+            <input type="file" id="smart-audio-input" accept=".mp3,.m4a,.wav,.flac,.ogg,.aac" class="hidden">
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+          <div class="form-group">
+            <label class="form-label" for="smart-input-title" style="font-weight: 600; margin-bottom: 8px; display: block;">歌曲名称</label>
+            <input type="text" id="smart-input-title" class="form-control" placeholder="例如：晴天、告白气球..." autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="smart-input-artist" style="font-weight: 600; margin-bottom: 8px; display: block;">歌手 / 原唱（可选，建议填写以提高检索准确率）</label>
+            <input type="text" id="smart-input-artist" class="form-control" placeholder="例如：周杰伦..." autocomplete="off">
+          </div>
+        </div>
+
+        <div id="smart-form-error" class="alert alert-danger hidden" style="margin-top: 16px;"></div>
+
+        <div style="margin-top: 24px; text-align: right;">
+          <button type="button" id="btn-start-smart" class="btn btn-primary" style="padding: 10px 24px; font-size: 1rem;">
+            开始智能创建 →
+          </button>
+        </div>
+      </form>
+
+      <!-- Smart Progress Box -->
+      <div id="smart-progress-box" class="progress-box hidden" style="margin-top: 30px;">
+        <div class="spinner"></div>
+        <h3 id="smart-progress-title" style="margin-bottom: 8px;">正在智能创建乐谱...</h3>
+        <p id="smart-progress-desc" class="progress-text">正在启动处理任务，请稍候</p>
+        <div class="progress-bar-bg">
+          <div id="smart-progress-fill" class="progress-bar-fill"></div>
+        </div>
+        <div id="smart-error-box" class="hidden" style="margin-top: 20px;">
+          <p id="smart-error-msg" style="color: var(--danger); font-weight: 500;"></p>
+          <button type="button" id="btn-retry-smart" class="btn btn-secondary" style="margin-top: 12px;">返回重试</button>
+        </div>
+      </div>
     </section>
 
     <!-- History View -->

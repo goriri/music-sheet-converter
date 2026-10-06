@@ -72,11 +72,26 @@ gcloud storage buckets add-iam-policy-binding "gs://${BUCKET_NAME}" \
   --role="roles/storage.objectAdmin" \
   --quiet
 
+SMART_AUDIO_JOB_NAME="${SMART_AUDIO_JOB:-smart-audio}"
+if gcloud run jobs describe "${SMART_AUDIO_JOB_NAME}" --project="${PROJECT}" --region="${REGION}" &>/dev/null; then
+  echo "Granting roles/run.jobsExecutorWithOverrides on job ${SMART_AUDIO_JOB_NAME}..."
+  gcloud run jobs add-iam-policy-binding "${SMART_AUDIO_JOB_NAME}" \
+    --project="${PROJECT}" \
+    --region="${REGION}" \
+    --member="serviceAccount:${SA_EMAIL}" \
+    --role="roles/run.jobsExecutorWithOverrides" \
+    --quiet
+else
+  echo "WARNING: Cloud Run job ${SMART_AUDIO_JOB_NAME} not found; run deploy_audio_job.sh first (smart create will fall back to search-only)."
+fi
+
 # 4. Prepare environment variables
 ENV_VARS="BUCKET=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT}"
 if [ -n "${OMR_MODEL:-}" ]; then
   ENV_VARS="${ENV_VARS},OMR_MODEL=${OMR_MODEL}"
 fi
+SMART_AUDIO_JOB="${SMART_AUDIO_JOB:-smart-audio}"
+ENV_VARS="${ENV_VARS},SMART_AUDIO_JOB=${SMART_AUDIO_JOB}"
 QA_ARBITER_MODEL="${QA_ARBITER_MODEL:-claude-opus-5-5}"
 QA_ARBITER_REGION="${QA_ARBITER_REGION:-global}"
 QA_LLM_REVIEW="${QA_LLM_REVIEW:-0}"
