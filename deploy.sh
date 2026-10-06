@@ -26,19 +26,24 @@ else
   echo "Bucket gs://${BUCKET_NAME} already exists."
 fi
 
-# Configure lifecycle rule: delete after 30 days
+# Configure lifecycle rules. Public history (sheets/, history/) is kept; only private uploads
+# (smart-create audio under private/, never public) and caches expire.
 LIFECYCLE_TMP="$(mktemp)"
 cat > "${LIFECYCLE_TMP}" << 'EOF'
 {
   "rule": [
     {
       "action": {"type": "Delete"},
-      "condition": {"age": 30}
+      "condition": {"age": 3, "matchesPrefix": ["private/"]}
+    },
+    {
+      "action": {"type": "Delete"},
+      "condition": {"age": 30, "matchesPrefix": ["cache/", "tmp/"]}
     }
   ]
 }
 EOF
-echo "Updating bucket lifecycle rule (delete after 30 days)..."
+echo "Updating bucket lifecycle rules (private/ 3 days, cache/ tmp/ 30 days)..."
 gcloud storage buckets update "gs://${BUCKET_NAME}" --lifecycle-file="${LIFECYCLE_TMP}"
 rm -f "${LIFECYCLE_TMP}"
 
