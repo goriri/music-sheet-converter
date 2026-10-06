@@ -1,0 +1,114 @@
+{
+  "title": "茉莉花",
+  "artist": "江苏民歌",
+  "key": "F",
+  "time_signature": "4/4",
+  "tempo_bpm": 84.0,
+  "chords_only": false,
+  "provenance": "中国传统民歌 · 江苏六合民歌",
+  "sources": [
+    {
+      "title": "中国民歌集成",
+      "url": "https://example.com/jasmine"
+    }
+  ],
+  "measures": [
+    {
+      "beats": 1.0,
+      "section": "前奏",
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": -1, "tie_to_next": false, "lyric": ""}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": "主歌",
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "好"},
+        {"onset": 1.0, "duration": 0.5, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "一"},
+        {"onset": 1.5, "duration": 0.5, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "朵"},
+        {"onset": 2.0, "duration": 1.0, "degree": 6, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "美"},
+        {"onset": 3.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 1, "tie_to_next": false, "lyric": "丽"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "4", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 1, "tie_to_next": false, "lyric": "的"},
+        {"onset": 1.0, "duration": 0.5, "degree": 6, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "茉"},
+        {"onset": 1.5, "duration": 0.5, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "莉"},
+        {"onset": 2.0, "duration": 2.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "花"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"},
+        {"raw": "5", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 0.75, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "芬"},
+        {"onset": 0.75, "duration": 0.25, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "芳"},
+        {"onset": 1.0, "duration": 0.5, "degree": 6, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "美"},
+        {"onset": 1.5, "duration": 0.5, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "丽"},
+        {"onset": 2.0, "duration": 2.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "满"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "4", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 0.25, "degree": 6, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "枝"},
+        {"onset": 0.25, "duration": 0.25, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": ""},
+        {"onset": 0.5, "duration": 0.25, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": ""},
+        {"onset": 0.75, "duration": 0.25, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "桠"},
+        {"onset": 1.0, "duration": 1.0, "degree": 6, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "又"},
+        {"onset": 2.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 1, "tie_to_next": false, "lyric": "香"},
+        {"onset": 3.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 1, "tie_to_next": false, "lyric": "又"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "5", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 4, "accidental": 1, "octave": 0, "tie_to_next": false, "lyric": "白"},
+        {"onset": 1.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "人"},
+        {"onset": 2.0, "duration": 1.0, "degree": 0, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": ""},
+        {"onset": 3.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": -1, "tie_to_next": false, "lyric": "人"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"},
+        {"raw": "5", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 2.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "夸"},
+        {"onset": 2.0, "duration": 2.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "…"}
+      ]
+    }
+  ]
+}

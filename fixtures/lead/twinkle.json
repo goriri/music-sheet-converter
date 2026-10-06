@@ -1,0 +1,179 @@
+{
+  "title": "小星星",
+  "artist": "莫扎特变奏 / 法国民谣",
+  "key": "C",
+  "time_signature": "4/4",
+  "tempo_bpm": 100.0,
+  "chords_only": false,
+  "provenance": "公共领域作品 · 经典童谣",
+  "sources": [
+    {
+      "title": "IMSLP",
+      "url": "https://imslp.org/wiki/Ah_vous_dirai-je,_Maman"
+    }
+  ],
+  "measures": [
+    {
+      "beats": 4.0,
+      "section": "主歌",
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "一"},
+        {"onset": 1.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "闪"},
+        {"onset": 2.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "一"},
+        {"onset": 3.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "闪"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "4", "beat": 1.0, "agreement": "disagree", "alternatives": ["4maj7"]},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 6, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "亮"},
+        {"onset": 1.0, "duration": 1.0, "degree": 6, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "晶"},
+        {"onset": 2.0, "duration": 2.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "晶"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "4", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "满"},
+        {"onset": 1.0, "duration": 1.0, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "天"},
+        {"onset": 2.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "都"},
+        {"onset": 3.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "是"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "5", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "小"},
+        {"onset": 1.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "星"},
+        {"onset": 2.0, "duration": 2.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "星"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": "间奏",
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"},
+        {"raw": "4", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "挂"},
+        {"onset": 1.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "在"},
+        {"onset": 2.0, "duration": 1.0, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "天"},
+        {"onset": 3.0, "duration": 1.0, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "空"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"},
+        {"raw": "5", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "放"},
+        {"onset": 1.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "光"},
+        {"onset": 2.0, "duration": 2.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "明"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"},
+        {"raw": "4", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "好"},
+        {"onset": 1.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "像"},
+        {"onset": 2.0, "duration": 1.0, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "许"},
+        {"onset": 3.0, "duration": 1.0, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "多"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"},
+        {"raw": "5", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "小"},
+        {"onset": 1.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "眼"},
+        {"onset": 2.0, "duration": 2.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "睛"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": "副歌",
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "一"},
+        {"onset": 1.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "闪"},
+        {"onset": 2.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "一"},
+        {"onset": 3.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "闪"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "4", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 6, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "亮"},
+        {"onset": 1.0, "duration": 1.0, "degree": 6, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "晶"},
+        {"onset": 2.0, "duration": 2.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "晶"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "4", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "满"},
+        {"onset": 1.0, "duration": 1.0, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "天"},
+        {"onset": 2.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "都"},
+        {"onset": 3.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "是"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "5", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "小"},
+        {"onset": 1.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "星"},
+        {"onset": 2.0, "duration": 2.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "星"}
+      ]
+    }
+  ]
+}

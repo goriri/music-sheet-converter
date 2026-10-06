@@ -1,0 +1,230 @@
+{
+  "title": "欢乐颂",
+  "artist": "路德维希·凡·贝多芬",
+  "key": "D",
+  "time_signature": "4/4",
+  "tempo_bpm": 120.0,
+  "chords_only": false,
+  "provenance": "公共领域作品 · 第九交响曲第四乐章主题",
+  "sources": [
+    {
+      "title": "IMSLP",
+      "url": "https://imslp.org/wiki/Symphony_No.9,_Op.125"
+    }
+  ],
+  "measures": [
+    {
+      "beats": 4.0,
+      "section": "主歌",
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "欢"},
+        {"onset": 1.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "乐"},
+        {"onset": 2.0, "duration": 1.0, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "女"},
+        {"onset": 3.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "神"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "5", "beat": 1.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "圣"},
+        {"onset": 1.0, "duration": 1.0, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "洁"},
+        {"onset": 2.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "美"},
+        {"onset": 3.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "丽"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "灿"},
+        {"onset": 1.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "烂"},
+        {"onset": 2.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "光"},
+        {"onset": 3.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "芒"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "5", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.5, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "照"},
+        {"onset": 1.5, "duration": 0.5, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "大"},
+        {"onset": 2.0, "duration": 2.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "地"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "我"},
+        {"onset": 1.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "们"},
+        {"onset": 2.0, "duration": 1.0, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "心"},
+        {"onset": 3.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "中"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "5", "beat": 1.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "充"},
+        {"onset": 1.0, "duration": 1.0, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "满"},
+        {"onset": 2.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "热"},
+        {"onset": 3.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "情"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "来"},
+        {"onset": 1.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "到"},
+        {"onset": 2.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "你"},
+        {"onset": 3.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "的"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "5", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.5, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "圣"},
+        {"onset": 1.5, "duration": 0.5, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "殿"},
+        {"onset": 2.0, "duration": 2.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "里"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": "副歌",
+      "chords": [
+        {"raw": "5", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "你"},
+        {"onset": 1.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "的"},
+        {"onset": 2.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "力"},
+        {"onset": 3.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "量"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "5", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "能"},
+        {"onset": 1.0, "duration": 0.5, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "使"},
+        {"onset": 1.5, "duration": 0.5, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "人"},
+        {"onset": 2.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "们"},
+        {"onset": 3.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "消"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "5", "beat": 1.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "除"},
+        {"onset": 1.0, "duration": 0.5, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "一"},
+        {"onset": 1.5, "duration": 0.5, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "切"},
+        {"onset": 2.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "分"},
+        {"onset": 3.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "歧"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"},
+        {"raw": "5", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "在"},
+        {"onset": 1.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "你"},
+        {"onset": 2.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": -1, "tie_to_next": false, "lyric": "光"},
+        {"onset": 3.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": true, "lyric": "辉"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "照"},
+        {"onset": 1.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "耀"},
+        {"onset": 2.0, "duration": 1.0, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "之"},
+        {"onset": 3.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "下"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "5", "beat": 1.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 5, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "四"},
+        {"onset": 1.0, "duration": 1.0, "degree": 4, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "海"},
+        {"onset": 2.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "皆"},
+        {"onset": 3.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "成"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "1", "beat": 1.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "亲"},
+        {"onset": 1.0, "duration": 1.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "兄"},
+        {"onset": 2.0, "duration": 1.0, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "弟"},
+        {"onset": 3.0, "duration": 1.0, "degree": 3, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "妹"}
+      ]
+    },
+    {
+      "beats": 4.0,
+      "section": null,
+      "chords": [
+        {"raw": "5", "beat": 1.0, "agreement": "agree"},
+        {"raw": "1", "beat": 3.0, "agreement": "agree"}
+      ],
+      "notes": [
+        {"onset": 0.0, "duration": 1.5, "degree": 2, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "万"},
+        {"onset": 1.5, "duration": 0.5, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "众"},
+        {"onset": 2.0, "duration": 2.0, "degree": 1, "accidental": 0, "octave": 0, "tie_to_next": false, "lyric": "心"}
+      ]
+    }
+  ]
+}
