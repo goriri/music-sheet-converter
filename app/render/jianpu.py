@@ -273,6 +273,41 @@ def compute_stack_height(max_notes: int, line_spacing: float = 18.0, scale: floa
     return base_h + (max_notes - 1) * line_spacing
 
 
+# Extra vertical room per octave dot sitting BETWEEN two stacked digits
+# (dots are drawn 4 + 5·i px from the digit box with radius 1.8).
+STACK_DOT_ROOM = 5.5
+
+
+def _sort_stack(notes: Sequence[JianpuNote]) -> list[JianpuNote]:
+    return sorted(notes, key=lambda n: n.midi if n.midi is not None else n.degree)
+
+
+def stack_offsets(
+    notes: Sequence[JianpuNote], line_spacing: float = 18.0, scale: float = 1.0
+) -> list[float]:
+    """Upward offsets (px) of each digit from the stack base, lowest note first.
+
+    The gap between neighbours is line_spacing plus room for the lower note's
+    dots above and the upper note's dots below, so dots never collide with digits.
+    """
+    sorted_notes = _sort_stack(notes)
+    offsets: list[float] = []
+    cur = 0.0
+    for i, note in enumerate(sorted_notes):
+        if i > 0:
+            below = sorted_notes[i - 1]
+            between = max(0, below.octave_dots) + max(0, -note.octave_dots)
+            cur += line_spacing + between * STACK_DOT_ROOM * scale
+        offsets.append(cur)
+    return offsets
+
+
+def stack_span(notes: Sequence[JianpuNote], line_spacing: float = 18.0, scale: float = 1.0) -> float:
+    """Distance from the lowest to the highest digit baseline of a stack."""
+    offs = stack_offsets(notes, line_spacing, scale)
+    return offs[-1] if offs else 0.0
+
+
 # --------------------------------------------------------------------------- Drawing Primitives
 def draw_jianpu_note(
     draw: ImageDraw.ImageDraw,
@@ -344,17 +379,18 @@ def draw_chord_stack(
 
     Notes are sorted by MIDI ascending (lowest at base_y, higher notes above).
     """
-    sorted_notes = sorted(notes, key=lambda n: n.midi if n.midi is not None else n.degree)
+    sorted_notes = _sort_stack(notes)
     num_notes = len(sorted_notes)
+    offsets = stack_offsets(sorted_notes, line_spacing, scale)
 
     digit_y_positions: list[float] = []
     max_w = 0.0
     overall_top = 999999.0
     overall_bottom = -999999.0
 
-    # Layout digits: lowest note at base_y, next note higher by line_spacing
+    # Layout digits: lowest note at base_y, higher notes above (gaps widened for octave dots)
     for i, note in enumerate(sorted_notes):
-        digit_y = base_y - i * line_spacing
+        digit_y = base_y - offsets[i]
         digit_y_positions.append(digit_y)
         w, top_y, bot_y = draw_jianpu_note(
             draw, x, digit_y, note, font, acc_font, color=color, scale=scale

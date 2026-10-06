@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 from app.models import Arrangement, ChordSymbol, Event, KeyChange, ParsedSheet, ResolvedChord, System
 from app.render.jianpu import (
     compute_stack_height,
+    stack_span,
     draw_augmentation_dot,
     draw_chord_stack,
     draw_rest,
@@ -506,6 +507,34 @@ def render_system_strip(
                 max_lh = max(max_lh, len(ev.notes))
 
     line_spacing = 18.0 * scale
+
+    # Real stack spans (digit gaps widen when octave dots sit between stacked notes)
+    def _max_span(events, tonic_pc, hand, chords, key_name) -> float:
+        best = 0.0
+        for ev in events:
+            if len(ev.notes) < 2:
+                continue
+            try:
+                jn = [
+                    midi_to_jianpu(
+                        n.midi, tonic_pc, hand=hand, finger=n.finger,
+                        chord=get_active_chord(chords, ev.onset), key_name=key_name,
+                    )
+                    for n in ev.notes
+                ]
+                best = max(best, stack_span(jn, line_spacing, scale))
+            except Exception:
+                best = max(best, (len(ev.notes) - 1) * line_spacing)
+        return best
+
+    span_rh = (max_rh - 1) * line_spacing
+    span_lh = (max_lh - 1) * line_spacing
+    for m in system.measures:
+        arr_m = arr_map.get(m.index)
+        if arr_m:
+            span_rh = max(span_rh, _max_span(arr_m.rh, arr_m.tonic_pc, "rh", arr_m.chords, arr_m.key_name))
+            span_lh = max(span_lh, _max_span(arr_m.lh, arr_m.tonic_pc, "lh", arr_m.chords, arr_m.key_name))
+
     chord_y = 6.0 * scale
     chord_row_h = 24.0 * scale
 
@@ -513,13 +542,13 @@ def render_system_strip(
     # Dedicated chord-name row at top (y = 0..24)
     # RH row: y_top_rh leaves room for RH fingers and octave dots above top note
     y_top_rh = chord_row_h + 18.0 * scale
-    base_y_rh = y_top_rh + (max_rh - 1) * line_spacing
+    base_y_rh = y_top_rh + span_rh
 
     gap_between_hands = 26.0 * scale
     # In RH, lowest note bottom is base_y_rh + 24, beams can reach base_y_rh + 32
     top_lh = base_y_rh + 32.0 * scale + gap_between_hands
     y_top_lh = top_lh + 8.0 * scale
-    base_y_lh = y_top_lh + (max_lh - 1) * line_spacing
+    base_y_lh = y_top_lh + span_lh
 
     # In LH, bottom dots reach base_y_lh + 25, beams reach base_y_lh + 35, fingers reach base_y_lh + 48
     strip_h = int(math.ceil(base_y_lh + 60.0 * scale))
