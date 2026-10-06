@@ -1,0 +1,28 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# PyTorch CPU pinned for Linux Cloud Run container, flexible fallback for dev platforms
+torch==2.4.0+cpu; sys_platform == 'linux'
+torchaudio==2.4.0+cpu; sys_platform == 'linux'
+torch>=2.2.0; sys_platform != 'linux'
+torchaudio>=2.2.0; sys_platform != 'linux'
+
+# Core audio & DSP
+numpy>=1.26,<3.0
+scipy>=1.13.0
+soundfile>=0.12.1
+librosa>=0.10.2
+audioread>=3.0.1
+onnxruntime>=1.18.0
+
+# Pipeline ML components
+audio-separator==0.47.0
+beat-this>=1.1.0
+torchcrepe>=0.0.23
+av>=11.0.0,<14.0.0
+faster-whisper>=1.0.3
+opencc-python-reimplemented>=0.1.7
+
+# App & Storage dependencies
+pydantic>=2.7
+fastapi>=0.115
+google-cloud-storage>=2.18

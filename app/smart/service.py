@@ -29,8 +29,9 @@ from app.storage import Storage, get_storage
 logger = logging.getLogger(__name__)
 
 DEFAULT_PROJECT = "cellular-cider-495602-r9"
-DEFAULT_REGION = "us-central1"
+DEFAULT_REGION = "asia-east1"
 DEFAULT_JOB_NAME = "smart-audio"
+QUEUED_GIVE_UP_SECONDS = 300.0  # job never started (trigger lost / quota): stop waiting
 
 
 def trigger_cloud_run_job(
@@ -41,7 +42,7 @@ def trigger_cloud_run_job(
 ) -> bool:
     """Trigger a Cloud Run Job execution via Google Cloud Run Admin v2 REST API."""
     proj = project or os.environ.get("GOOGLE_CLOUD_PROJECT", DEFAULT_PROJECT)
-    reg = region or os.environ.get("CLOUD_RUN_REGION", os.environ.get("REGION", DEFAULT_REGION))
+    reg = region or os.environ.get("SMART_AUDIO_REGION", DEFAULT_REGION)
     jname = job_name or os.environ.get("SMART_AUDIO_JOB", DEFAULT_JOB_NAME)
 
     url = f"https://run.googleapis.com/v2/projects/{proj}/locations/{reg}/jobs/{jname}:run"
@@ -131,18 +132,24 @@ def _run_smart_pipeline(
     audio_lead: Optional[LeadSheet] = None
 
     try:
-        # 1. Multi-source Web Search
-        if title or artist:
-            _update_smart_state(store, state_path, state, 0.10, "正在搜索网络和弦来源...")
+        # 1. Multi-source web search runs concurrently with the audio job.
+        search_box: dict[str, Any] = {}
+
+        def _search() -> None:
             try:
-                search_res = search_song(title=title, artist=artist)
+                search_box["res"] = search_song(title=title, artist=artist)
             except Exception as s_exc:
                 logger.warning("Web search failed for '%s - %s': %s", title, artist, s_exc)
-                search_res = None
+
+        search_thread: Optional[threading.Thread] = None
+        if title or artist:
+            _update_smart_state(store, state_path, state, 0.10, "正在搜索网络和弦来源...")
+            search_thread = threading.Thread(target=_search, daemon=True, name=f"smart-search-{sheet_id}")
+            search_thread.start()
 
         # 2. Audio Processing (Wait for Cloud Run Job)
         if has_audio:
-            _update_smart_state(store, state_path, state, 0.20, "音频处理中: 等待计算节点启动")
+            _update_smart_state(store, state_path, state, 0.15, "音频处理中: 等待计算节点启动")
             status_file = f"{prefix}/status.json"
             lead_file = f"{prefix}/audio_lead.json"
 
@@ -159,7 +166,7 @@ def _run_smart_pipeline(
                         s_stage = s_data.get("stage", last_stage)
                         last_stage = s_stage
 
-                        scaled_prog = 0.20 + 0.60 * s_prog
+                        scaled_prog = 0.15 + 0.65 * s_prog
                         _update_smart_state(store, state_path, state, scaled_prog, f"音频处理中: {s_stage}")
 
                         if s_status == "done":
@@ -170,6 +177,9 @@ def _run_smart_pipeline(
                                 "Audio job reported error: %s",
                                 s_data.get("error", "未知错误"),
                             )
+                            break
+                        elif s_status == "queued" and time.time() - start_t > QUEUED_GIVE_UP_SECONDS:
+                            logger.warning("Audio job for %s never started; giving up", sheet_id)
                             break
                     except Exception as poll_exc:
                         logger.debug("Error reading audio status %s: %s", status_file, poll_exc)
@@ -185,6 +195,15 @@ def _run_smart_pipeline(
                     audio_lead = None
             else:
                 logger.info("Audio processing incomplete or timed out; proceeding to fallback")
+
+        if search_thread is not None:
+            if search_thread.is_alive():
+                _update_smart_state(store, state_path, state, 0.82, "等待网络和弦来源检索完成...")
+            search_thread.join(timeout=180.0)
+            search_res = search_box.get("res")
+            # A search that found no usable chart is a failed branch, not an empty song.
+            if search_res is not None and not any(c.bars for c in search_res.consensus_sections):
+                search_res = None
 
         # 3. Graceful Degradation Check
         if audio_lead is None and search_res is None:
@@ -337,20 +356,28 @@ def start_smart(
         )
 
         # 3. Trigger Cloud Run Job
+        triggered = False
         if job_runner is not None:
             try:
-                if callable(job_runner):
-                    job_runner(sheet_id)
-                else:
-                    try:
-                        runner_fn = job_runner.run
-                        runner_fn(sheet_id)
-                    except AttributeError:
-                        pass
+                runner_fn = job_runner if callable(job_runner) else getattr(job_runner, "run", None)
+                if runner_fn is not None:
+                    res = runner_fn(sheet_id)
+                    triggered = res is not False
             except Exception as j_err:
                 logger.warning("Custom job runner failed: %s", j_err)
         else:
-            trigger_cloud_run_job(sheet_id)
+            triggered = trigger_cloud_run_job(sheet_id)
+        if not triggered:
+            store.put_json(
+                f"private/smart/{sheet_id}/status.json",
+                {
+                    "status": "error",
+                    "progress": 0.0,
+                    "stage": "音频处理任务启动失败",
+                    "error": "音频处理任务启动失败",
+                    "updated_at": now_iso,
+                },
+            )
 
     # 4. Launch background pipeline
     if background:

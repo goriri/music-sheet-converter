@@ -1,6 +1,10 @@
 .venv
+.venv*
 out
-fixtures
+fixtures/*
+!fixtures/groundtruth
+!fixtures/lead
+!fixtures/sections_truth.json
 tests
 .git
 .gitignore
@@ -13,3 +17,4 @@ __pycache__
 *.pyd
 *.jpg
 *.png
+scratch

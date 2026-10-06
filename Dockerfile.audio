@@ -1,0 +1,49 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    TORCH_HOME=/app/models/cache/torch \
+    HF_HOME=/app/models/cache/huggingface \
+    AUDIO_SEPARATOR_MODEL_DIR=/app/models/audio_separator \
+    BTC_WEIGHTS_PATH=/app/models/btc_model_large_voca.pt \
+    BEAT_THIS_MODEL_DIR=/app/models/cache/beat_this \
+    WHISPER_MODEL=small
+
+WORKDIR /app
+
+# Install system dependencies: ffmpeg, libsndfile, curl, build-essential
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ffmpeg \
+    libsndfile1 \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-audio.txt .
+RUN pip install --no-cache-dir -r requirements-audio.txt
+
+# Bake model weights into image at build time to prevent cold downloads in Cloud Run
+RUN mkdir -p /app/models/audio_separator /app/models/cache
+
+# 1. Download UVR-MDX-NET-Voc_FT ONNX model
+RUN python3 -c "from audio_separator.separator import Separator; sep = Separator(model_file_dir='/app/models/audio_separator'); sep.load_model('UVR-MDX-NET-Voc_FT.onnx')"
+
+# 2. Download BTC-ISMIR19 large vocabulary weights
+RUN curl -L -o /app/models/btc_model_large_voca.pt https://raw.githubusercontent.com/jayg996/BTC-ISMIR19/master/test/btc_model_large_voca.pt
+
+# 3. Download beat-this default checkpoint
+RUN python3 -c "from beat_this.inference import File2Beats; File2Beats(checkpoint_path='final0', device='cpu')"
+
+# 4. Download torchcrepe tiny model
+RUN python3 -c "import torchcrepe, torch; torchcrepe.predict(torch.zeros(1, 16000), 16000, model='tiny', device='cpu')"
+
+# 5. Download faster-whisper model
+RUN python3 -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
+
+COPY app/ app/
+COPY fixtures/groundtruth/ fixtures/groundtruth/
+COPY fixtures/lead/ fixtures/lead/
+COPY fixtures/sections_truth.json fixtures/sections_truth.json
+
+CMD ["python", "-m", "app.audio.job_main"]

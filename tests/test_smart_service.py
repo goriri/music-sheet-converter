@@ -286,3 +286,54 @@ def test_api_get_sheet_status_returns_smart_report(tmp_path: Path):
         assert data["status"] == "ready"
         assert data["smart_report"] is not None
         assert data["smart_report"]["agreement_ratio"] == 0.95
+
+
+def test_empty_search_and_failed_trigger_give_error_quickly(tmp_path: Path):
+    """Regression (live bug): the job trigger failed (wrong region → 403) and the search found no
+    chart; the pipeline waited the full poll timeout and then marked an EMPTY sheet 'ready'."""
+    import time as _time
+
+    storage = LocalStorage(tmp_path)
+    sheet_id = "test_trigger_fail"
+    empty = SearchResult(title="茉莉花", artist="", key="C", sources=[], consensus_sections=[])
+    t0 = _time.time()
+    with patch("app.smart.service.search_song", return_value=empty):
+        start_smart(
+            sheet_id=sheet_id,
+            title="茉莉花",
+            audio_bytes=b"RIFFfake",
+            audio_ext=".wav",
+            storage=storage,
+            job_runner=lambda jid: False,  # trigger refused
+            background=False,
+            poll_interval=0.05,
+            poll_timeout=30.0,
+        )
+    assert _time.time() - t0 < 10.0, "must not wait for a job that was never started"
+    state = storage.get_json(f"sheets/{sheet_id}/state.json")
+    assert state["status"] == "error"
+    assert not storage.exists(f"sheets/{sheet_id}/parsed.json")
+
+
+def test_default_job_region_is_asia_east1(monkeypatch):
+    """The audio job is deployed in asia-east1; the trigger URL must target it by default."""
+    monkeypatch.delenv("SMART_AUDIO_REGION", raising=False)
+    captured = {}
+
+    class _Resp:
+        status_code = 200
+        text = ""
+
+    class _Session:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def post(self, url, json=None, timeout=None):
+            captured["url"] = url
+            return _Resp()
+
+    with patch("google.auth.default", return_value=(MagicMock(), "p")), patch(
+        "google.auth.transport.requests.AuthorizedSession", _Session
+    ):
+        assert trigger_cloud_run_job("abc") is True
+    assert "/locations/asia-east1/jobs/" in captured["url"]
