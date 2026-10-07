@@ -871,7 +871,8 @@ def render_lead_sheet(
                     tb_c = draw.textbbox((cx, chord_y), c.raw, font=font_chord, stroke_width=1)
                     cw = tb_c[2] - tb_c[0]
                     prev_cx = cx
-                    prev_cw = cw
+                    # Reserve room for the disagree dot so the next chord never touches it.
+                    prev_cw = cw + (12.0 if c.agreement == "disagree" else 0.0) + 8.0
 
                     # Orange dot indicator for disagree
                     if c.agreement == "disagree":

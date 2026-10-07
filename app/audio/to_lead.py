@@ -78,10 +78,9 @@ def format_degree_to_number(root_semitone: int, quality: str, bass_semitone: int
 
 
 def _snap_onset(val: float) -> float:
-    """Quantize onset to a 0.25-beat grid with preference for 0.5-beat positions."""
-    # Check if close to half-beat (or integer beat)
+    """Quantize onset to a grid, strongly preferring 0.5 and 1.0 beat positions."""
     half_grid = round(val * 2.0) / 2.0
-    if abs(val - half_grid) <= 0.12:
+    if abs(val - half_grid) <= 0.16:
         return max(0.0, half_grid)
     quarter_grid = round(val * 4.0) / 4.0
     return max(0.0, quarter_grid)
@@ -430,6 +429,8 @@ def _analysis_to_lead_impl(a: AudioAnalysis, title: str = "", artist: str = "") 
     for note_seg in a.notes:
         if note_seg.end <= note_seg.start or note_seg.midi <= 0 or note_seg.confidence < 0.15:
             continue
+        if (note_seg.end - note_seg.start) < 0.07:
+            continue
 
         m_round = int(round(note_seg.midi))
         semitone_interval = (m_round - tonic_pc) % 12
@@ -470,8 +471,8 @@ def _analysis_to_lead_impl(a: AudioAnalysis, title: str = "", artist: str = "") 
                 if dur < 0.25:
                     dur = 0.25
 
-            # If note continues past m_e, set tie_to_next
-            has_tie = (n_end > m_e + 0.05)
+            # If note continues significantly past m_e, set tie_to_next
+            has_tie = (n_end > m_e + 0.12) and (dur >= 0.5 or (spec["beats"] - b_start) <= 0.5)
 
             lead_note = LeadNote(
                 onset=b_start,
@@ -509,45 +510,70 @@ def _analysis_to_lead_impl(a: AudioAnalysis, title: str = "", artist: str = "") 
         # Sort by onset
         raw_notes.sort(key=lambda n: (n.onset, -n.duration))
 
-        # Merge / clip overlapping notes
-        cleaned_notes: list[LeadNote] = []
+        # Pass 1: Merge overlapping or adjacent identical notes
+        merged_raw: list[LeadNote] = []
         for n in raw_notes:
-            if not cleaned_notes:
-                cleaned_notes.append(n)
+            if not merged_raw:
+                merged_raw.append(n)
                 continue
-            prev = cleaned_notes[-1]
+            prev = merged_raw[-1]
             prev_end = prev.onset + prev.duration
 
+            # Same pitch: if adjacent or slightly separated by <= 0.25 beats, merge
+            if prev.degree == n.degree and prev.accidental == n.accidental and prev.octave == n.octave:
+                if n.onset <= prev_end + 0.25 + 1e-4:
+                    new_dur = round(max(prev.duration, (n.onset + n.duration - prev.onset)) * 4.0) / 4.0
+                    merged_raw[-1] = prev.model_copy(update={
+                        "duration": min(m_beats - prev.onset, new_dur),
+                        "tie_to_next": n.tie_to_next or prev.tie_to_next,
+                    })
+                    continue
+
+            # Overlap with different pitch
             if n.onset < prev_end:
-                # Overlap: clip prev duration
                 new_prev_dur = round((n.onset - prev.onset) * 4.0) / 4.0
                 if new_prev_dur >= 0.25:
-                    cleaned_notes[-1] = prev.model_copy(update={"duration": new_prev_dur})
-                    cleaned_notes.append(n)
+                    merged_raw[-1] = prev.model_copy(update={"duration": new_prev_dur})
+                    merged_raw.append(n)
                 else:
-                    # Previous note too short, drop or merge
-                    if prev.degree == n.degree and prev.accidental == n.accidental:
-                        # Merge
-                        merged_dur = _snap_duration(prev.duration + n.duration)
-                        cleaned_notes[-1] = prev.model_copy(update={"duration": min(m_beats - prev.onset, merged_dur)})
-                    else:
-                        # Replace
-                        cleaned_notes[-1] = n
+                    merged_raw[-1] = n
             else:
-                cleaned_notes.append(n)
+                merged_raw.append(n)
 
-        # Build complete sequence with explicit rests covering 0.0 to m_beats exactly
+        # Pass 2: Absorb tiny isolated blips into neighbors
+        pass2_notes: list[LeadNote] = []
+        for n in merged_raw:
+            if not pass2_notes:
+                pass2_notes.append(n)
+                continue
+            prev = pass2_notes[-1]
+            if prev.duration <= 0.25 and abs(n.onset - (prev.onset + prev.duration)) < 1e-4:
+                pass2_notes[-1] = n.model_copy(update={
+                    "onset": prev.onset,
+                    "duration": round((prev.duration + n.duration) * 4.0) / 4.0,
+                })
+            else:
+                pass2_notes.append(n)
+
+        # Pass 3: Construct sequence with rest-gap filling and legato breath absorption
         cur_pos = 0.0
         filled_notes: list[LeadNote] = []
 
-        for n in cleaned_notes:
-            if n.onset > cur_pos + 1e-4:
-                rest_dur = round((n.onset - cur_pos) * 4.0) / 4.0
-                if rest_dur >= 0.25:
+        for n in pass2_notes:
+            gap = round((n.onset - cur_pos) * 4.0) / 4.0
+            if gap > 1e-4:
+                if gap <= 0.25 and filled_notes and filled_notes[-1].degree > 0:
+                    # Legato breath gap: absorb small gap into preceding note
+                    prev_note = filled_notes[-1]
+                    filled_notes[-1] = prev_note.model_copy(update={
+                        "duration": round((prev_note.duration + gap) * 4.0) / 4.0
+                    })
+                    cur_pos += gap
+                elif gap >= 0.25:
                     filled_notes.append(
                         LeadNote(
                             onset=cur_pos,
-                            duration=rest_dur,
+                            duration=gap,
                             degree=0,
                             accidental=0,
                             octave=0,
@@ -555,9 +581,8 @@ def _analysis_to_lead_impl(a: AudioAnalysis, title: str = "", artist: str = "") 
                             lyric="",
                         )
                     )
-                    cur_pos += rest_dur
+                    cur_pos += gap
                 else:
-                    # Shift note onset to cur_pos
                     n = n.model_copy(update={"onset": cur_pos})
 
             # Check remaining measure capacity
@@ -570,14 +595,18 @@ def _analysis_to_lead_impl(a: AudioAnalysis, title: str = "", artist: str = "") 
                 filled_notes.append(n.model_copy(update={"onset": cur_pos, "duration": actual_dur}))
                 cur_pos += actual_dur
 
-        # Fill any trailing rest
+        # Fill any trailing rest or extend last voiced note
         if cur_pos < m_beats - 1e-4:
-            trailing_rest = round((m_beats - cur_pos) * 4.0) / 4.0
-            if trailing_rest >= 0.25:
+            trailing_gap = round((m_beats - cur_pos) * 4.0) / 4.0
+            if trailing_gap <= 0.25 and filled_notes and filled_notes[-1].degree > 0:
+                last_n = filled_notes[-1]
+                filled_notes[-1] = last_n.model_copy(update={"duration": round((last_n.duration + trailing_gap) * 4.0) / 4.0})
+                cur_pos += trailing_gap
+            elif trailing_gap >= 0.25:
                 filled_notes.append(
                     LeadNote(
                         onset=cur_pos,
-                        duration=trailing_rest,
+                        duration=trailing_gap,
                         degree=0,
                         accidental=0,
                         octave=0,
@@ -585,7 +614,7 @@ def _analysis_to_lead_impl(a: AudioAnalysis, title: str = "", artist: str = "") 
                         lyric="",
                     )
                 )
-                cur_pos += trailing_rest
+                cur_pos += trailing_gap
 
         # Guarantee exact duration sum
         tot_dur = sum(n.duration for n in filled_notes)

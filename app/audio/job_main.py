@@ -1087,6 +1087,14 @@ def run_cloud_batch_eval() -> None:
                         )
                         logger.info("Uploaded lyrics_debug.json for %s", item_id)
 
+                    chord_dbg_file = Path(work_dir) / "chord_debug.npz"
+                    if chord_dbg_file.exists():
+                        results_bucket.blob(f"{res_prefix}/chord_debug.npz").upload_from_filename(
+                            str(chord_dbg_file),
+                            content_type="application/octet-stream",
+                        )
+                        logger.info("Uploaded chord_debug.npz for %s", item_id)
+
                     vocals_file = Path(work_dir) / "vocals.wav"
                     if vocals_file.exists():
                         try:

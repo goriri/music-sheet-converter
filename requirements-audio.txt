@@ -26,3 +26,4 @@ opencc-python-reimplemented>=0.1.7
 pydantic>=2.7
 fastapi>=0.115
 google-cloud-storage>=2.18
+google-genai>=1.30

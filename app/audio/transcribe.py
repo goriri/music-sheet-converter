@@ -1012,105 +1012,29 @@ def transcribe(
         else:
             grid[-1] = duration
 
-        simp_vocab = [_simplify_btc_chord(vocab.get(idx, "N")) for idx in range(170)]
-        unique_labels = sorted(list(set(simp_vocab)))
+        # Save raw chord-model outputs for offline evaluation/tuning (cheap, small).
+        try:
+            np.savez_compressed(
+                os.path.join(work_dir, "chord_debug.npz"),
+                probs=all_probs.astype(np.float16),
+                hop_dur=np.array([hop_dur]),
+                chroma_bass=chroma_bass.astype(np.float16),
+                grid=np.array(grid, dtype=float),
+                vocab=np.array([vocab.get(idx, "N") for idx in range(170)]),
+            )
+        except Exception as dbg_exc:
+            logger.warning("Failed saving chord_debug.npz: %s", dbg_exc)
 
-        # Aggregate frame posteriors over each beat interval
-        beat_chords: list[str] = []
-        beat_confs: list[float] = []
+        from app.audio.chords import decode_chords
 
-        for k in range(len(grid) - 1):
-            t0 = grid[k]
-            t1 = grid[k + 1]
-            f_start = max(0, int(round(t0 / hop_dur)))
-            f_end = min(n_frames, max(f_start + 1, int(round(t1 / hop_dur))))
-
-            if f_end > f_start and n_frames > 0:
-                frame_dist = np.mean(all_probs[f_start:f_end, :], axis=0)
-            elif n_frames > 0:
-                frame_dist = all_probs[min(f_start, n_frames - 1), :]
-            else:
-                frame_dist = np.zeros(170)
-
-            prob_per_label: dict[str, float] = {lbl: 0.0 for lbl in unique_labels}
-            for c_idx in range(len(frame_dist)):
-                prob_per_label[simp_vocab[c_idx]] += float(frame_dist[c_idx])
-
-            best_lbl = max(prob_per_label.keys(), key=lambda l: prob_per_label[l])
-            best_prob = prob_per_label[best_lbl]
-            beat_chords.append(best_lbl)
-            beat_confs.append(best_prob)
-
-        # Apply 2-beat smoothing / transient filter to remove isolated 1-beat glitches
-        smoothed_chords = _smooth_beat_chords(beat_chords, beat_confs)
-
-        # Group contiguous identical chords into ChordSeg
-        if smoothed_chords:
-            cur_start_idx = 0
-            cur_label = smoothed_chords[0]
-
-            for idx in range(1, len(smoothed_chords)):
-                if smoothed_chords[idx] != cur_label:
-                    if cur_label not in ("N", "X"):
-                        t_seg_start = grid[cur_start_idx]
-                        t_seg_end = grid[idx]
-                        seg_conf = float(np.mean(beat_confs[cur_start_idx:idx]))
-
-                        bass_pc = None
-                        m_root = re.match(r"^([A-Ga-g][b#]?)", cur_label)
-                        if m_root and chroma_bass.shape[1] > 0:
-                            r_pc = KEY_NAME_TO_PC.get(m_root.group(1).upper())
-                            sf_start = max(0, int(round(t_seg_start / hop_dur)))
-                            sf_end = min(chroma_bass.shape[1], max(sf_start + 1, int(round(t_seg_end / hop_dur))))
-                            sub_bass = chroma_bass[:, sf_start:sf_end]
-                            if sub_bass.shape[1] > 0:
-                                b_vec = np.mean(sub_bass, axis=1)
-                                b_cand = int(np.argmax(b_vec))
-                                mean_e = np.mean(b_vec)
-                                if mean_e > 1e-4 and b_vec[b_cand] > 1.35 * mean_e and b_cand != r_pc:
-                                    bass_pc = b_cand
-
-                        chords.append(
-                            ChordSeg(
-                                start=round(t_seg_start, 2),
-                                end=round(t_seg_end, 2),
-                                label=cur_label,
-                                bass_pc=bass_pc,
-                                confidence=round(seg_conf, 3),
-                            )
-                        )
-                    cur_start_idx = idx
-                    cur_label = smoothed_chords[idx]
-
-            # Last segment
-            if cur_label not in ("N", "X"):
-                t_seg_start = grid[cur_start_idx]
-                t_seg_end = grid[-1]
-                seg_conf = float(np.mean(beat_confs[cur_start_idx:]))
-
-                bass_pc = None
-                m_root = re.match(r"^([A-Ga-g][b#]?)", cur_label)
-                if m_root and chroma_bass.shape[1] > 0:
-                    r_pc = KEY_NAME_TO_PC.get(m_root.group(1).upper())
-                    sf_start = max(0, int(round(t_seg_start / hop_dur)))
-                    sf_end = min(chroma_bass.shape[1], max(sf_start + 1, int(round(t_seg_end / hop_dur))))
-                    sub_bass = chroma_bass[:, sf_start:sf_end]
-                    if sub_bass.shape[1] > 0:
-                        b_vec = np.mean(sub_bass, axis=1)
-                        b_cand = int(np.argmax(b_vec))
-                        mean_e = np.mean(b_vec)
-                        if mean_e > 1e-4 and b_vec[b_cand] > 1.35 * mean_e and b_cand != r_pc:
-                            bass_pc = b_cand
-
-                chords.append(
-                    ChordSeg(
-                        start=round(t_seg_start, 2),
-                        end=round(t_seg_end, 2),
-                        label=cur_label,
-                        bass_pc=bass_pc,
-                        confidence=round(seg_conf, 3),
-                    )
-                )
+        chords = decode_chords(
+            all_probs,
+            hop_dur,
+            grid,
+            vocab,
+            chroma_bass,
+            params={"downbeats": downbeats},
+        )
 
         del btc_model
         del ckpt
@@ -1245,138 +1169,10 @@ def transcribe(
         except Exception as dbg_exc:
             logger.warning("Failed saving melody_debug.npz: %s", dbg_exc)
 
-        # Adaptive voicing detection using periodicity + vocal stem energy
-        rms_active = rms_loud_thresh
+        # Note segmentation via dedicated notes module
+        from app.audio.notes import segment_notes
 
-        is_voiced = np.zeros(len(pitch_arr), dtype=bool)
-        state = False
-        for t_idx in range(len(pitch_arr)):
-            p_val = per_arr[t_idx]
-            hz_val = pitch_arr[t_idx]
-            r_val = vocal_rms[t_idx]
-
-            # In active vocal frames, lower the required periodicity threshold
-            if r_val >= rms_active:
-                turn_on_thresh = 0.22
-                turn_off_thresh = 0.15
-            else:
-                turn_on_thresh = 0.35
-                turn_off_thresh = 0.22
-
-            if not state:
-                if p_val >= turn_on_thresh and 65.0 <= hz_val <= 1100.0:
-                    state = True
-            else:
-                if p_val < turn_off_thresh or hz_val < 60.0 or hz_val > 1200.0:
-                    state = False
-            is_voiced[t_idx] = state
-
-        # Convert Hz to MIDI pitches for voiced frames
-        midi_arr = np.zeros(len(pitch_arr), dtype=float)
-        v_idx = np.where(is_voiced)[0]
-        if len(v_idx) > 0:
-            midi_arr[v_idx] = 69.0 + 12.0 * np.log2(np.maximum(1.0, pitch_arr[v_idx]) / 440.0)
-            midi_arr[v_idx] = median_filter(midi_arr[v_idx], size=5)
-
-        # Bridge short unvoiced dropouts (1-3 frames, <= 30ms) between similar pitches
-        bridged_voiced = is_voiced.copy()
-        for idx in range(1, len(is_voiced) - 4):
-            if not bridged_voiced[idx]:
-                gap_len = 0
-                while idx + gap_len < len(is_voiced) and not is_voiced[idx + gap_len]:
-                    gap_len += 1
-                if 1 <= gap_len <= 3 and idx + gap_len < len(is_voiced):
-                    prev_p = midi_arr[idx - 1]
-                    next_p = midi_arr[idx + gap_len]
-                    if prev_p > 0 and next_p > 0 and abs(next_p - prev_p) <= 1.5:
-                        for g in range(gap_len):
-                            bridged_voiced[idx + g] = True
-                            alpha = (g + 1) / (gap_len + 1)
-                            midi_arr[idx + g] = prev_p + alpha * (next_p - prev_p)
-        is_voiced = bridged_voiced
-
-        # Note segmentation with vibrato tolerance & pitch-change hysteresis
-        in_note = False
-        note_start_idx = 0
-        current_note_midis: list[float] = []
-        deviation_count = 0
-
-        for idx in range(len(pitch_arr)):
-            if is_voiced[idx]:
-                cur_m = midi_arr[idx]
-                if not in_note:
-                    in_note = True
-                    note_start_idx = idx
-                    current_note_midis = [cur_m]
-                    deviation_count = 0
-                else:
-                    ref_m = np.median(current_note_midis)
-                    if abs(cur_m - ref_m) > 0.85:
-                        deviation_count += 1
-                    else:
-                        deviation_count = 0
-
-                    # Only split if deviation persists for >= 3 frames and previous note >= 8 frames
-                    if deviation_count >= 3 and len(current_note_midis) >= 8:
-                        split_idx = idx - deviation_count + 1
-                        prev_midis = current_note_midis[:len(current_note_midis) - deviation_count + 1]
-                        n_dur = (split_idx - note_start_idx) * hop_dur
-                        if n_dur >= 0.08 and prev_midis:
-                            notes.append(
-                                NoteSeg(
-                                    start=round(note_start_idx * hop_dur, 2),
-                                    end=round(split_idx * hop_dur, 2),
-                                    midi=round(float(np.median(prev_midis)), 1),
-                                    confidence=round(float(np.mean(per_arr[note_start_idx:split_idx])), 3),
-                                )
-                            )
-                        note_start_idx = split_idx
-                        current_note_midis = list(midi_arr[split_idx:idx + 1])
-                        deviation_count = 0
-                    else:
-                        current_note_midis.append(cur_m)
-            else:
-                if in_note:
-                    in_note = False
-                    n_dur = (idx - note_start_idx) * hop_dur
-                    if n_dur >= 0.08 and current_note_midis:
-                        notes.append(
-                            NoteSeg(
-                                start=round(note_start_idx * hop_dur, 2),
-                                end=round(idx * hop_dur, 2),
-                                midi=round(float(np.median(current_note_midis)), 1),
-                                confidence=round(float(np.mean(per_arr[note_start_idx:idx])), 3),
-                            )
-                        )
-                    current_note_midis = []
-                    deviation_count = 0
-
-        # Trailing note
-        if in_note and len(current_note_midis) >= 8:
-            notes.append(
-                NoteSeg(
-                    start=round(note_start_idx * hop_dur, 2),
-                    end=round(len(pitch_arr) * hop_dur, 2),
-                    midi=round(float(np.median(current_note_midis)), 1),
-                    confidence=round(float(np.mean(per_arr[note_start_idx:])), 3),
-                )
-            )
-
-        # Merge adjacent notes with identical pitch (within 0.4 st) and gap <= 0.06s
-        if len(notes) > 1:
-            merged_notes: list[NoteSeg] = [notes[0]]
-            for n_next in notes[1:]:
-                n_prev = merged_notes[-1]
-                if abs(n_next.midi - n_prev.midi) <= 0.4 and (n_next.start - n_prev.end) <= 0.06:
-                    merged_notes[-1] = NoteSeg(
-                        start=n_prev.start,
-                        end=n_next.end,
-                        midi=round(float((n_prev.midi + n_next.midi) / 2.0), 1),
-                        confidence=round(float((n_prev.confidence + n_next.confidence) / 2.0), 3),
-                    )
-                else:
-                    merged_notes.append(n_next)
-            notes = merged_notes
+        notes = segment_notes(time_arr, pitch_arr, per_arr, vocal_rms, beats=beats)
 
         del pitch_arr
         del per_arr
@@ -1465,6 +1261,23 @@ def transcribe(
             lyrics = []
         else:
             lyrics = filter_lyrics_segments(segments_list, notes, language="zh", cc=cc)
+
+            # Gemini-based lyric correction
+            if os.environ.get("SMART_LYRICS_LLM", "1") != "0":
+                try:
+                    from app.audio.lyrics_llm import correct_lyrics
+
+                    corr_lyrics, corr_warnings = correct_lyrics(
+                        vocals_path,
+                        lyrics,
+                        notes,
+                        language="zh",
+                    )
+                    lyrics = corr_lyrics
+                    warnings.extend(corr_warnings)
+                except Exception as corr_exc:
+                    logger.warning("Gemini lyrics correction failed: %s", corr_exc)
+                    warnings.append(f"歌词大模型纠错异常: {corr_exc}")
 
     except Exception as exc:
         logger.warning("Lyrics transcription failed: %s", exc)
