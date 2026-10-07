@@ -921,6 +921,234 @@ def run_cloud_synth_eval() -> None:
     print(json.dumps(report_data, indent=2, ensure_ascii=False))
 
 
+def parse_gcs_uri(uri: str) -> tuple[str, str]:
+    """Parse a gs://bucket/path URI into (bucket_name, blob_name)."""
+    if not uri.startswith("gs://"):
+        raise ValueError(f"Invalid GCS URI (must start with gs://): {uri}")
+    path = uri[5:]
+    bucket_name, sep, blob_name = path.partition("/")
+    if not sep or not bucket_name or not blob_name:
+        raise ValueError(f"Invalid GCS URI (missing bucket or object path): {uri}")
+    return bucket_name, blob_name
+
+
+def shard_manifest(items: list[dict], task_index: int, task_count: int) -> list[dict]:
+    """Deterministically shard manifest items across Cloud Run tasks."""
+    if task_count <= 0:
+        raise ValueError(f"task_count must be > 0, got {task_count}")
+    if not (0 <= task_index < task_count):
+        raise ValueError(f"task_index must be in [0, {task_count - 1}], got {task_index}")
+    sorted_items = sorted(items, key=lambda x: str(x.get("id", "")))
+    return [item for idx, item in enumerate(sorted_items) if idx % task_count == task_index]
+
+
+def run_cloud_batch_eval() -> None:
+    """Execute batch evaluation mode in Cloud Run Job.
+
+    Reads manifest JSON from GCS (EVAL_MANIFEST, default:
+    gs://cellular-cider-495602-r9-sheet-eval/manifest.json).
+    Shards items across tasks using CLOUD_RUN_TASK_INDEX / CLOUD_RUN_TASK_COUNT.
+    For each item:
+      - downloads audio from GCS
+      - runs transcribe() pipeline to produce AudioAnalysis
+      - converts to LeadSheet via analysis_to_lead()
+      - records elapsed and per-stage timings
+      - uploads analysis.json, audio_lead.json, timing.json to:
+        gs://<eval_bucket>/results/<run_id>/<id>/
+      - catches and records any per-item exceptions into error.json without halting the task.
+    """
+    import time
+    import traceback
+    from google.cloud import storage
+
+    manifest_uri = os.environ.get(
+        "EVAL_MANIFEST",
+        "gs://cellular-cider-495602-r9-sheet-eval/manifest.json",
+    )
+    run_id = os.environ.get("EVAL_RUN_ID")
+    if not run_id:
+        run_id = f"eval_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+
+    task_index = int(os.environ.get("CLOUD_RUN_TASK_INDEX", "0"))
+    task_count = int(os.environ.get("CLOUD_RUN_TASK_COUNT", "1"))
+
+    logger.info(
+        "Starting batch_eval: manifest=%s, run_id=%s, task=%d/%d",
+        manifest_uri,
+        run_id,
+        task_index,
+        task_count,
+    )
+
+    storage_client = storage.Client()
+    m_bucket_name, m_blob_name = parse_gcs_uri(manifest_uri)
+    m_bucket = storage_client.bucket(m_bucket_name)
+    m_blob = m_bucket.blob(m_blob_name)
+
+    manifest_bytes = m_blob.download_as_bytes()
+    all_items = json.loads(manifest_bytes.decode("utf-8"))
+
+    eval_split = os.environ.get("EVAL_SPLIT", "").strip().lower()
+    if eval_split:
+        filtered_items = [it for it in all_items if it.get("split", "").lower() == eval_split]
+        logger.info("Filtered manifest to split=%s: %d of %d items", eval_split, len(filtered_items), len(all_items))
+    else:
+        filtered_items = all_items
+
+    task_items = shard_manifest(filtered_items, task_index, task_count)
+
+    logger.info(
+        "Task %d/%d assigned %d of %d items: %s",
+        task_index,
+        task_count,
+        len(task_items),
+        len(all_items),
+        [it.get("id") for it in task_items],
+    )
+
+    results_bucket = m_bucket
+
+    for item_idx, item in enumerate(task_items):
+        item_id = item.get("id", f"item_{item_idx}")
+        audio_gcs = item.get("audio_gcs", "")
+        item_title = item.get("title", "")
+        item_artist = item.get("artist", "")
+        dataset = item.get("dataset", "")
+
+        logger.info(
+            "[%d/%d] Processing %s (%s, %s)...",
+            item_idx + 1,
+            len(task_items),
+            item_id,
+            dataset,
+            audio_gcs,
+        )
+
+        with tempfile.TemporaryDirectory(prefix=f"eval_{item_id}_") as work_dir:
+            try:
+                t0 = time.perf_counter()
+                audio_b_name, audio_blob_name = parse_gcs_uri(audio_gcs)
+                audio_bucket = storage_client.bucket(audio_b_name)
+                audio_blob = audio_bucket.blob(audio_blob_name)
+
+                ext = Path(audio_blob_name).suffix or ".wav"
+                local_audio = os.path.join(work_dir, f"input{ext}")
+                audio_blob.download_to_filename(local_audio)
+                logger.info("Downloaded %s to %s", audio_gcs, local_audio)
+
+                analysis = transcribe(
+                    local_audio,
+                    work_dir,
+                    progress=lambda pct, text: logger.info("[%s %3d%%] %s", item_id, int(pct * 100), text),
+                )
+                lead = analysis_to_lead(analysis, title=item_title, artist=item_artist)
+                elapsed = round(time.perf_counter() - t0, 3)
+
+                timing_info = {
+                    "id": item_id,
+                    "dataset": dataset,
+                    "title": item_title,
+                    "artist": item_artist,
+                    "elapsed_sec": elapsed,
+                    "stage_timings": analysis.stage_timings,
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                }
+
+                res_prefix = f"results/{run_id}/{item_id}"
+                results_bucket.blob(f"{res_prefix}/analysis.json").upload_from_string(
+                    analysis.model_dump_json(indent=2),
+                    content_type="application/json",
+                )
+                results_bucket.blob(f"{res_prefix}/audio_lead.json").upload_from_string(
+                    lead.model_dump_json(indent=2),
+                    content_type="application/json",
+                )
+                results_bucket.blob(f"{res_prefix}/timing.json").upload_from_string(
+                    json.dumps(timing_info, indent=2),
+                    content_type="application/json",
+                )
+                logger.info("Saved outputs for %s to %s/ (elapsed: %.2fs)", item_id, res_prefix, elapsed)
+
+                save_debug = os.environ.get("EVAL_SAVE_DEBUG", "0").lower() in ("1", "true", "yes")
+                if save_debug:
+                    npz_file = Path(work_dir) / "melody_debug.npz"
+                    if npz_file.exists():
+                        results_bucket.blob(f"{res_prefix}/melody_debug.npz").upload_from_filename(
+                            str(npz_file),
+                            content_type="application/octet-stream",
+                        )
+                        logger.info("Uploaded melody_debug.npz for %s", item_id)
+
+                    lyrics_dbg_file = Path(work_dir) / "lyrics_debug.json"
+                    if lyrics_dbg_file.exists():
+                        results_bucket.blob(f"{res_prefix}/lyrics_debug.json").upload_from_filename(
+                            str(lyrics_dbg_file),
+                            content_type="application/json",
+                        )
+                        logger.info("Uploaded lyrics_debug.json for %s", item_id)
+
+                    vocals_file = Path(work_dir) / "vocals.wav"
+                    if vocals_file.exists():
+                        try:
+                            import numpy as np
+                            import soundfile as sf
+                            v_audio, v_sr = sf.read(str(vocals_file))
+                            if v_audio.ndim > 1:
+                                v_audio = np.mean(v_audio, axis=1)
+                            if v_sr != 16000:
+                                n_target = int(round(len(v_audio) * 16000.0 / float(v_sr)))
+                                v_16k = np.interp(
+                                    np.linspace(0, len(v_audio), n_target, endpoint=False),
+                                    np.arange(len(v_audio)),
+                                    v_audio,
+                                ).astype(np.float32)
+                            else:
+                                v_16k = v_audio.astype(np.float32)
+                            flac_path = Path(work_dir) / "vocals_16k.flac"
+                            sf.write(str(flac_path), v_16k, 16000, format="FLAC")
+                            results_bucket.blob(f"{res_prefix}/vocals_16k.flac").upload_from_filename(
+                                str(flac_path),
+                                content_type="audio/flac",
+                            )
+                            logger.info("Uploaded vocals_16k.flac for %s", item_id)
+                        except Exception as flac_err:
+                            logger.warning("Failed encoding/uploading vocals_16k.flac: %s", flac_err)
+
+            except Exception as exc:
+                logger.exception("Failed processing item %s: %s", item_id, exc)
+                err_info = {
+                    "id": item_id,
+                    "item": item,
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                res_prefix = f"results/{run_id}/{item_id}"
+                try:
+                    results_bucket.blob(f"{res_prefix}/error.json").upload_from_string(
+                        json.dumps(err_info, indent=2),
+                        content_type="application/json",
+                    )
+                except Exception as upload_exc:
+                    logger.warning("Failed uploading error.json for %s: %s", item_id, upload_exc)
+
+    try:
+        task_done_info = {
+            "task_index": task_index,
+            "task_count": task_count,
+            "assigned_items": [it.get("id") for it in task_items],
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        results_bucket.blob(f"results/{run_id}/task_{task_index}_done.json").upload_from_string(
+            json.dumps(task_done_info, indent=2),
+            content_type="application/json",
+        )
+    except Exception as exc:
+        logger.warning("Failed recording task_done marker: %s", exc)
+
+    logger.info("Task %d/%d completed batch_eval successfully.", task_index, task_count)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Smart Sheet Audio Transcription Job")
     parser.add_argument("--local", type=str, default=None, help="Path to local audio file for direct run")
@@ -932,6 +1160,8 @@ def main():
     mode = os.environ.get("SMART_JOB_MODE")
     if mode == "synth_eval":
         run_cloud_synth_eval()
+    elif mode == "batch_eval":
+        run_cloud_batch_eval()
     elif args.local:
         run_local(args.local, args.out, title=args.title, artist=args.artist)
     else:

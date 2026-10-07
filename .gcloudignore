@@ -7,9 +7,16 @@ fixtures/*
 !fixtures/groundtruth
 !fixtures/lead
 !fixtures/sections_truth.json
+fixtures/external/
+fixtures/holdout/
+fixtures/sheets/
+fixtures/pages/
+fixtures/corrupted*/
 tests/
 docs/
 scripts/
+eval/
+diag_stems/
 *.jpg
 *.jpeg
 *.png

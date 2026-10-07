@@ -38,7 +38,7 @@ gcloud run jobs deploy "${JOB_NAME}" \
   --image="${IMAGE}" \
   --cpu=8 \
   --memory=32Gi \
-  --task-timeout=1800 \
+  --task-timeout=3600 \
   --max-retries=0 \
   --service-account="${SA_EMAIL}" \
   --set-env-vars="BUCKET=${BUCKET_NAME},GOOGLE_CLOUD_PROJECT=${PROJECT}"

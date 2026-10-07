@@ -1,12 +1,11 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
     args:
-      - 'build'
-      - '-f'
-      - 'Dockerfile.audio'
-      - '-t'
-      - 'asia-east1-docker.pkg.dev/cellular-cider-495602-r9/cloud-run-source-deploy/smart-audio:latest'
-      - '.'
+      - '-c'
+      - |
+        docker pull asia-east1-docker.pkg.dev/cellular-cider-495602-r9/cloud-run-source-deploy/smart-audio:latest || true
+        docker build --cache-from asia-east1-docker.pkg.dev/cellular-cider-495602-r9/cloud-run-source-deploy/smart-audio:latest -f Dockerfile.audio -t asia-east1-docker.pkg.dev/cellular-cider-495602-r9/cloud-run-source-deploy/smart-audio:latest .
 images:
   - 'asia-east1-docker.pkg.dev/cellular-cider-495602-r9/cloud-run-source-deploy/smart-audio:latest'
 options:

@@ -578,14 +578,17 @@ def filter_lyrics_segments(
                     c_start = w_start + c_idx * char_dur
                     c_end = min(w_end, c_start + char_dur)
 
-                    # Gating against melody notes: must overlap [n.start - 0.15, n.end + 0.15]
-                    overlaps = False
-                    for n in notes:
-                        if max(c_start, n.start - 0.15) < min(c_end, n.end + 0.15):
-                            overlaps = True
-                            break
-                    if not overlaps:
-                        continue
+                    # Gating against melody notes:
+                    # If notes exist, must overlap [n.start - 0.25, n.end + 0.25]
+                    # If notes is empty, accept confident whisper characters directly
+                    if notes:
+                        overlaps = False
+                        for n in notes:
+                            if max(c_start, n.start - 0.25) < min(c_end, n.end + 0.25):
+                                overlaps = True
+                                break
+                        if not overlaps:
+                            continue
 
                     lyrics.append(
                         LyricChar(
@@ -614,13 +617,14 @@ def filter_lyrics_segments(
             for c_idx, char in enumerate(chars):
                 c_start = seg_start + c_idx * char_dur
                 c_end = min(seg_end, c_start + char_dur)
-                overlaps = False
-                for n in notes:
-                    if max(c_start, n.start - 0.15) < min(c_end, n.end + 0.15):
-                        overlaps = True
-                        break
-                if not overlaps:
-                    continue
+                if notes:
+                    overlaps = False
+                    for n in notes:
+                        if max(c_start, n.start - 0.25) < min(c_end, n.end + 0.25):
+                            overlaps = True
+                            break
+                    if not overlaps:
+                        continue
                 lyrics.append(
                     LyricChar(
                         start=round(c_start, 2),
@@ -630,6 +634,27 @@ def filter_lyrics_segments(
                 )
 
     return lyrics
+
+
+def vocal_activity_thresholds(vocal_rms) -> tuple[float, float]:
+    """Return (active_thresh, loud_thresh) RMS levels for the separated vocal stem.
+
+    Thresholds are RELATIVE to the stem's own loud level (95th percentile), so they work
+    for quiet uploads and for stems that are voiced almost everywhere (a percentile-of-
+    silence rule such as p25*1.5 gates out every frame when there is no silence).
+    active ≈ -24 dB below the loud level, loud ≈ -20 dB; a tiny absolute floor rejects
+    digital silence / separation residue.
+    """
+    import numpy as np
+
+    rms = np.asarray(vocal_rms, dtype=float)
+    rms = rms[np.isfinite(rms)]
+    if rms.size == 0:
+        return 1e-4, 1e-4
+    ref = float(np.percentile(rms, 95))
+    active = max(1e-4, 0.06 * ref)
+    loud = max(1e-4, 0.10 * ref)
+    return active, loud
 
 
 def _detect_sections(
@@ -841,7 +866,20 @@ def transcribe(
 
         model_dir = os.environ.get("AUDIO_SEPARATOR_MODEL_DIR", os.path.join(work_dir, "models"))
         os.makedirs(model_dir, exist_ok=True)
-        sep = Separator(model_file_dir=model_dir, output_dir=work_dir, output_format="WAV")
+        mdx_overlap = float(os.environ.get("MDX_OVERLAP", "0.15"))
+        mdx_params = {
+            "hop_length": 1024,
+            "segment_size": 256,
+            "overlap": mdx_overlap,
+            "batch_size": 1,
+            "enable_denoise": False,
+        }
+        sep = Separator(
+            model_file_dir=model_dir,
+            output_dir=work_dir,
+            output_format="WAV",
+            mdx_params=mdx_params,
+        )
         sep.load_model("UVR-MDX-NET-Voc_FT.onnx")
         outputs = sep.separate(audio_path)
 
@@ -1090,42 +1128,146 @@ def transcribe(
 
     notes: list[NoteSeg] = []
     try:
+        import math
+        import scipy.signal
+        from scipy.ndimage import binary_closing, binary_dilation, median_filter
         import torchcrepe
-        from scipy.ndimage import median_filter
 
         voc_audio, v_sr = sf.read(vocals_path)
         if voc_audio.ndim > 1:
             voc_audio = np.mean(voc_audio, axis=1)
 
-        hop_length = int(v_sr * 0.01)  # 10ms frame
-        hop_dur = hop_length / float(v_sr)
-        voc_t = torch.from_numpy(voc_audio).float().unsqueeze(0)
+        # Ensure vocal audio is resampled to 16000 Hz for Crepe consistency
+        target_sr = 16000
+        if v_sr != target_sr:
+            g = math.gcd(int(target_sr), int(v_sr))
+            voc_16k = scipy.signal.resample_poly(voc_audio, target_sr // g, v_sr // g)
+        else:
+            voc_16k = voc_audio
+        voc_16k = np.ascontiguousarray(voc_16k, dtype=np.float32)
 
-        with torch.no_grad():
-            pitch, periodicity = torchcrepe.predict(
-                voc_t,
-                v_sr,
-                hop_length=hop_length,
-                model="tiny",
-                device="cpu",
-                return_periodicity=True,
-                batch_size=2048,
+        hop_length = 160  # 10ms frame at 16000 Hz
+        hop_dur = 0.01
+        num_frames = int(np.ceil(len(voc_16k) / float(hop_length)))
+        target_len = num_frames * hop_length
+        padded_voc = np.pad(voc_16k, (0, max(0, target_len - len(voc_16k))))[:target_len]
+        vocal_frames = padded_voc.reshape(num_frames, hop_length)
+        vocal_rms = np.sqrt(np.mean(vocal_frames ** 2, axis=1))
+        time_arr = np.arange(num_frames) * hop_dur
+
+        # Identify active vocal frames based on RMS
+        rms_active_thresh, rms_loud_thresh = vocal_activity_thresholds(vocal_rms)
+
+        is_active = vocal_rms >= rms_active_thresh
+        # Pad active regions by +/- 0.20s (+/- 20 frames) and bridge gaps <= 0.40s (40 frames)
+        pad_frames = 20
+        bridge_frames = 40
+        active_dilated = binary_dilation(is_active, iterations=pad_frames)
+        active_bridged = binary_closing(active_dilated, structure=np.ones(bridge_frames, dtype=bool))
+
+        # Find contiguous active segments
+        segments: list[tuple[int, int]] = []
+        in_seg = False
+        seg_start = 0
+        for idx, val in enumerate(active_bridged):
+            if val and not in_seg:
+                in_seg = True
+                seg_start = idx
+            elif not val and in_seg:
+                in_seg = False
+                segments.append((seg_start, idx))
+        if in_seg:
+            segments.append((seg_start, len(active_bridged)))
+
+        crepe_model = os.environ.get("CREPE_MODEL", "tiny")
+        crepe_batch_size = int(os.environ.get("CREPE_BATCH_SIZE", "4096"))
+        enable_pyin = os.environ.get("ENABLE_PYIN_FALLBACK", "0") == "1"
+        pitch_arr = np.zeros(num_frames, dtype=np.float32)
+        per_arr = np.zeros(num_frames, dtype=np.float32)
+
+        for s_idx, e_idx in segments:
+            sample_start = s_idx * hop_length
+            sample_end = min(len(voc_16k), e_idx * hop_length)
+            seg_audio = voc_16k[sample_start:sample_end]
+            if len(seg_audio) < hop_length:
+                continue
+
+            seg_t = torch.from_numpy(seg_audio).float().unsqueeze(0)
+            with torch.no_grad():
+                seg_pitch, seg_per = torchcrepe.predict(
+                    seg_t,
+                    target_sr,
+                    hop_length=hop_length,
+                    model=crepe_model,
+                    device="cpu",
+                    return_periodicity=True,
+                    batch_size=crepe_batch_size,
+                    decoder=torchcrepe.decode.weighted_argmax,
+                )
+            sp = seg_pitch.squeeze(0).numpy()
+            sc = seg_per.squeeze(0).numpy()
+
+            # Segment-level librosa.pyin fallback (disabled by default):
+            if enable_pyin:
+                seg_rms_mean = float(np.mean(vocal_rms[s_idx:e_idx]))
+                seg_per_mean = float(np.mean(sc)) if len(sc) > 0 else 0.0
+                if seg_rms_mean >= rms_loud_thresh and seg_per_mean < 0.20:
+                    try:
+                        import librosa
+                        f0_pyin, voiced_flag, voiced_probs = librosa.pyin(
+                            seg_audio,
+                            fmin=65.0,
+                            fmax=1100.0,
+                            sr=target_sr,
+                            hop_length=hop_length,
+                        )
+                        f0_pyin = np.nan_to_num(f0_pyin, nan=0.0)
+                        voiced_probs = np.nan_to_num(voiced_probs, nan=0.0)
+                        sp = f0_pyin.astype(np.float32)
+                        sc = voiced_probs.astype(np.float32)
+                    except Exception as pyin_exc:
+                        logger.warning("librosa.pyin fallback failed on segment %d-%d: %s", s_idx, e_idx, pyin_exc)
+
+            n_assign = min(e_idx - s_idx, len(sp))
+            pitch_arr[s_idx : s_idx + n_assign] = sp[:n_assign]
+            per_arr[s_idx : s_idx + n_assign] = sc[:n_assign]
+
+        # Save melody_debug.npz in work_dir
+        try:
+            debug_npz_path = os.path.join(work_dir, "melody_debug.npz")
+            np.savez_compressed(
+                debug_npz_path,
+                time=time_arr,
+                pitch_hz=pitch_arr,
+                periodicity=per_arr,
+                vocal_rms=vocal_rms,
             )
+        except Exception as dbg_exc:
+            logger.warning("Failed saving melody_debug.npz: %s", dbg_exc)
 
-        pitch_arr = pitch.squeeze(0).numpy()
-        per_arr = periodicity.squeeze(0).numpy()
+        # Adaptive voicing detection using periodicity + vocal stem energy
+        rms_active = rms_loud_thresh
 
-        # Voicing detection with hysteresis
         is_voiced = np.zeros(len(pitch_arr), dtype=bool)
         state = False
         for t_idx in range(len(pitch_arr)):
             p_val = per_arr[t_idx]
             hz_val = pitch_arr[t_idx]
+            r_val = vocal_rms[t_idx]
+
+            # In active vocal frames, lower the required periodicity threshold
+            if r_val >= rms_active:
+                turn_on_thresh = 0.22
+                turn_off_thresh = 0.15
+            else:
+                turn_on_thresh = 0.35
+                turn_off_thresh = 0.22
+
             if not state:
-                if p_val >= 0.35 and 65.0 <= hz_val <= 1100.0:
+                if p_val >= turn_on_thresh and 65.0 <= hz_val <= 1100.0:
                     state = True
             else:
-                if p_val < 0.20 or hz_val < 60.0 or hz_val > 1200.0:
+                if p_val < turn_off_thresh or hz_val < 60.0 or hz_val > 1200.0:
                     state = False
             is_voiced[t_idx] = state
 
@@ -1134,13 +1276,30 @@ def transcribe(
         v_idx = np.where(is_voiced)[0]
         if len(v_idx) > 0:
             midi_arr[v_idx] = 69.0 + 12.0 * np.log2(np.maximum(1.0, pitch_arr[v_idx]) / 440.0)
-            # Median smoothing
             midi_arr[v_idx] = median_filter(midi_arr[v_idx], size=5)
 
-        # Note segmentation
+        # Bridge short unvoiced dropouts (1-3 frames, <= 30ms) between similar pitches
+        bridged_voiced = is_voiced.copy()
+        for idx in range(1, len(is_voiced) - 4):
+            if not bridged_voiced[idx]:
+                gap_len = 0
+                while idx + gap_len < len(is_voiced) and not is_voiced[idx + gap_len]:
+                    gap_len += 1
+                if 1 <= gap_len <= 3 and idx + gap_len < len(is_voiced):
+                    prev_p = midi_arr[idx - 1]
+                    next_p = midi_arr[idx + gap_len]
+                    if prev_p > 0 and next_p > 0 and abs(next_p - prev_p) <= 1.5:
+                        for g in range(gap_len):
+                            bridged_voiced[idx + g] = True
+                            alpha = (g + 1) / (gap_len + 1)
+                            midi_arr[idx + g] = prev_p + alpha * (next_p - prev_p)
+        is_voiced = bridged_voiced
+
+        # Note segmentation with vibrato tolerance & pitch-change hysteresis
         in_note = False
         note_start_idx = 0
         current_note_midis: list[float] = []
+        deviation_count = 0
 
         for idx in range(len(pitch_arr)):
             if is_voiced[idx]:
@@ -1149,30 +1308,38 @@ def transcribe(
                     in_note = True
                     note_start_idx = idx
                     current_note_midis = [cur_m]
+                    deviation_count = 0
                 else:
-                    ref_m = np.median(current_note_midis[-5:]) if len(current_note_midis) >= 5 else current_note_midis[0]
-                    # Split on sustained pitch jump > 0.7 semitones
-                    if abs(cur_m - ref_m) > 0.7 and len(current_note_midis) >= 8:
-                        # Finalize previous note if length >= 0.08s
-                        n_dur = (idx - note_start_idx) * hop_dur
-                        if n_dur >= 0.08:
+                    ref_m = np.median(current_note_midis)
+                    if abs(cur_m - ref_m) > 0.85:
+                        deviation_count += 1
+                    else:
+                        deviation_count = 0
+
+                    # Only split if deviation persists for >= 3 frames and previous note >= 8 frames
+                    if deviation_count >= 3 and len(current_note_midis) >= 8:
+                        split_idx = idx - deviation_count + 1
+                        prev_midis = current_note_midis[:len(current_note_midis) - deviation_count + 1]
+                        n_dur = (split_idx - note_start_idx) * hop_dur
+                        if n_dur >= 0.08 and prev_midis:
                             notes.append(
                                 NoteSeg(
                                     start=round(note_start_idx * hop_dur, 2),
-                                    end=round(idx * hop_dur, 2),
-                                    midi=round(float(np.median(current_note_midis)), 1),
-                                    confidence=round(float(np.mean(per_arr[note_start_idx:idx])), 3),
+                                    end=round(split_idx * hop_dur, 2),
+                                    midi=round(float(np.median(prev_midis)), 1),
+                                    confidence=round(float(np.mean(per_arr[note_start_idx:split_idx])), 3),
                                 )
                             )
-                        note_start_idx = idx
-                        current_note_midis = [cur_m]
+                        note_start_idx = split_idx
+                        current_note_midis = list(midi_arr[split_idx:idx + 1])
+                        deviation_count = 0
                     else:
                         current_note_midis.append(cur_m)
             else:
                 if in_note:
                     in_note = False
                     n_dur = (idx - note_start_idx) * hop_dur
-                    if n_dur >= 0.08:
+                    if n_dur >= 0.08 and current_note_midis:
                         notes.append(
                             NoteSeg(
                                 start=round(note_start_idx * hop_dur, 2),
@@ -1182,6 +1349,7 @@ def transcribe(
                             )
                         )
                     current_note_midis = []
+                    deviation_count = 0
 
         # Trailing note
         if in_note and len(current_note_midis) >= 8:
@@ -1194,8 +1362,26 @@ def transcribe(
                 )
             )
 
-        del pitch
-        del periodicity
+        # Merge adjacent notes with identical pitch (within 0.4 st) and gap <= 0.06s
+        if len(notes) > 1:
+            merged_notes: list[NoteSeg] = [notes[0]]
+            for n_next in notes[1:]:
+                n_prev = merged_notes[-1]
+                if abs(n_next.midi - n_prev.midi) <= 0.4 and (n_next.start - n_prev.end) <= 0.06:
+                    merged_notes[-1] = NoteSeg(
+                        start=n_prev.start,
+                        end=n_next.end,
+                        midi=round(float((n_prev.midi + n_next.midi) / 2.0), 1),
+                        confidence=round(float((n_prev.confidence + n_next.confidence) / 2.0), 3),
+                    )
+                else:
+                    merged_notes.append(n_next)
+            notes = merged_notes
+
+        del pitch_arr
+        del per_arr
+        del voc_16k
+        del vocal_frames
         gc.collect()
     except Exception as exc:
         logger.warning("Melody pitch extraction failed: %s", exc)
@@ -1224,9 +1410,9 @@ def transcribe(
         whisper = WhisperModel(w_model_name, device="cpu", compute_type="int8")
         cc = opencc.OpenCC("t2s")
 
-        segments, _ = whisper.transcribe(
+        segments, info = whisper.transcribe(
             vocals_path,
-            language="zh",
+            language=None,
             word_timestamps=True,
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=500),
@@ -1237,7 +1423,48 @@ def transcribe(
             log_prob_threshold=-1.0,
         )
 
-        lyrics = filter_lyrics_segments(list(segments), notes, language="zh", cc=cc)
+        segments_list = list(segments)
+        detected_lang = info.language if info and hasattr(info, "language") else "zh"
+        lang_prob = info.language_probability if info and hasattr(info, "language_probability") else 1.0
+        logger.info("Whisper detected language: %s (prob: %.3f)", detected_lang, lang_prob)
+
+        # Save raw whisper segments to work_dir/lyrics_debug.json
+        try:
+            debug_lyrics_path = os.path.join(work_dir, "lyrics_debug.json")
+            raw_segs = []
+            for s in segments_list:
+                s_dict = {
+                    "start": s.start if hasattr(s, "start") else 0.0,
+                    "end": s.end if hasattr(s, "end") else 0.0,
+                    "text": s.text if hasattr(s, "text") else "",
+                    "avg_logprob": s.avg_logprob if hasattr(s, "avg_logprob") else 0.0,
+                    "no_speech_prob": s.no_speech_prob if hasattr(s, "no_speech_prob") else 0.0,
+                    "compression_ratio": s.compression_ratio if hasattr(s, "compression_ratio") else 1.0,
+                }
+                words = s.words if hasattr(s, "words") else None
+                if words:
+                    s_dict["words"] = [
+                        {
+                            "word": w.word if hasattr(w, "word") else "",
+                            "start": w.start if hasattr(w, "start") else 0.0,
+                            "end": w.end if hasattr(w, "end") else 0.0,
+                            "probability": w.probability if hasattr(w, "probability") else 0.0,
+                        }
+                        for w in words
+                    ]
+                raw_segs.append(s_dict)
+            with open(debug_lyrics_path, "w", encoding="utf-8") as f_dbg:
+                json.dump(raw_segs, f_dbg, indent=2, ensure_ascii=False)
+        except Exception as dbg_exc:
+            logger.warning("Failed saving lyrics_debug.json: %s", dbg_exc)
+
+        # For non-Mandarin songs (e.g. Japanese, English), skip Chinese lyrics conversion
+        if detected_lang != "zh" and lang_prob > 0.65:
+            logger.info("Non-Mandarin song detected (%s, prob %.2f). Skipping Chinese lyrics generation.", detected_lang, lang_prob)
+            warnings.append(f"检测到非中文歌曲 ({detected_lang})，跳过歌词生成")
+            lyrics = []
+        else:
+            lyrics = filter_lyrics_segments(segments_list, notes, language="zh", cc=cc)
 
     except Exception as exc:
         logger.warning("Lyrics transcription failed: %s", exc)
